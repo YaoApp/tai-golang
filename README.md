@@ -6,7 +6,7 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 ## Status
 
-**Work in progress** — L0 connection management is implemented; L1 Control stream is next.
+**Work in progress** — L0 connection management and L1 Control stream are implemented; HTTP/3 (QUIC) primary transport with HTTP/2 fallback is operational.
 
 ## Install
 
@@ -56,7 +56,7 @@ server.go             Server interface and configuration types
 auth.go               AuthProvider interface
 auth_default.go       DefaultAuth — Ed25519 JWT node_token + HMAC connect_ticket
 http.go               HTTP API server (5099): well-known, connect, token refresh, heartbeat
-transport.go          Transport server (6099): h2c HTTP/2, ticket auth middleware, stream endpoints
+transport.go          Transport server (6099): HTTP/3 (QUIC) primary + HTTP/2 (h2c) fallback, ticket auth middleware
 types.go              Node, Session, Tool, and related types
 testutil.go           NewTestServer helper for self-contained testing
 .github/workflows/    CI: lint → unit tests (Linux/macOS/Windows)
@@ -83,23 +83,27 @@ make proto
 
 Requires `protoc` and `protoc-gen-go`.
 
-## Implemented (PLAN 1–2)
+## Implemented
 
 - **Protobuf definitions** — all 5 `.proto` files with generated Go code
 - **AuthProvider interface** — pluggable auth, ships with `DefaultAuth`:
   - Ed25519 JWT `node_token` (issue / validate / refresh, 7-day expiry)
-  - HMAC `connect_ticket` (30s expiry, one-time use)
+  - HMAC `connect_ticket` (30s expiry, one-time use, random nonce)
   - `OperationToken` for session-scoped authorization
 - **HTTP API** (port 5099):
   - `GET /.well-known/yao-transport` — transport metadata discovery
   - `POST /v1/tai/connect` — exchange node_token for connect_ticket
   - `POST /v1/tai/token/refresh` — refresh node_token
   - `POST /v1/tai/heartbeat` — fallback heartbeat
-- **Transport server** (port 6099):
-  - HTTP/2 cleartext (h2c) via Go 1.24+ native `http.Protocols`
-  - Ticket-based auth middleware (validates connect_ticket per request)
-  - Control / Session Control / Session Data stream endpoint stubs
-- **Test infrastructure** — `NewTestServer(t)` with ephemeral ports, 42 tests, 91%+ coverage
+- **Transport server** (port 6099, TCP + UDP):
+  - **HTTP/3 (QUIC)** — primary protocol, requires TLS
+  - **HTTP/2 (h2c)** — fallback, cleartext via Go 1.24+ native `http.Protocols`
+  - Shared `http.Handler` and ticket auth middleware across both protocols
+  - L1 Control stream: register → register_ack, ping → pong, go_away, forward-compatible unknown kinds
+  - Session Control / Session Data stream endpoints
+- **Node manager** — in-memory node state, onRegister callback, sendControl / goAway / goAwayAll
+- **Frame codec** — length-prefixed protobuf (4-byte big-endian header, 16 MB max)
+- **Test infrastructure** — `NewTestServer(t)` with ephemeral ports, self-signed TLS cert generated at runtime, all integration tests run as H2/H3 sub-tests, 90%+ coverage
 
 ## Architecture
 
@@ -108,7 +112,7 @@ Tai binary  ←── Transport (6099) ──→  Your Server (import tai-golang
             ←── HTTP API (5099)  ──→
 ```
 
-The SDK is the server side. Tai is the client. They communicate over HTTP/2 using length-prefixed protobuf messages. The HTTP API handles discovery and authentication; the Transport layer carries Control and Session streams.
+The SDK is the server side. Tai is the client. They communicate over **HTTP/3 (QUIC)** as the primary protocol, with **HTTP/2 (TCP)** as fallback, using length-prefixed protobuf messages on both. The HTTP API handles discovery and authentication; the Transport layer carries Control and Session streams.
 
 ## License
 

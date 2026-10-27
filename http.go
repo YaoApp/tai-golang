@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // httpServer handles the HTTP API on port 5099.
@@ -15,6 +16,7 @@ import (
 type httpServer struct {
 	auth     AuthProvider
 	mux      *http.ServeMux
+	mu       sync.Mutex
 	server   *http.Server
 	listener net.Listener
 }
@@ -32,14 +34,18 @@ func newHTTPServer(auth AuthProvider) *httpServer {
 	return s
 }
 
-// listenAndServe starts the HTTP server on the given address.
+// listenAndServe starts the HTTP server on the given address (blocking).
 func (s *httpServer) listenAndServe(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("http listen: %w", err)
 	}
+
+	s.mu.Lock()
 	s.listener = ln
 	s.server = &http.Server{Handler: s.mux}
+	s.mu.Unlock()
+
 	log.Printf("tai-sdk: HTTP server listening on %s", ln.Addr())
 	return s.server.Serve(ln)
 }
@@ -50,8 +56,12 @@ func (s *httpServer) start(addr string) error {
 	if err != nil {
 		return fmt.Errorf("http listen: %w", err)
 	}
+
+	s.mu.Lock()
 	s.listener = ln
 	s.server = &http.Server{Handler: s.mux}
+	s.mu.Unlock()
+
 	go func() {
 		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Printf("tai-sdk: HTTP server error: %v", err)
@@ -62,6 +72,8 @@ func (s *httpServer) start(addr string) error {
 
 // addr returns the listener address.
 func (s *httpServer) addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.listener == nil {
 		return ""
 	}
@@ -70,10 +82,13 @@ func (s *httpServer) addr() string {
 
 // close gracefully shuts down the HTTP server.
 func (s *httpServer) close(ctx context.Context) error {
-	if s.server == nil {
+	s.mu.Lock()
+	srv := s.server
+	s.mu.Unlock()
+	if srv == nil {
 		return nil
 	}
-	return s.server.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
 
 // ---------------------------------------------------------------------------
