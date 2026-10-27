@@ -1,0 +1,92 @@
+// Session stream messages for L2 Data Plane.
+//
+// Each Session occupies two streams on the Light pool:
+//   - Control stream: bidirectional commands and responses
+//   - Data stream: Tai-to-server unidirectional event flow
+//
+// Both streams use length-prefixed SessionMessage frames.
+// The transport layer only inspects `seq` for ordering and recovery;
+// `kind` and `data` are opaque to transport.
+syntax = "proto3";
+
+package tai;
+
+option go_package = "github.com/yaoapp/tai-golang/pb";
+
+// SessionMessage is the unified frame for both Session Control and Data streams.
+message SessionMessage {
+  uint64 seq  = 1; // Monotonic sequence number (per-stream)
+  string kind = 2; // Message kind (e.g. "prompt", "text_delta", "tool_start")
+  bytes  data = 3; // Kind-specific JSON or protobuf payload
+}
+
+// ---------------------------------------------------------------------------
+// Session lifecycle (carried on L1 Control stream)
+// ---------------------------------------------------------------------------
+
+// SessionOpen is sent by the server to open a new session on a Tai node.
+message SessionOpen {
+  string         session_id = 1;
+  string         node_id    = 2;
+  string         token      = 3; // OperationToken (JWT)
+  SessionOptions options    = 4;
+}
+
+// SessionClose is sent by either side to close a session.
+message SessionClose {
+  string session_id = 1;
+  string reason     = 2;
+}
+
+// SessionResume is sent by the server after reconnection to resume a session.
+message SessionResume {
+  string session_id    = 1;
+  string token         = 2; // Fresh OperationToken
+  uint64 last_ctrl_seq = 3; // Last received Control stream seq
+  uint64 last_data_seq = 4; // Last received Data stream seq
+}
+
+// SessionOpened is Tai's acknowledgment that a session is ready.
+message SessionOpened {
+  string session_id = 1;
+  string runtime    = 2; // Actual runtime used (e.g. "agent", "dsh")
+  string isolation  = 3; // Actual isolation (e.g. "host", "container")
+}
+
+// SessionClosed is Tai's report that a session has ended.
+message SessionClosed {
+  string session_id = 1;
+  string reason     = 2;
+  int32  exit_code  = 3;
+}
+
+// SessionError reports a session-level error.
+message SessionError {
+  string session_id = 1;
+  string code       = 2; // e.g. "recovery_gap", "runtime_crash"
+  string message    = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Session options
+// ---------------------------------------------------------------------------
+
+message SessionOptions {
+  string         runtime             = 1; // "agent" | "dsh" | "claude" | "codex"
+  string         isolation           = 2; // "auto" | "host" | "container"
+  uint32         idle_timeout_sec    = 3; // Session idle timeout (default 1800)
+  uint32         max_duration_sec    = 4; // Max session duration, 0 = unlimited
+  RuntimeOptions runtime_options     = 5;
+}
+
+message RuntimeOptions {
+  LLMConfig         llm    = 1;
+  map<string,string> env   = 2; // Environment variables for the runtime
+  bytes             config = 3; // Runtime-specific JSON config
+}
+
+message LLMConfig {
+  string provider = 1; // e.g. "deepseek"
+  string model    = 2; // e.g. "deepseek-r1"
+  string base_url = 3; // Optional API base URL override
+}

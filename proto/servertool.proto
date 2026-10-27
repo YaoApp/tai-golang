@@ -1,0 +1,29 @@
+// Server Tool messages for `tai call` remote tool invocation.
+//
+// Server Tools are independent of sessions. Tai calls the server's
+// HTTP API (port 5099) directly. The tool list is synchronized via
+// ServerToolSync on the L1 Control stream.
+syntax = "proto3";
+
+package tai;
+
+option go_package = "github.com/yaoapp/tai-golang/pb";
+
+// ServerToolRequest is the payload for a `tai call` invocation.
+message ServerToolRequest {
+  string tool       = 1; // Tool name (e.g. "search", "db.query")
+  bytes  input      = 2; // JSON input payload
+  uint32 timeout_ms = 3; // Timeout in milliseconds, 0 = default (30s)
+}
+
+// ServerToolResponse is the result of a `tai call` invocation.
+message ServerToolResponse {
+  bytes     output = 1; // JSON output payload
+  ToolError error  = 2; // Non-nil on failure
+}
+
+// ToolError describes a tool execution failure.
+message ToolError {
+  string code    = 1; // Error code (e.g. "not_found", "timeout")
+  string message = 2; // Human-readable error description
+}

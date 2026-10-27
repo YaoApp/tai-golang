@@ -1,0 +1,143 @@
+// Control stream messages for L1 Control Plane.
+//
+// The Control stream is a long-lived bidirectional stream on a dedicated
+// HTTP/3 or HTTP/2 connection, isolated from the data plane. It carries
+// node registration, heartbeat, computer management, session lifecycle,
+// tunnel lifecycle, and security management messages.
+//
+// Wire format: length-prefixed ControlMessage frames inside HTTP DATA frames.
+syntax = "proto3";
+
+package tai;
+
+option go_package = "github.com/yaoapp/tai-golang/pb";
+
+// ControlMessage is the top-level envelope for all Control stream messages.
+// The transport layer routes by `kind`; `data` holds the kind-specific payload.
+message ControlMessage {
+  string kind = 1; // Message kind (e.g. "register", "ping", "session.open")
+  bytes  data = 2; // Kind-specific protobuf payload
+}
+
+// ---------------------------------------------------------------------------
+// Connection management
+// ---------------------------------------------------------------------------
+
+// Register is sent by Tai immediately after the Control stream is established.
+message Register {
+  string   node_id      = 1; // Unique node identifier
+  string   version      = 2; // Tai binary version
+  Hardware hardware     = 3; // Hardware information
+  repeated string capabilities = 4; // e.g. ["session","tunnel","realtime","container"]
+}
+
+// RegisterAck is the server response to a successful Register.
+message RegisterAck {
+  string     tai_id      = 1; // Server-assigned Tai identifier
+  bytes      public_key  = 2; // OperationToken verification public key (PEM)
+  string     key_id      = 3; // Public key identifier for rotation
+  PoolConfig pool_config = 4; // Initial pool parameters
+}
+
+// Ping is sent by Tai at a 30-second interval, carrying lightweight status.
+message Ping {
+  int64  timestamp     = 1; // Unix timestamp (seconds)
+  uint32 session_count = 2; // Active session count
+  uint32 cpu_percent   = 3; // CPU usage 0-100
+}
+
+// Pong is the server response to Ping.
+message Pong {
+  int64      timestamp   = 1; // Echo timestamp
+  PoolConfig pool_config = 2; // Optional: dynamic pool adjustment
+}
+
+// GoAway notifies Tai that the server will close the connection.
+message GoAway {
+  string reason          = 1; // Human-readable reason
+  uint32 reconnect_after = 2; // Seconds before Tai should reconnect
+}
+
+// PoolAdjust dynamically resizes a connection pool.
+message PoolAdjust {
+  string pool        = 1; // "light" or "heavy"
+  uint32 target_size = 2; // Desired pool size
+}
+
+// ---------------------------------------------------------------------------
+// Hardware and pool configuration
+// ---------------------------------------------------------------------------
+
+message Hardware {
+  string os            = 1; // "darwin" | "linux" | "windows"
+  string arch          = 2; // "amd64" | "arm64"
+  uint32 cpu_cores     = 3;
+  uint64 memory_mb     = 4;
+  uint64 disk_free_mb  = 5;
+  repeated GPU gpus    = 6;
+}
+
+message GPU {
+  string name    = 1; // e.g. "NVIDIA RTX 4090"
+  uint64 vram_mb = 2; // e.g. 24576
+  string driver  = 3; // e.g. "550.54.14"
+}
+
+message PoolConfig {
+  // Light pool (HTTP/3 or HTTP/2 streams)
+  uint32 light_min_conns         = 1; // Minimum connections (default 2)
+  uint32 light_max_conns         = 2; // Maximum connections (default 8)
+  uint32 light_max_streams       = 3; // Max streams per connection (default 256)
+  uint32 light_idle_timeout_sec  = 4; // Idle connection reclaim (default 300)
+
+  // Heavy pool (raw TCP)
+  uint32 heavy_min_idle          = 5; // Minimum idle connections (default 2)
+  uint32 heavy_max_active        = 6; // Maximum active connections (default 20)
+  uint32 heavy_max_idle          = 7; // Maximum idle connections (default 6)
+  uint32 heavy_idle_timeout_sec  = 8; // Idle reclaim (default 300)
+  uint32 heavy_health_check_sec  = 9; // Health check interval (default 30)
+}
+
+// ---------------------------------------------------------------------------
+// Server Tool synchronization
+// ---------------------------------------------------------------------------
+
+// ServerToolSync pushes the available tool list to Tai.
+// Sent once after RegisterAck and again on any tool change.
+message ServerToolSync {
+  repeated ServerTool tools = 1;
+}
+
+// ServerTool describes a single tool available via `tai call`.
+message ServerTool {
+  string name         = 1; // Tool name (e.g. "search", "db.query")
+  string description  = 2; // Human-readable description
+  bytes  input_schema = 3; // JSON Schema for input validation
+}
+
+// ---------------------------------------------------------------------------
+// Security management
+// ---------------------------------------------------------------------------
+
+// ACLSync pushes access control lists to Tai.
+message ACLSync {
+  repeated string computer_users = 1;
+  repeated string workspaces     = 2;
+}
+
+// KeyRotation pushes a new OperationToken signing public key.
+message KeyRotation {
+  string kid        = 1; // Key identifier
+  bytes  public_key = 2; // PEM-encoded public key
+}
+
+// CertRotation pushes a new TLS CA certificate.
+message CertRotation {
+  bytes ca_certificate = 1; // PEM-encoded CA certificate
+}
+
+// TokenRefresh pushes a refreshed OperationToken for a long-running session.
+message TokenRefresh {
+  string session_id = 1;
+  string token      = 2; // New OperationToken (JWT)
+}

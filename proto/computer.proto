@@ -1,0 +1,295 @@
+// Computer status reporting and management messages.
+//
+// Status messages are sent by Tai on the L1 Control stream.
+// Management commands are sent by the server to Tai.
+syntax = "proto3";
+
+package tai;
+
+option go_package = "github.com/yaoapp/tai-golang/pb";
+
+// ---------------------------------------------------------------------------
+// Status reporting (Tai -> Server)
+// ---------------------------------------------------------------------------
+
+// ComputerStatus is sent periodically (default 60s) with system metrics.
+message ComputerStatus {
+  int64    timestamp  = 1; // Unix timestamp
+  CPUInfo  cpu        = 2;
+  MemInfo  memory     = 3;
+  DiskInfo disk       = 4;
+  NetInfo  network    = 5;
+  uint64   uptime_sec = 6;
+}
+
+message CPUInfo {
+  float usage_percent = 1; // 0-100
+  float load_1m       = 2;
+  float load_5m       = 3;
+}
+
+message MemInfo {
+  uint64 total_mb     = 1;
+  uint64 used_mb      = 2;
+  uint64 available_mb = 3;
+}
+
+message DiskInfo {
+  uint64 total_mb     = 1;
+  uint64 used_mb      = 2;
+  uint64 available_mb = 3;
+}
+
+message NetInfo {
+  uint64 rx_bytes_sec = 1; // Inbound rate
+  uint64 tx_bytes_sec = 2; // Outbound rate
+}
+
+// ComputerEvent reports a discrete event (disk full, temperature alert, etc.).
+message ComputerEvent {
+  string event_type = 1;
+  string severity   = 2; // "info" | "warning" | "critical"
+  string message    = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Image management
+// ---------------------------------------------------------------------------
+
+message ImageInfo {
+  string image      = 1;
+  string tag        = 2;
+  uint64 size_mb    = 3;
+  int64  created_at = 4; // Unix timestamp
+}
+
+// ImageList is used bidirectionally:
+//   Tai -> Server: report local images
+//   Server -> Tai: query local images (empty payload)
+message ImageList {
+  repeated ImageInfo images = 1;
+}
+
+message ImagePull {
+  string image    = 1;
+  string tag      = 2;
+  string registry = 3;
+}
+
+message ImagePulled {
+  string image   = 1;
+  string tag     = 2;
+  uint64 size_mb = 3;
+}
+
+message ImagePullProgress {
+  string image   = 1;
+  string tag     = 2;
+  float  percent = 3; // 0-100
+}
+
+message ImageDelete {
+  string image = 1;
+  string tag   = 2;
+  bool   force = 3;
+}
+
+message ImageDeleted {
+  string image = 1;
+  string tag   = 2;
+}
+
+message ImagePrune {
+  uint32 keep_latest = 1; // Keep the N most recent images, 0 = prune all unused
+}
+
+message ImagePruned {
+  uint64 freed_mb      = 1;
+  uint32 removed_count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Container management
+// ---------------------------------------------------------------------------
+
+message ContainerInfo {
+  string id    = 1;
+  string image = 2;
+  string state = 3; // "created" | "running" | "stopped" | "paused"
+  repeated PortMapping ports = 4;
+}
+
+message PortMapping {
+  uint32 host_port      = 1;
+  uint32 container_port = 2;
+  string protocol       = 3; // "tcp" | "udp"
+}
+
+// ContainerList is used bidirectionally:
+//   Tai -> Server: report container changes
+//   Server -> Tai: query containers (empty payload)
+message ContainerList {
+  repeated ContainerInfo containers = 1;
+}
+
+message ContainerCreate {
+  string container_id = 1;
+  string image        = 2;
+  bytes  config       = 3; // JSON container configuration
+}
+
+message ContainerStart {
+  string container_id = 1;
+}
+
+message ContainerStop {
+  string container_id = 1;
+  uint32 timeout_sec  = 2;
+}
+
+message ContainerDestroy {
+  string container_id = 1;
+  bool   force        = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Process and port monitoring (Tai -> Server)
+// ---------------------------------------------------------------------------
+
+message ProcessInfo {
+  uint32 pid        = 1;
+  string name       = 2;
+  float  cpu_percent = 3;
+  uint64 memory_mb  = 4;
+}
+
+message ProcessList {
+  repeated ProcessInfo processes = 1;
+}
+
+message PortInfo {
+  uint32 port     = 1;
+  string protocol = 2; // "tcp" | "udp"
+  uint32 pid      = 3;
+  string state    = 4; // "listen" | "established"
+}
+
+message PortList {
+  repeated PortInfo ports = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime management
+// ---------------------------------------------------------------------------
+
+message RuntimeInfo {
+  string name    = 1; // e.g. "agent", "dsh", "claude"
+  string version = 2;
+  string status  = 3; // "available" | "unavailable" | "updating"
+}
+
+// RuntimeList is used bidirectionally:
+//   Tai -> Server: report installed runtimes
+//   Server -> Tai: query runtimes (empty payload)
+message RuntimeList {
+  repeated RuntimeInfo runtimes = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Configuration management (Server -> Tai)
+// ---------------------------------------------------------------------------
+
+message ConfigGet {
+  string key = 1; // Empty = get all
+}
+
+message ConfigValues {
+  bytes values = 1; // JSON key-value map
+}
+
+message ConfigSet {
+  string key   = 1;
+  bytes  value = 2; // JSON value
+}
+
+// ---------------------------------------------------------------------------
+// Node management (Server -> Tai)
+// ---------------------------------------------------------------------------
+
+message ComputerUpgrade {
+  string version      = 1;
+  string download_url = 2;
+  string checksum     = 3; // SHA256
+}
+
+message ComputerRestart {
+  string reason        = 1;
+  uint32 delay_seconds = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox management
+// ---------------------------------------------------------------------------
+
+message SandboxCreate {
+  string sandbox_id = 1;
+  bytes  options    = 2; // JSON sandbox options
+}
+
+message SandboxDestroy {
+  string sandbox_id = 1;
+  bool   force      = 2;
+}
+
+message SandboxList {} // Query request (empty)
+
+message SandboxInspect {
+  string sandbox_id = 1;
+}
+
+message SandboxPause {
+  string sandbox_id = 1;
+}
+
+message SandboxResume {
+  string sandbox_id = 1;
+}
+
+message SandboxCreated {
+  string sandbox_id = 1;
+  string type       = 2; // "docker" | "nsjail" | "process"
+  string image      = 3;
+}
+
+message SandboxDestroyed {
+  string sandbox_id = 1;
+  string reason     = 2;
+}
+
+message SandboxError {
+  string sandbox_id = 1;
+  string code       = 2;
+  string message    = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Daemon lifecycle (Tai -> Server)
+// ---------------------------------------------------------------------------
+
+message DaemonStarted {
+  string daemon_id  = 1;
+  uint32 port       = 2;
+  uint32 pid        = 3;
+  string session_id = 4; // Optional: owning session, empty = manually started
+}
+
+message DaemonHealth {
+  string daemon_id = 1;
+  string status    = 2; // "healthy" | "unhealthy"
+}
+
+message DaemonStopped {
+  string daemon_id = 1;
+  int32  exit_code = 2;
+  string reason    = 3;
+}

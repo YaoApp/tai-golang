@@ -1,0 +1,218 @@
+package tai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"strings"
+)
+
+// httpServer handles the HTTP API on port 5099.
+// Endpoints: well-known, connect_ticket, token refresh, heartbeat, tai call.
+type httpServer struct {
+	auth     AuthProvider
+	mux      *http.ServeMux
+	server   *http.Server
+	listener net.Listener
+}
+
+// newHTTPServer creates an httpServer wired to the given AuthProvider.
+func newHTTPServer(auth AuthProvider) *httpServer {
+	s := &httpServer{
+		auth: auth,
+		mux:  http.NewServeMux(),
+	}
+	s.mux.HandleFunc("GET /.well-known/yao-transport", s.handleWellKnown)
+	s.mux.HandleFunc("POST /v1/tai/connect", s.handleConnect)
+	s.mux.HandleFunc("POST /v1/tai/token/refresh", s.handleTokenRefresh)
+	s.mux.HandleFunc("POST /v1/tai/heartbeat", s.handleHeartbeat)
+	return s
+}
+
+// listenAndServe starts the HTTP server on the given address.
+func (s *httpServer) listenAndServe(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("http listen: %w", err)
+	}
+	s.listener = ln
+	s.server = &http.Server{Handler: s.mux}
+	log.Printf("tai-sdk: HTTP server listening on %s", ln.Addr())
+	return s.server.Serve(ln)
+}
+
+// start starts the HTTP server in the background.
+func (s *httpServer) start(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("http listen: %w", err)
+	}
+	s.listener = ln
+	s.server = &http.Server{Handler: s.mux}
+	go func() {
+		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("tai-sdk: HTTP server error: %v", err)
+		}
+	}()
+	return nil
+}
+
+// addr returns the listener address.
+func (s *httpServer) addr() string {
+	if s.listener == nil {
+		return ""
+	}
+	return s.listener.Addr().String()
+}
+
+// close gracefully shuts down the HTTP server.
+func (s *httpServer) close(ctx context.Context) error {
+	if s.server == nil {
+		return nil
+	}
+	return s.server.Shutdown(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// GET /.well-known/yao-transport
+// ---------------------------------------------------------------------------
+
+func (s *httpServer) handleWellKnown(w http.ResponseWriter, r *http.Request) {
+	info := s.auth.WellKnownInfo()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/tai/connect
+// ---------------------------------------------------------------------------
+
+type connectRequest struct {
+	NodeID      string `json:"node_id"`
+	ConnectType string `json:"connect_type"` // "control" | "light" | "heavy"
+}
+
+type connectResponse struct {
+	ConnectTicket string   `json:"connect_ticket"`
+	Protocols     []string `json:"protocols"`
+	ExpiresIn     int      `json:"expires_in"`
+}
+
+func (s *httpServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	token := extractBearer(r)
+	if token == "" {
+		httpError(w, http.StatusUnauthorized, "missing authorization")
+		return
+	}
+
+	nodeInfo, err := s.auth.ValidateNodeToken(token)
+	if err != nil {
+		httpError(w, http.StatusUnauthorized, "invalid node_token")
+		return
+	}
+
+	var req connectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.ConnectType == "" {
+		req.ConnectType = "control"
+	}
+
+	ticket, err := s.auth.IssueConnectTicket(nodeInfo.NodeID, req.ConnectType)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "failed to issue ticket")
+		return
+	}
+
+	info := s.auth.WellKnownInfo()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(connectResponse{
+		ConnectTicket: ticket.Ticket,
+		Protocols:     info.Protocols,
+		ExpiresIn:     ticket.ExpiresIn,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/tai/token/refresh
+// ---------------------------------------------------------------------------
+
+type refreshRequest struct {
+	NodeToken string `json:"node_token"`
+}
+
+type refreshResponse struct {
+	NodeToken string `json:"node_token"`
+}
+
+func (s *httpServer) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	newToken, err := s.auth.RefreshNodeToken(req.NodeToken)
+	if err != nil {
+		httpError(w, http.StatusUnauthorized, "refresh failed")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(refreshResponse{NodeToken: newToken})
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/tai/heartbeat
+// ---------------------------------------------------------------------------
+
+type heartbeatRequest struct {
+	TaiID        string   `json:"tai_id"`
+	NodeToken    string   `json:"node_token"`
+	Sessions     []string `json:"sessions"`
+	Reconnecting bool     `json:"reconnecting"`
+	Timestamp    int64    `json:"timestamp"`
+}
+
+func (s *httpServer) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var req heartbeatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if _, err := s.auth.ValidateNodeToken(req.NodeToken); err != nil {
+		httpError(w, http.StatusUnauthorized, "invalid node_token")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func extractBearer(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return ""
+	}
+	return strings.TrimPrefix(auth, "Bearer ")
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func httpError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(errorResponse{Error: msg})
+}
