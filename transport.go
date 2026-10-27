@@ -27,6 +27,8 @@ type transportServer struct {
 
 	// H3 (QUIC/UDP)
 	h3Server *http3.Server
+	h3Conn   net.PacketConn // pre-bound UDP socket, closed after goroutine exits
+	h3Done   chan struct{}  // closed when the H3 serve goroutine returns
 }
 
 // ticketValidator is the subset of AuthProvider needed by the transport layer.
@@ -98,16 +100,24 @@ func (t *transportServer) startH2(addr string, tlsCfg *tls.Config) error {
 }
 
 // startH3 starts the HTTP/3 (QUIC) listener on the given UDP address.
+// The UDP socket is bound synchronously so port conflicts are caught immediately.
 func (t *transportServer) startH3(addr string, tlsCfg *tls.Config) error {
+	conn, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		return fmt.Errorf("h3 listen udp: %w", err)
+	}
+	t.h3Conn = conn
+
 	t.h3Server = &http3.Server{
-		Addr:      addr,
 		Handler:   t.handler,
 		TLSConfig: tlsCfg,
 	}
 
+	t.h3Done = make(chan struct{})
 	go func() {
+		defer close(t.h3Done)
 		log.Printf("tai-sdk: H3 transport listening on %s (QUIC)", addr)
-		if err := t.h3Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := t.h3Server.Serve(conn); err != nil && err != http.ErrServerClosed {
 			log.Printf("tai-sdk: H3 transport error: %v", err)
 		}
 	}()
@@ -128,11 +138,18 @@ func (t *transportServer) h2Addr() string {
 }
 
 // close gracefully shuts down both H2 and H3 servers.
+// It waits for the H3 serve goroutine to exit and ensures the UDP socket is released.
 func (t *transportServer) close(ctx context.Context) error {
 	var firstErr error
 	if t.h3Server != nil {
 		if err := t.h3Server.Close(); err != nil {
 			firstErr = err
+		}
+		if t.h3Done != nil {
+			<-t.h3Done
+		}
+		if t.h3Conn != nil {
+			t.h3Conn.Close()
 		}
 	}
 	if t.h2Server != nil {

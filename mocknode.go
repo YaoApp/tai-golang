@@ -128,7 +128,8 @@ func (m *MockNode) WaitRegistered(timeout time.Duration) error {
 	}
 }
 
-// Stop closes the Control stream and cancels background goroutines.
+// Stop closes the Control stream, cancels background goroutines, and
+// releases the HTTP client transport (including QUIC/UDP sockets).
 func (m *MockNode) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -152,6 +153,14 @@ func (m *MockNode) Stop() {
 	}
 	if m.httpResp != nil {
 		m.httpResp.Body.Close()
+	}
+	if m.httpClient != nil {
+		switch t := m.httpClient.Transport.(type) {
+		case *http3.Transport:
+			t.Close()
+		case *http.Transport:
+			t.CloseIdleConnections()
+		}
 	}
 }
 
