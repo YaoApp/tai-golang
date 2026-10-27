@@ -69,7 +69,7 @@ func TestMockNodePingPong(t *testing.T) {
 	// Send an explicit ping and verify pong comes back
 	ping := &pb.Ping{Timestamp: 9999, SessionCount: 2, CpuPercent: 42}
 	pingData, _ := proto.Marshal(ping)
-	if err := mock.SendControl(&pb.ControlMessage{Kind: "ping", Data: pingData}); err != nil {
+	if err := mock.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "ping", Data: pingData}); err != nil {
 		t.Fatalf("send ping: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestMockNodeGoAway(t *testing.T) {
 	goAwayReceived.Add(1)
 	var goAwayReason string
 
-	mock.OnControl(func(msg *pb.ControlMessage) {
+	mock.OnControl(func(msg *pb.Payload) {
 		if msg.Kind == "go_away" {
 			ga := &pb.GoAway{}
 			if proto.Unmarshal(msg.Data, ga) == nil {
@@ -152,13 +152,8 @@ func TestMockNodeH3Fallback(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 
-	ticket, err := mock.ObtainTicket("control")
-	if err != nil {
-		t.Fatalf("ObtainTicket: %v", err)
-	}
-
 	// Try connecting with H3 only
-	if err := mock.Connect(ctx, ticket, []string{"HTTP/3"}); err != nil {
+	if err := mock.Connect(ctx, []string{"HTTP/3"}); err != nil {
 		t.Fatalf("Connect H3: %v", err)
 	}
 	defer mock.Stop()
@@ -197,18 +192,9 @@ func TestMockNodeLowLevelAPI(t *testing.T) {
 		t.Error("protocols should not be empty")
 	}
 
-	// Step 2: Obtain ticket
-	ticket, err := mock.ObtainTicket("control")
-	if err != nil {
-		t.Fatalf("ObtainTicket: %v", err)
-	}
-	if ticket == "" {
-		t.Error("ticket should not be empty")
-	}
-
-	// Step 3: Connect (H2)
+	// Step 2/3: Connect (authorize with node_token, then open Control on H2)
 	ctx := context.Background()
-	if err := mock.Connect(ctx, ticket, []string{"HTTP/2"}); err != nil {
+	if err := mock.Connect(ctx, []string{"HTTP/2"}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	defer mock.Stop()
@@ -251,13 +237,12 @@ func TestMockNodeTokenRefresh(t *testing.T) {
 	}
 
 	// Verify new token works
-	ticket, err := mock.ObtainTicket("control")
-	if err != nil {
-		t.Fatalf("ObtainTicket with refreshed token: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mock.Connect(ctx, []string{"HTTP/2"}); err != nil {
+		t.Fatalf("Connect with refreshed token: %v", err)
 	}
-	if ticket == "" {
-		t.Error("ticket with refreshed token should not be empty")
-	}
+	mock.Stop()
 }
 
 func TestMockNodePoolConfig(t *testing.T) {
@@ -295,7 +280,7 @@ func TestMockNodeWaitRegisteredTimeout(t *testing.T) {
 
 func TestMockNodeSendControlNotConnected(t *testing.T) {
 	mock := NewMockNode("node-nc", "http://localhost:1", "", "")
-	err := mock.SendControl(&pb.ControlMessage{Kind: "test"})
+	err := mock.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "test"})
 	if err == nil {
 		t.Error("expected error for not connected")
 	}
@@ -316,7 +301,7 @@ func TestMockNodeConnectNoProtocol(t *testing.T) {
 	mock.SetNodeToken(ts.IssueTestNodeToken("node-nop"))
 
 	ctx := context.Background()
-	err := mock.Connect(ctx, "ticket", []string{"HTTP/99"})
+	err := mock.Connect(ctx, []string{"HTTP/99"})
 	if err == nil {
 		t.Error("expected error for unsupported protocol")
 	}
@@ -330,11 +315,12 @@ func TestMockNodeDiscoverError(t *testing.T) {
 	}
 }
 
-func TestMockNodeObtainTicketError(t *testing.T) {
-	mock := NewMockNode("node-err", "http://127.0.0.1:1", "", "")
+func TestMockNodeConnectUnreachable(t *testing.T) {
+	mock := NewMockNode("node-err", "http://127.0.0.1:1", "127.0.0.1:1", "")
 	mock.SetNodeToken("bad-token")
-	_, err := mock.ObtainTicket("control")
-	if err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := mock.Connect(ctx, []string{"HTTP/2"}); err == nil {
 		t.Error("expected error for unreachable server")
 	}
 }
@@ -346,7 +332,7 @@ func TestMockNodeGoAwayViaTestServer(t *testing.T) {
 	mock.SetNodeToken(ts.IssueTestNodeToken("node-ga2"))
 
 	var goAwayCh = make(chan string, 1)
-	mock.OnControl(func(msg *pb.ControlMessage) {
+	mock.OnControl(func(msg *pb.Payload) {
 		if msg.Kind == "go_away" {
 			ga := &pb.GoAway{}
 			proto.Unmarshal(msg.Data, ga)
@@ -383,7 +369,7 @@ func TestMockNodeSendControlViaTestServer(t *testing.T) {
 	mock.SetNodeToken(ts.IssueTestNodeToken("node-sc"))
 
 	received := make(chan string, 1)
-	mock.OnControl(func(msg *pb.ControlMessage) {
+	mock.OnControl(func(msg *pb.Payload) {
 		received <- msg.Kind
 	})
 
@@ -397,7 +383,7 @@ func TestMockNodeSendControlViaTestServer(t *testing.T) {
 	mock.WaitRegistered(5 * time.Second)
 
 	// Use SendControl helper
-	ts.SendControl("node-sc", &pb.ControlMessage{Kind: "custom.event", Data: []byte("data")})
+	ts.SendControl("node-sc", &pb.Payload{Namespace: NamespaceControl, Kind: "custom.event", Data: []byte("data")})
 
 	select {
 	case kind := <-received:
@@ -409,22 +395,26 @@ func TestMockNodeSendControlViaTestServer(t *testing.T) {
 	}
 }
 
-func TestMockNodeObtainTicketNoToken(t *testing.T) {
+func TestMockNodeConnectNoToken(t *testing.T) {
 	mock := NewMockNode("node-notoken", "http://127.0.0.1:1", "", "")
-	// Don't set nodeToken — issueTokenFromServer will be called and fail
-	_, err := mock.ObtainTicket("control")
+	// Don't set nodeToken
+	err := mock.Connect(context.Background(), []string{"HTTP/2"})
 	if err == nil {
 		t.Error("expected error for missing nodeToken")
 	}
 }
 
-func TestMockNodeObtainTicketBadStatus(t *testing.T) {
+func TestMockNodeConnectBadToken(t *testing.T) {
 	ts := NewTestServer(t)
-	mock := NewMockNode("node-bad", ts.HTTPURL(), ts.TransportAddr, ts.H3Addr)
-	mock.SetNodeToken("invalid-token")
-	_, err := mock.ObtainTicket("control")
-	if err == nil {
-		t.Error("expected error for invalid token")
+	for _, protocols := range [][]string{{"HTTP/2"}, {"HTTP/3"}} {
+		mock := NewMockNode("node-bad", ts.HTTPURL(), ts.TransportAddr, ts.H3Addr)
+		mock.SetNodeToken("invalid-token")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := mock.Connect(ctx, protocols)
+		cancel()
+		if err == nil {
+			t.Errorf("%v: expected error for invalid token", protocols)
+		}
 	}
 }
 
@@ -448,10 +438,9 @@ func TestMockNodeConnectH2SkipH3(t *testing.T) {
 	mock.SetNodeToken(ts.IssueTestNodeToken("node-h2skip"))
 
 	ctx := context.Background()
-	ticket, _ := mock.ObtainTicket("control")
 
 	// H3 should be skipped (no h3Addr), H2 should succeed
-	err := mock.Connect(ctx, ticket, []string{"HTTP/3", "HTTP/2"})
+	err := mock.Connect(ctx, []string{"HTTP/3", "HTTP/2"})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -482,5 +471,39 @@ func TestMockNodeStartH2Only(t *testing.T) {
 
 	if mock.Protocol() != "H2" {
 		t.Errorf("Protocol = %q, want H2", mock.Protocol())
+	}
+}
+
+// A node that reconnects before its old Control stream is torn down keeps its
+// new registration: the old stream's teardown must not remove it.
+func TestReconnectKeepsNewRegistration(t *testing.T) {
+	ts := NewTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := func() *MockNode {
+		m := NewMockNode("re-node", ts.HTTPURL(), ts.TransportAddr, ts.H3Addr)
+		m.SetNodeToken(ts.IssueTestNodeToken("re-node"))
+		if err := m.Start(ctx); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if err := m.WaitRegistered(5 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	first := start()
+	second := start()
+	defer second.Stop()
+
+	first.Stop()
+	time.Sleep(300 * time.Millisecond)
+
+	if ts.Nodes.nodeByID("re-node") == nil {
+		t.Fatal("old stream teardown removed the new registration")
+	}
+	if err := ts.Nodes.sendControl("re-node", &pb.Payload{Namespace: NamespaceControl, Kind: "x"}); err != nil {
+		t.Errorf("sendControl to the new stream: %v", err)
 	}
 }

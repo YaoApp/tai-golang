@@ -1,7 +1,6 @@
 package tai
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -20,9 +19,11 @@ import (
 	"github.com/yaoapp/tai-golang/pb"
 )
 
-// TestServer is a self-contained test harness that starts HTTP API, H2, and H3
-// transport servers on ephemeral ports. No external dependencies required.
+// TestServer is a self-contained test harness that starts the HTTP API and
+// the TCP and H3 transport on ephemeral ports through the production server
+// assembly. No external dependencies required.
 type TestServer struct {
+	Server    Server
 	Auth      AuthProvider
 	HTTP      *httpServer
 	Transport *transportServer
@@ -32,7 +33,7 @@ type TestServer struct {
 	// HTTPAddr is the listen address of the HTTP API.
 	HTTPAddr string
 
-	// TransportAddr is the H2 (TCP) transport address.
+	// TransportAddr is the TCP transport address (HTTP/2 and Tai frames).
 	TransportAddr string
 
 	// H3Addr is the H3 (QUIC/UDP) transport address.
@@ -40,75 +41,55 @@ type TestServer struct {
 }
 
 // NewTestServer creates and starts a TestServer with ephemeral ports,
-// a fresh Ed25519 key pair (for JWT), and a self-signed TLS certificate (for H3).
-// H2 (TCP) and H3 (QUIC/UDP) share the same port number, matching the
+// a fresh Ed25519 key pair (for JWT), and a self-signed TLS certificate.
+// TCP and H3 (QUIC/UDP) share the same port number, matching the
 // production design where 6099 serves both TCP and UDP.
 func NewTestServer(t *testing.T) *TestServer {
+	t.Helper()
+	return newTestServer(t, 0)
+}
+
+// newTestServer is NewTestServer with a custom unauthorized-connection
+// timeout (0 uses DefaultUnauthTimeout).
+func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 	t.Helper()
 
 	_, privKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate ed25519 key: %v", err)
 	}
-
 	auth := DefaultAuth(privKey)
-	mgr := newNodeManager()
-	httpSrv := newHTTPServer(auth)
-	transportSrv := newTransportServer(auth, auth.(*defaultAuth), mgr, defaultCodec)
+	tlsCfg, _, _ := generateTestTLS(t)
 
-	// Generate self-signed TLS cert for H3
-	tlsCfg, certPEM, fingerprint := generateTestTLS(t)
-
-	// Set TLS info so well-known includes ca_certificate and fingerprint
-	auth.(*defaultAuth).SetTLS(string(certPEM), fingerprint)
-
-	// Start HTTP API
-	if err := httpSrv.start("127.0.0.1:0"); err != nil {
-		t.Fatalf("start http server: %v", err)
+	s, err := newServer(&ServerConfig{Auth: auth, UnauthTimeout: unauthTimeout})
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
 	}
-
-	// Start H2 (TCP/TLS) on ephemeral port — same TLS cert as H3
-	if err := transportSrv.startH2("127.0.0.1:0", tlsCfg); err != nil {
-		httpSrv.close(context.Background())
-		t.Fatalf("start h2 transport: %v", err)
+	s.httpListenAddr = "127.0.0.1:0"
+	s.transportListenAddr = "127.0.0.1:0"
+	s.tlsCfg = tlsCfg
+	if err := s.bind(); err != nil {
+		t.Fatalf("bind: %v", err)
 	}
-
-	// Extract the port from H2 address, then bind H3 (UDP) to the same port.
-	// TCP and UDP can share the same port number.
-	h2Addr := transportSrv.h2Addr()
-	_, h2Port, _ := net.SplitHostPort(h2Addr)
-	h3Addr := "127.0.0.1:" + h2Port
-	if err := transportSrv.startH3(h3Addr, tlsCfg); err != nil {
-		transportSrv.close(context.Background())
-		httpSrv.close(context.Background())
-		t.Fatalf("start h3 transport: %v", err)
-	}
-
-	// Set transport_port in well-known to the shared port
-	port := 0
-	fmt.Sscanf(h2Port, "%d", &port)
-	auth.(*defaultAuth).SetTransportPort(port)
 
 	ts := &TestServer{
+		Server:        s,
 		Auth:          auth,
-		HTTP:          httpSrv,
-		Transport:     transportSrv,
-		Nodes:         mgr,
+		HTTP:          s.http,
+		Transport:     s.tr,
+		Nodes:         s.mgr,
 		TLSConfig:     tlsCfg,
-		HTTPAddr:      httpSrv.addr(),
-		TransportAddr: h2Addr,
-		H3Addr:        h3Addr,
+		HTTPAddr:      s.http.addr(),
+		TransportAddr: s.tcpAddr,
+		H3Addr:        s.udpAddr,
 	}
-
 	t.Cleanup(func() { ts.Close() })
 	return ts
 }
 
 // Close shuts down all servers.
 func (ts *TestServer) Close() {
-	ctx := context.Background()
-	ts.Transport.close(ctx)
-	ts.HTTP.close(ctx)
+	ts.Server.Close()
 }
 
 // HTTPURL returns the base URL of the HTTP API (no trailing slash).
@@ -136,7 +117,7 @@ func (ts *TestServer) GoAwayAll(reason string) {
 }
 
 // SendControl sends an arbitrary control message to a specific node.
-func (ts *TestServer) SendControl(nodeID string, msg *pb.ControlMessage) error {
+func (ts *TestServer) SendControl(nodeID string, msg *pb.Payload) error {
 	return ts.Nodes.sendControl(nodeID, msg)
 }
 

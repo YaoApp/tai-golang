@@ -2,22 +2,39 @@
 //
 // The Control stream is a long-lived bidirectional stream on a dedicated
 // HTTP/3 or HTTP/2 connection, isolated from the data plane. It carries
-// node registration, heartbeat, computer management, session lifecycle,
-// tunnel lifecycle, and security management messages.
+// node registration, heartbeat, computer management, pool adjustment,
+// transfer declarations, and security management messages. Session,
+// Workspace and Realtime operations are not sent on Control: the server
+// opens streams on Light/Heavy connections directly.
 //
-// Wire format: length-prefixed ControlMessage frames inside HTTP DATA frames.
+// Wire format: length-prefixed Payload frames inside HTTP DATA frames.
+// Every Control message has namespace "control".
 syntax = "proto3";
 
 package tai;
 
 option go_package = "github.com/yaoapp/tai-golang/pb";
 
-// ControlMessage is the top-level envelope for all Control stream messages.
-// The transport layer routes by `kind`; `data` holds the kind-specific payload.
-message ControlMessage {
-  string kind = 1; // Message kind (e.g. "register", "ping", "session.open")
-  bytes  data = 2; // Kind-specific protobuf payload
+// Payload is the envelope for every command: messages on the Control stream,
+// and the first frame of every Light stream and Heavy transfer. The transport
+// layer routes by `namespace + kind` and does not interpret `data`.
+message Payload {
+  string namespace = 1; // e.g. "control", "session", "workspace"
+  string kind      = 2; // Command or event name (e.g. "register", "ping", "open")
+  bytes  data      = 3; // Kind-specific protobuf or JSON payload
 }
+
+// Connect is the first message of a TCP connection carrying the Tai frame
+// protocol (ALPN "tai/2" or plaintext): Light over reversed HTTP/2, or Heavy.
+// Control and H3 Light carry the same fields in HTTP headers instead.
+message Connect {
+  string node_id      = 1; // Node identifier
+  string node_token   = 2; // node_token issued by the server
+  string connect_type = 3; // "light" | "heavy"
+}
+
+// ConnectAck is the server response to an accepted Connect.
+message ConnectAck {}
 
 // ---------------------------------------------------------------------------
 // Connection management
@@ -70,6 +87,49 @@ message GoAway {
 message PoolAdjust {
   string pool        = 1; // "light" or "heavy"
   uint32 target_size = 2; // Desired pool size
+}
+
+// ---------------------------------------------------------------------------
+// Tai-initiated transfers
+//
+// Tai declares the transfer on Control; the server accepts by opening a
+// stream (Light) or transfer (Heavy) that carries ToolFilePull / BlobPush,
+// or rejects with TransferRejected on Control.
+// ---------------------------------------------------------------------------
+
+// ToolFilePush declares a large tool-result file that Tai wants to upload.
+message ToolFilePush {
+  string tool_call_id = 1;
+  string param_name   = 2;
+  string content_type = 3;
+  string filename     = 4;
+  uint64 size         = 5; // Bytes
+}
+
+// BlobPull asks the server to send a blob to Tai.
+message BlobPull {
+  string blob_hash = 1;
+}
+
+// TransferRejected refuses a Tai-initiated transfer declaration.
+message TransferRejected {
+  string kind    = 1; // "tool_file_push" | "blob_pull"
+  string key     = 2; // tool_call_id + param_name, or blob_hash
+  string code    = 3; // e.g. "unauthorized", "quota_exceeded", "too_large"
+  string message = 4;
+}
+
+// ToolFilePull is the first frame of a server-opened stream: Tai writes the
+// declared file content back on the same stream.
+message ToolFilePull {
+  string tool_call_id = 1;
+  string param_name   = 2;
+}
+
+// BlobPush is the first frame of a server-opened stream: the server pushes
+// the blob content to Tai on the same stream.
+message BlobPush {
+  string blob_hash = 1;
 }
 
 // ---------------------------------------------------------------------------

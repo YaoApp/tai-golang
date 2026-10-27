@@ -57,7 +57,7 @@ type MockNode struct {
 	registered chan struct{}
 	pingCancel context.CancelFunc
 	recvCancel context.CancelFunc
-	onControl  func(*pb.ControlMessage)
+	onControl  func(*pb.Payload)
 	stopped    bool
 }
 
@@ -85,13 +85,14 @@ func NewMockNode(id string, serverHTTPURL string, h2Addr string, h3Addr string) 
 
 // OnControl registers a handler called for each downstream Control message
 // (e.g. go_away, key.rotation). Called from the recv goroutine.
-func (m *MockNode) OnControl(fn func(*pb.ControlMessage)) {
+func (m *MockNode) OnControl(fn func(*pb.Payload)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onControl = fn
 }
 
-// Start runs the full connection flow: discover -> ticket -> connect -> register -> ping.
+// Start runs the full connection flow: discover -> connect (authorize, open
+// control) -> register -> ping.
 // It blocks until registration completes or ctx is cancelled.
 func (m *MockNode) Start(ctx context.Context) error {
 	wk, err := m.Discover()
@@ -99,12 +100,7 @@ func (m *MockNode) Start(ctx context.Context) error {
 		return fmt.Errorf("discover: %w", err)
 	}
 
-	ticket, err := m.ObtainTicket("control")
-	if err != nil {
-		return fmt.Errorf("obtain ticket: %w", err)
-	}
-
-	if err := m.Connect(ctx, ticket, wk.Protocols); err != nil {
+	if err := m.Connect(ctx, wk.Protocols); err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 
@@ -208,47 +204,16 @@ func (m *MockNode) Discover() (*WellKnownResponse, error) {
 	return &wk, nil
 }
 
-// ObtainTicket calls POST /v1/tai/connect and returns the ticket string.
-// The nodeToken must be set before calling this (set automatically if Start is used).
-func (m *MockNode) ObtainTicket(connType string) (string, error) {
+// Connect establishes an H3 or H2 Control connection: it authorizes the
+// connection with POST /v1/tai/connect (node_token) and then opens the
+// Control stream on the same connection.
+// protocols should be ordered by preference (H3 first). The nodeToken must be
+// set (SetNodeToken). Each protocol attempt uses a fresh client and pipe, so
+// fallback works even if the first attempt fails.
+func (m *MockNode) Connect(ctx context.Context, protocols []string) error {
 	if m.nodeToken == "" {
-		token, err := m.issueTokenFromServer()
-		if err != nil {
-			return "", fmt.Errorf("issue node_token: %w", err)
-		}
-		m.nodeToken = token
+		return fmt.Errorf("nodeToken not set; call SetNodeToken or use TestServer.IssueTestNodeToken")
 	}
-
-	body, _ := json.Marshal(map[string]string{
-		"node_id":      m.ID,
-		"connect_type": connType,
-	})
-
-	req, _ := http.NewRequest("POST", m.serverURL+"/v1/tai/connect", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+m.nodeToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("connect: status %d", resp.StatusCode)
-	}
-
-	var cr connectResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return "", fmt.Errorf("decode connect response: %w", err)
-	}
-	return cr.ConnectTicket, nil
-}
-
-// Connect establishes an H3 or H2 transport connection.
-// protocols should be ordered by preference (H3 first). The ticket authenticates the connection.
-// Each protocol attempt uses a fresh pipe, so fallback works even if the first attempt fails.
-func (m *MockNode) Connect(ctx context.Context, ticket string, protocols []string) error {
 	var lastErr error
 	for _, p := range protocols {
 		switch p {
@@ -256,7 +221,7 @@ func (m *MockNode) Connect(ctx context.Context, ticket string, protocols []strin
 			if m.h3Addr == "" {
 				continue
 			}
-			if err := m.connectH3(ctx, ticket); err != nil {
+			if err := m.connectH3(ctx); err != nil {
 				log.Printf("mocknode: H3 connect failed: %v, trying next protocol", err)
 				lastErr = err
 				continue
@@ -266,7 +231,7 @@ func (m *MockNode) Connect(ctx context.Context, ticket string, protocols []strin
 			if m.h2Addr == "" {
 				continue
 			}
-			if err := m.connectH2(ctx, ticket); err != nil {
+			if err := m.connectH2(ctx); err != nil {
 				lastErr = err
 				continue
 			}
@@ -297,7 +262,7 @@ func (m *MockNode) Register() (*pb.RegisterAck, error) {
 	}
 
 	// Write register frame to the pipe. This triggers the server to respond.
-	if err := m.SendControl(&pb.ControlMessage{Kind: "register", Data: regData}); err != nil {
+	if err := m.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "register", Data: regData}); err != nil {
 		return nil, fmt.Errorf("send register: %w", err)
 	}
 
@@ -379,14 +344,14 @@ func (m *MockNode) StartPing(ctx context.Context, interval time.Duration) {
 			case <-ticker.C:
 				ping := &pb.Ping{Timestamp: time.Now().Unix()}
 				pingData, _ := proto.Marshal(ping)
-				m.SendControl(&pb.ControlMessage{Kind: "ping", Data: pingData})
+				m.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "ping", Data: pingData})
 			}
 		}
 	}()
 }
 
-// SendControl writes a ControlMessage to the transport stream.
-func (m *MockNode) SendControl(msg *pb.ControlMessage) error {
+// SendControl writes a Payload to the transport stream.
+func (m *MockNode) SendControl(msg *pb.Payload) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.controlW == nil {
@@ -401,8 +366,8 @@ func (m *MockNode) SendControl(msg *pb.ControlMessage) error {
 	return nil
 }
 
-// RecvControl reads the next ControlMessage from the transport stream.
-func (m *MockNode) RecvControl() (*pb.ControlMessage, error) {
+// RecvControl reads the next Payload from the transport stream.
+func (m *MockNode) RecvControl() (*pb.Payload, error) {
 	m.mu.Lock()
 	r := m.controlR
 	m.mu.Unlock()
@@ -437,12 +402,6 @@ func (m *MockNode) RefreshToken() (string, error) {
 // Internal
 // ---------------------------------------------------------------------------
 
-// issueTokenFromServer creates a node_token via the AuthProvider.
-// This works in test because TestServer.Auth is accessible.
-func (m *MockNode) issueTokenFromServer() (string, error) {
-	return "", fmt.Errorf("nodeToken not set; call SetNodeToken or use TestServer.IssueTestNodeToken")
-}
-
 // SetNodeToken sets the node_token for authentication.
 func (m *MockNode) SetNodeToken(token string) {
 	m.nodeToken = token
@@ -454,33 +413,73 @@ type httpResult struct {
 	err  error
 }
 
-func (m *MockNode) connectH2(ctx context.Context, ticket string) error {
+// closeClient releases the transport of client (including QUIC/UDP sockets).
+func closeClient(client *http.Client) {
+	switch t := client.Transport.(type) {
+	case *http3.Transport:
+		t.Close()
+	case *http.Transport:
+		t.CloseIdleConnections()
+	}
+}
+
+// authorize sends POST /v1/tai/connect on client's connection with the
+// node_token. The response body is drained before returning so the Control
+// request that follows reuses the same connection.
+func (m *MockNode) authorize(ctx context.Context, client *http.Client, baseURL string) error {
+	body, _ := json.Marshal(connectRequest{NodeID: m.ID, ConnectType: connTypeControl})
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/tai/connect", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+m.nodeToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("connect: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (m *MockNode) connectH2(ctx context.Context) error {
 	pr, pw := io.Pipe()
 
-	var h2URL string
+	var baseURL string
 	var client *http.Client
 
 	wk, _ := m.Discover()
 	if wk != nil && wk.TLS != nil && wk.TLS.CACertificate != "" {
-		h2URL = fmt.Sprintf("https://%s/v1/tai/control", m.h2Addr)
+		baseURL = fmt.Sprintf("https://%s", m.h2Addr)
 		pool := x509.NewCertPool()
 		pool.AppendCertsFromPEM([]byte(wk.TLS.CACertificate))
 		client = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig:   &tls.Config{RootCAs: pool},
 				ForceAttemptHTTP2: true,
+				MaxConnsPerHost:   1,
 			},
 		}
 	} else {
-		h2URL = fmt.Sprintf("http://%s/v1/tai/control", m.h2Addr)
+		baseURL = fmt.Sprintf("http://%s", m.h2Addr)
 		client = m.h2cClient()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", h2URL, pr)
-	if err != nil {
+	if err := m.authorize(ctx, client, baseURL); err != nil {
+		closeClient(client)
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+ticket)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/tai/control", pr)
+	if err != nil {
+		closeClient(client)
+		return err
+	}
 	req.Header.Set("Content-Type", "application/x-protobuf")
 
 	ch := make(chan httpResult, 1)
@@ -499,18 +498,22 @@ func (m *MockNode) connectH2(ctx context.Context, ticket string) error {
 	return nil
 }
 
-func (m *MockNode) connectH3(ctx context.Context, ticket string) error {
-	h3URL := fmt.Sprintf("https://%s/v1/tai/control", m.h3Addr)
+func (m *MockNode) connectH3(ctx context.Context) error {
+	baseURL := fmt.Sprintf("https://%s", m.h3Addr)
+	client := m.h3Client()
 
-	pr, pw := io.Pipe()
-	req, err := http.NewRequestWithContext(ctx, "POST", h3URL, pr)
-	if err != nil {
+	if err := m.authorize(ctx, client, baseURL); err != nil {
+		closeClient(client)
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+ticket)
-	req.Header.Set("Content-Type", "application/x-protobuf")
 
-	client := m.h3Client()
+	pr, pw := io.Pipe()
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/tai/control", pr)
+	if err != nil {
+		closeClient(client)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-protobuf")
 
 	ch := make(chan httpResult, 1)
 	go func() {
@@ -577,7 +580,8 @@ func (m *MockNode) h2cClient() *http.Client {
 	protos.SetUnencryptedHTTP2(true)
 	return &http.Client{
 		Transport: &http.Transport{
-			Protocols: &protos,
+			Protocols:       &protos,
+			MaxConnsPerHost: 1,
 		},
 	}
 }

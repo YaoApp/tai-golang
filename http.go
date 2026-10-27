@@ -12,7 +12,9 @@ import (
 )
 
 // httpServer handles the HTTP API on port 5099.
-// Endpoints: well-known, connect_ticket, token refresh, heartbeat, tai call.
+// Endpoints: well-known, token refresh, heartbeat, tai call.
+// Connection authentication (`POST /v1/tai/connect`) lives on the transport
+// port (6099), not here.
 type httpServer struct {
 	auth     AuthProvider
 	mux      *http.ServeMux
@@ -28,7 +30,6 @@ func newHTTPServer(auth AuthProvider) *httpServer {
 		mux:  http.NewServeMux(),
 	}
 	s.mux.HandleFunc("GET /.well-known/yao-transport", s.handleWellKnown)
-	s.mux.HandleFunc("POST /v1/tai/connect", s.handleConnect)
 	s.mux.HandleFunc("POST /v1/tai/token/refresh", s.handleTokenRefresh)
 	s.mux.HandleFunc("POST /v1/tai/heartbeat", s.handleHeartbeat)
 	return s
@@ -99,59 +100,6 @@ func (s *httpServer) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	info := s.auth.WellKnownInfo()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
-}
-
-// ---------------------------------------------------------------------------
-// POST /v1/tai/connect
-// ---------------------------------------------------------------------------
-
-type connectRequest struct {
-	NodeID      string `json:"node_id"`
-	ConnectType string `json:"connect_type"` // "control" | "light" | "heavy"
-}
-
-type connectResponse struct {
-	ConnectTicket string   `json:"connect_ticket"`
-	Protocols     []string `json:"protocols"`
-	ExpiresIn     int      `json:"expires_in"`
-}
-
-func (s *httpServer) handleConnect(w http.ResponseWriter, r *http.Request) {
-	token := extractBearer(r)
-	if token == "" {
-		httpError(w, http.StatusUnauthorized, "missing authorization")
-		return
-	}
-
-	nodeInfo, err := s.auth.ValidateNodeToken(token)
-	if err != nil {
-		httpError(w, http.StatusUnauthorized, "invalid node_token")
-		return
-	}
-
-	var req connectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if req.ConnectType == "" {
-		req.ConnectType = "control"
-	}
-
-	ticket, err := s.auth.IssueConnectTicket(nodeInfo.NodeID, req.ConnectType)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, "failed to issue ticket")
-		return
-	}
-
-	info := s.auth.WellKnownInfo()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(connectResponse{
-		ConnectTicket: ticket.Ticket,
-		Protocols:     info.Protocols,
-		ExpiresIn:     ticket.ExpiresIn,
-	})
 }
 
 // ---------------------------------------------------------------------------

@@ -5,9 +5,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -86,12 +89,46 @@ func protocolCases(ts *TestServer) []transportTestCase {
 	}
 }
 
+// postConnect sends POST /v1/tai/connect on client and returns the status code.
+// The response body is drained so the connection stays reusable.
+func postConnect(client *http.Client, baseURL, token, nodeID, connType string) (int, error) {
+	body, _ := json.Marshal(connectRequest{NodeID: nodeID, ConnectType: connType})
+	req, _ := http.NewRequest("POST", baseURL+"/v1/tai/connect", bytes.NewReader(body))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+// authorizedClient returns a client whose connection to the test server has
+// been authorized as a Control connection for nodeID. Later requests from the
+// same client reuse that connection.
+func authorizedClient(t *testing.T, ts *TestServer, tc transportTestCase, nodeID string) *http.Client {
+	t.Helper()
+	client := tc.newClient()
+	status, err := postConnect(client, tc.url, ts.IssueTestNodeToken(nodeID), nodeID, "control")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("connect status=%d, want 200", status)
+	}
+	return client
+}
+
 // ---------------------------------------------------------------------------
 // Frame tests (protocol-independent)
 // ---------------------------------------------------------------------------
 
 func TestFrameRoundTrip(t *testing.T) {
-	msg := &pb.ControlMessage{Kind: "test", Data: []byte("hello")}
+	msg := &pb.Payload{Namespace: NamespaceControl, Kind: "test", Data: []byte("hello")}
 
 	var buf bytes.Buffer
 	if err := writeFrame(&buf, msg); err != nil {
@@ -113,7 +150,7 @@ func TestFrameRoundTrip(t *testing.T) {
 func TestFrameMultiple(t *testing.T) {
 	var buf bytes.Buffer
 	for i := 0; i < 5; i++ {
-		msg := &pb.ControlMessage{Kind: "ping", Data: []byte{byte(i)}}
+		msg := &pb.Payload{Namespace: NamespaceControl, Kind: "ping", Data: []byte{byte(i)}}
 		if err := writeFrame(&buf, msg); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}
@@ -137,7 +174,7 @@ func TestFrameMultiple(t *testing.T) {
 
 func TestFrameMaxSize(t *testing.T) {
 	huge := make([]byte, maxFrameSize+1)
-	msg := &pb.ControlMessage{Kind: "big", Data: huge}
+	msg := &pb.Payload{Namespace: NamespaceControl, Kind: "big", Data: huge}
 
 	var buf bytes.Buffer
 	err := writeFrame(&buf, msg)
@@ -147,7 +184,7 @@ func TestFrameMaxSize(t *testing.T) {
 }
 
 func TestFrameReadTruncated(t *testing.T) {
-	msg := &pb.ControlMessage{Kind: "test", Data: []byte("data")}
+	msg := &pb.Payload{Namespace: NamespaceControl, Kind: "test", Data: []byte("data")}
 	var buf bytes.Buffer
 	writeFrame(&buf, msg)
 
@@ -160,7 +197,7 @@ func TestFrameReadTruncated(t *testing.T) {
 
 func TestFrameWriteError(t *testing.T) {
 	w := &errWriter{}
-	msg := &pb.ControlMessage{Kind: "test"}
+	msg := &pb.Payload{Namespace: NamespaceControl, Kind: "test"}
 	err := writeFrame(w, msg)
 	if err == nil {
 		t.Error("expected error from broken writer")
@@ -300,7 +337,7 @@ func TestNodeManagerSendControlNoStream(t *testing.T) {
 	reg := &pb.Register{NodeId: "node-ns", Version: "1.0", Hardware: &pb.Hardware{}}
 	mgr.register("node-ns", reg, auth)
 
-	err := mgr.sendControl("node-ns", &pb.ControlMessage{Kind: "test"})
+	err := mgr.sendControl("node-ns", &pb.Payload{Namespace: NamespaceControl, Kind: "test"})
 	if err == nil {
 		t.Error("expected error for node with no stream")
 	}
@@ -308,7 +345,7 @@ func TestNodeManagerSendControlNoStream(t *testing.T) {
 
 func TestNodeManagerSendControlNodeNotFound(t *testing.T) {
 	mgr := newNodeManager()
-	err := mgr.sendControl("nonexistent", &pb.ControlMessage{Kind: "test"})
+	err := mgr.sendControl("nonexistent", &pb.Payload{Namespace: NamespaceControl, Kind: "test"})
 	if err != ErrNodeNotFound {
 		t.Errorf("got %v, want ErrNodeNotFound", err)
 	}
@@ -343,10 +380,7 @@ func TestControlStreamEndToEnd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			nodeID := "e2e-" + tc.name
 
-			ticket, err := ts.Auth.IssueConnectTicket(nodeID, "control")
-			if err != nil {
-				t.Fatalf("issue ticket: %v", err)
-			}
+			client := authorizedClient(t, ts, tc, nodeID)
 
 			pr, pw := io.Pipe()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -354,7 +388,6 @@ func TestControlStreamEndToEnd(t *testing.T) {
 
 			req, _ := http.NewRequestWithContext(ctx, "POST",
 				tc.url+"/v1/tai/control", pr)
-			req.Header.Set("Authorization", "Bearer "+ticket.Ticket)
 
 			type result struct {
 				resp *http.Response
@@ -362,7 +395,7 @@ func TestControlStreamEndToEnd(t *testing.T) {
 			}
 			ch := make(chan result, 1)
 			go func() {
-				resp, err := tc.newClient().Do(req)
+				resp, err := client.Do(req)
 				ch <- result{resp, err}
 			}()
 
@@ -376,7 +409,7 @@ func TestControlStreamEndToEnd(t *testing.T) {
 				Capabilities: []string{"session"},
 			}
 			regData, _ := proto.Marshal(regPB)
-			writeFrame(pw, &pb.ControlMessage{Kind: "register", Data: regData})
+			writeFrame(pw, &pb.Payload{Namespace: NamespaceControl, Kind: "register", Data: regData})
 
 			res := <-ch
 			if res.err != nil {
@@ -406,9 +439,13 @@ func TestControlStreamEndToEnd(t *testing.T) {
 				t.Error("pool_config unexpected")
 			}
 
+			// A message in another namespace is ignored: no pong for it.
+			foreign, _ := proto.Marshal(&pb.Ping{Timestamp: 1111})
+			writeFrame(pw, &pb.Payload{Namespace: "other", Kind: "ping", Data: foreign})
+
 			// Send Ping
 			pingData, _ := proto.Marshal(&pb.Ping{Timestamp: 7777})
-			writeFrame(pw, &pb.ControlMessage{Kind: "ping", Data: pingData})
+			writeFrame(pw, &pb.Payload{Namespace: NamespaceControl, Kind: "ping", Data: pingData})
 
 			// Read Pong
 			pongMsg, err := readFrame(res.resp.Body)
@@ -425,7 +462,7 @@ func TestControlStreamEndToEnd(t *testing.T) {
 			}
 
 			// Unknown kind (forward compat)
-			writeFrame(pw, &pb.ControlMessage{Kind: "future.msg"})
+			writeFrame(pw, &pb.Payload{Namespace: NamespaceControl, Kind: "future.msg"})
 
 			// Verify node in manager
 			time.Sleep(50 * time.Millisecond)
@@ -455,7 +492,7 @@ func TestControlStreamCallback(t *testing.T) {
 				return nil
 			}
 
-			ticket, _ := ts.Auth.IssueConnectTicket(nodeID, "control")
+			client := authorizedClient(t, ts, tc, nodeID)
 			pr, pw := io.Pipe()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -463,7 +500,6 @@ func TestControlStreamCallback(t *testing.T) {
 
 			req, _ := http.NewRequestWithContext(ctx, "POST",
 				tc.url+"/v1/tai/control", pr)
-			req.Header.Set("Authorization", "Bearer "+ticket.Ticket)
 
 			type result struct {
 				resp *http.Response
@@ -471,7 +507,7 @@ func TestControlStreamCallback(t *testing.T) {
 			}
 			ch := make(chan result, 1)
 			go func() {
-				resp, err := tc.newClient().Do(req)
+				resp, err := client.Do(req)
 				ch <- result{resp, err}
 			}()
 
@@ -479,7 +515,7 @@ func TestControlStreamCallback(t *testing.T) {
 				NodeId: nodeID, Version: "1.0",
 				Hardware: &pb.Hardware{Os: "darwin", Arch: "arm64"},
 			})
-			writeFrame(pw, &pb.ControlMessage{Kind: "register", Data: regData})
+			writeFrame(pw, &pb.Payload{Namespace: NamespaceControl, Kind: "register", Data: regData})
 
 			res := <-ch
 			if res.err != nil {
@@ -551,7 +587,7 @@ func TestFrameCodecWriteRead(t *testing.T) {
 	c, _ := NewFrameCodec(256 * 1024)
 	var buf bytes.Buffer
 
-	msg := &pb.ControlMessage{Kind: "test", Data: []byte("hello")}
+	msg := &pb.Payload{Namespace: NamespaceControl, Kind: "test", Data: []byte("hello")}
 	if err := c.WriteFrame(&buf, msg); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
@@ -562,5 +598,29 @@ func TestFrameCodecWriteRead(t *testing.T) {
 	}
 	if got.Kind != "test" {
 		t.Errorf("Kind = %q, want test", got.Kind)
+	}
+}
+
+// A write that arrives after the Control stream's handler has returned must
+// fail instead of touching the ResponseWriter, which is invalid by then.
+func TestControlStreamRejectsWritesAfterRun(t *testing.T) {
+	auth, _ := newTestAuth(t)
+	mgr := newNodeManager()
+	var out bytes.Buffer
+	cs := newControlStream("node-closed", bytes.NewReader(nil), httptest.NewRecorder(), mgr, auth, defaultCodec)
+	cs.w = &out
+	mgr.register("node-closed", &pb.Register{Hardware: &pb.Hardware{}}, auth)
+	mgr.setStream("node-closed", cs)
+
+	cs.run(context.Background()) // empty body: EOF ends the loop
+
+	if err := mgr.sendControl("node-closed", &pb.Payload{Namespace: NamespaceControl, Kind: "pong"}); err == nil {
+		t.Error("sendControl after the stream closed must fail")
+	}
+	if err := cs.writeMsg(&pb.Payload{Namespace: NamespaceControl, Kind: "pong"}); !errors.Is(err, errControlClosed) {
+		t.Errorf("writeMsg after run = %v, want errControlClosed", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("wrote %d bytes after the stream closed", out.Len())
 	}
 }

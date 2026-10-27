@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/yaoapp/tai-golang/pb"
 )
 
@@ -14,6 +16,7 @@ type nodeManager struct {
 	mu         sync.RWMutex
 	nodes      map[string]*managedNode
 	onRegister func(node *Node) error
+	pool       *pb.PoolConfig // register_ack pool_config; immutable after construction
 }
 
 // managedNode pairs a Node with its Control stream and liveness info.
@@ -24,9 +27,16 @@ type managedNode struct {
 }
 
 func newNodeManager() *nodeManager {
+	cfg, _ := (*PoolSettings)(nil).poolConfig() // defaults always validate
 	return &nodeManager{
 		nodes: make(map[string]*managedNode),
+		pool:  cfg,
 	}
+}
+
+// poolConfig returns a copy of the pool parameters sent in register_ack.
+func (m *nodeManager) poolConfig() *pb.PoolConfig {
+	return proto.Clone(m.pool).(*pb.PoolConfig)
 }
 
 // register handles a Register message, stores the node, and returns a RegisterAck.
@@ -62,8 +72,11 @@ func (m *nodeManager) register(nodeID string, reg *pb.Register, auth AuthProvide
 	}
 	m.mu.Unlock()
 
-	if m.onRegister != nil {
-		if err := m.onRegister(&node); err != nil {
+	m.mu.RLock()
+	onRegister := m.onRegister
+	m.mu.RUnlock()
+	if onRegister != nil {
+		if err := onRegister(&node); err != nil {
 			m.mu.Lock()
 			delete(m.nodes, nodeID)
 			m.mu.Unlock()
@@ -72,22 +85,20 @@ func (m *nodeManager) register(nodeID string, reg *pb.Register, auth AuthProvide
 	}
 
 	ack := &pb.RegisterAck{
-		TaiId:     taiID,
-		PublicKey: pubKey,
-		KeyId:     keyID,
-		PoolConfig: &pb.PoolConfig{
-			LightMinConns:       2,
-			LightMaxConns:       8,
-			LightMaxStreams:     256,
-			LightIdleTimeoutSec: 300,
-			HeavyMinIdle:        2,
-			HeavyMaxActive:      20,
-			HeavyMaxIdle:        6,
-			HeavyIdleTimeoutSec: 300,
-			HeavyHealthCheckSec: 30,
-		},
+		TaiId:      taiID,
+		PublicKey:  pubKey,
+		KeyId:      keyID,
+		PoolConfig: m.poolConfig(),
 	}
 	return ack, nil
+}
+
+// setOnRegister sets the callback invoked after a node registers; an error
+// from it rejects the registration.
+func (m *nodeManager) setOnRegister(fn func(node *Node) error) {
+	m.mu.Lock()
+	m.onRegister = fn
+	m.mu.Unlock()
 }
 
 // setStream associates a controlStream with an already-registered node.
@@ -96,6 +107,17 @@ func (m *nodeManager) setStream(nodeID string, cs *controlStream) {
 	defer m.mu.Unlock()
 	if mn, ok := m.nodes[nodeID]; ok {
 		mn.stream = cs
+	}
+}
+
+// unregisterStream removes a node only while cs is still the stream that
+// registered it. A reconnected node has a newer stream; the older stream's
+// teardown must not remove the new registration.
+func (m *nodeManager) unregisterStream(nodeID string, cs *controlStream) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mn, ok := m.nodes[nodeID]; ok && mn.stream == cs {
+		delete(m.nodes, nodeID)
 	}
 }
 
@@ -140,8 +162,8 @@ func (m *nodeManager) updatePing(nodeID string, ping *pb.Ping) {
 	}
 }
 
-// sendControl sends a ControlMessage to a specific node via its stream.
-func (m *nodeManager) sendControl(nodeID string, msg *pb.ControlMessage) error {
+// sendControl sends a Payload to a specific node via its stream.
+func (m *nodeManager) sendControl(nodeID string, msg *pb.Payload) error {
 	m.mu.RLock()
 	mn, ok := m.nodes[nodeID]
 	m.mu.RUnlock()
@@ -160,7 +182,7 @@ func (m *nodeManager) goAway(nodeID string, reason string, reconnectAfter uint32
 		Reason:         reason,
 		ReconnectAfter: reconnectAfter,
 	})
-	return m.sendControl(nodeID, &pb.ControlMessage{Kind: "go_away", Data: data})
+	return m.sendControl(nodeID, &pb.Payload{Namespace: NamespaceControl, Kind: "go_away", Data: data})
 }
 
 // goAwayAll sends GoAway to all connected nodes.

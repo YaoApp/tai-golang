@@ -2,7 +2,7 @@ PROTO_DIR  := proto
 PB_DIR     := pb
 PROTO_FILES := $(wildcard $(PROTO_DIR)/*.proto)
 
-.PHONY: proto test coverage lint fmt ci clean
+.PHONY: proto test lint clean
 
 # Generate Go code from .proto files
 proto:

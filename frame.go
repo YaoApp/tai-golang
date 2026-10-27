@@ -21,7 +21,7 @@ const (
 // ErrFrameTooLarge is returned when a frame exceeds the configured max size.
 var ErrFrameTooLarge = errors.New("frame too large")
 
-// FrameCodec reads and writes length-prefixed ControlMessage frames.
+// FrameCodec reads and writes length-prefixed Payload frames.
 // The maximum payload size is configurable; use NewFrameCodec to create one.
 type FrameCodec struct {
 	maxSize int
@@ -40,9 +40,9 @@ func NewFrameCodec(maxSize int) (*FrameCodec, error) {
 	return &FrameCodec{maxSize: maxSize}, nil
 }
 
-// WriteFrame writes a length-prefixed ControlMessage to w.
+// WriteFrame writes a length-prefixed Payload to w.
 // Wire format: 4-byte big-endian length + protobuf payload.
-func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.ControlMessage) error {
+func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.Payload) error {
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
@@ -62,9 +62,9 @@ func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.ControlMessage) error {
 	return nil
 }
 
-// ReadFrame reads a length-prefixed ControlMessage from r.
+// ReadFrame reads a length-prefixed Payload from r.
 // Returns io.EOF when the stream ends cleanly.
-func (fc *FrameCodec) ReadFrame(r io.Reader) (*pb.ControlMessage, error) {
+func (fc *FrameCodec) ReadFrame(r io.Reader) (*pb.Payload, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(r, header); err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func (fc *FrameCodec) ReadFrame(r io.Reader) (*pb.ControlMessage, error) {
 		return nil, fmt.Errorf("read payload: %w", err)
 	}
 
-	msg := &pb.ControlMessage{}
+	msg := &pb.Payload{}
 	if err := proto.Unmarshal(payload, msg); err != nil {
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
@@ -95,12 +95,12 @@ func (fc *FrameCodec) MaxSize() int {
 // defaultCodec is used by the package-level writeFrame/readFrame functions.
 var defaultCodec = &FrameCodec{maxSize: DefaultMaxFrameSize}
 
-// writeFrame writes a length-prefixed ControlMessage using the default codec.
-func writeFrame(w io.Writer, msg *pb.ControlMessage) error {
+// writeFrame writes a length-prefixed Payload using the default codec.
+func writeFrame(w io.Writer, msg *pb.Payload) error {
 	return defaultCodec.WriteFrame(w, msg)
 }
 
-// readFrame reads a length-prefixed ControlMessage using the default codec.
-func readFrame(r io.Reader) (*pb.ControlMessage, error) {
+// readFrame reads a length-prefixed Payload using the default codec.
+func readFrame(r io.Reader) (*pb.Payload, error) {
 	return defaultCodec.ReadFrame(r)
 }

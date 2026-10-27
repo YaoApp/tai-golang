@@ -3,19 +3,8 @@ package tai
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"testing"
-	"time"
 )
-
-func decodeTicketRaw(ticket string) (string, error) {
-	b, err := base64.RawURLEncoding.DecodeString(ticket)
-	return string(b), err
-}
-
-func encodeTicketRaw(raw string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(raw))
-}
 
 func newTestAuth(t *testing.T) (*defaultAuth, ed25519.PrivateKey) {
 	t.Helper()
@@ -94,79 +83,6 @@ func TestRefreshNodeToken_Invalid(t *testing.T) {
 	}
 }
 
-func TestIssueAndValidateConnectTicket(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	ticket, err := auth.IssueConnectTicket("node-003", "control")
-	if err != nil {
-		t.Fatalf("issue ticket: %v", err)
-	}
-	if ticket.ExpiresIn != 30 {
-		t.Errorf("ExpiresIn=%d, want 30", ticket.ExpiresIn)
-	}
-
-	nodeID, connType, err := auth.ValidateConnectTicket(ticket.Ticket)
-	if err != nil {
-		t.Fatalf("validate ticket: %v", err)
-	}
-	if nodeID != "node-003" {
-		t.Errorf("nodeID=%q, want node-003", nodeID)
-	}
-	if connType != "control" {
-		t.Errorf("connType=%q, want control", connType)
-	}
-}
-
-func TestConnectTicket_OneTimeUse(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	ticket, _ := auth.IssueConnectTicket("node-004", "light")
-	auth.ValidateConnectTicket(ticket.Ticket) // first use OK
-
-	_, _, err := auth.ValidateConnectTicket(ticket.Ticket)
-	if err != ErrTicketUsed {
-		t.Errorf("second use: got %v, want ErrTicketUsed", err)
-	}
-}
-
-func TestConnectTicket_Invalid(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	_, _, err := auth.ValidateConnectTicket("!!!not-base64!!!")
-	if err != ErrTicketInvalid {
-		t.Errorf("got %v, want ErrTicketInvalid", err)
-	}
-}
-
-func TestConnectTicket_TamperedSignature(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	ticket, _ := auth.IssueConnectTicket("node-tamper", "control")
-
-	// Decode, corrupt the HMAC portion, re-encode
-	raw, _ := decodeTicketRaw(ticket.Ticket)
-	parts := splitLast(raw, "|")
-	if parts == nil {
-		t.Fatal("unexpected ticket format")
-	}
-	corrupted := parts[0] + "|" + "0000000000000000000000000000000000000000000000000000000000000000"
-	tampered := encodeTicketRaw(corrupted)
-
-	_, _, err := auth.ValidateConnectTicket(tampered)
-	if err != ErrTicketInvalid {
-		t.Errorf("got %v, want ErrTicketInvalid", err)
-	}
-}
-
-func TestConnectTicket_NoSeparator(t *testing.T) {
-	auth, _ := newTestAuth(t)
-	// Base64 of a string with no pipe separator
-	_, _, err := auth.ValidateConnectTicket("bm9waXBl") // "nopipe"
-	if err != ErrTicketInvalid {
-		t.Errorf("got %v, want ErrTicketInvalid", err)
-	}
-}
-
 func TestIssueOperationToken(t *testing.T) {
 	auth, _ := newTestAuth(t)
 
@@ -207,6 +123,12 @@ func TestSigningPublicKey(t *testing.T) {
 func TestWellKnownInfo(t *testing.T) {
 	auth, _ := newTestAuth(t)
 
+	// Without TLS there is no QUIC: only the TCP path is advertised.
+	if plain := auth.WellKnownInfo(); len(plain.Protocols) != 1 || plain.Protocols[0] != "HTTP/2" {
+		t.Errorf("Protocols without TLS=%v, want [HTTP/2]", plain.Protocols)
+	}
+
+	auth.SetTLS("pem", "sha256:abc")
 	info := auth.WellKnownInfo()
 	if info.TransportPort != 6099 {
 		t.Errorf("TransportPort=%d, want 6099", info.TransportPort)
@@ -225,65 +147,25 @@ func TestWellKnownInfo(t *testing.T) {
 	}
 }
 
-func TestPruneExpiredTickets(t *testing.T) {
+func TestWellKnownConfigureConcurrently(t *testing.T) {
 	auth, _ := newTestAuth(t)
 
-	auth.mu.Lock()
-	auth.usedTickets["expired-ticket"] = time.Now().Add(-1 * time.Hour)
-	auth.usedTickets["valid-ticket"] = time.Now().Add(1 * time.Hour)
-	auth.mu.Unlock()
-
-	auth.mu.Lock()
-	auth.pruneExpiredTickets()
-	auth.mu.Unlock()
-
-	auth.mu.Lock()
-	defer auth.mu.Unlock()
-	if _, exists := auth.usedTickets["expired-ticket"]; exists {
-		t.Error("expired ticket should have been pruned")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			auth.SetTLS("pem", "sha256:abc")
+			auth.SetTransportPort(6000 + i)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = auth.WellKnownInfo()
 	}
-	if _, exists := auth.usedTickets["valid-ticket"]; !exists {
-		t.Error("valid ticket should still exist")
-	}
-}
+	<-done
 
-func TestSplitN_EdgeCases(t *testing.T) {
-	// No separator found
-	result := splitN("nosep", "|", 3)
-	if len(result) != 1 || result[0] != "nosep" {
-		t.Errorf("no sep: got %v", result)
-	}
-
-	// Fewer fields than n — splitN stops splitting when no more separators
-	result = splitN("a|b", "|", 5)
-	if len(result) != 2 || result[0] != "a" || result[1] != "b" {
-		t.Errorf("fewer fields: got %v, want [a b]", result)
-	}
-
-	// Exact n
-	result = splitN("x|y|z", "|", 3)
-	if len(result) != 3 || result[0] != "x" || result[1] != "y" || result[2] != "z" {
-		t.Errorf("exact n: got %v", result)
-	}
-}
-
-func TestSplitLast(t *testing.T) {
-	// Normal case
-	result := splitLast("a|b|c", "|")
-	if result == nil || result[0] != "a|b" || result[1] != "c" {
-		t.Errorf("normal: got %v", result)
-	}
-
-	// No separator
-	result = splitLast("nosep", "|")
-	if result != nil {
-		t.Errorf("no sep: got %v, want nil", result)
-	}
-
-	// Single separator
-	result = splitLast("a|b", "|")
-	if result == nil || result[0] != "a" || result[1] != "b" {
-		t.Errorf("single: got %v", result)
+	wk := auth.WellKnownInfo()
+	if wk.TLS == nil || wk.TransportPort != 6199 {
+		t.Fatalf("well-known after configure: %+v", wk)
 	}
 }
 

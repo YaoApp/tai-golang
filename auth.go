@@ -6,7 +6,7 @@ package tai
 // their user database and token infrastructure.
 type AuthProvider interface {
 	// ValidateNodeToken verifies a node_token and returns node information.
-	// Called during the connect_ticket flow.
+	// Called with the first message of every Control, Light and Heavy connection.
 	ValidateNodeToken(token string) (*NodeInfo, error)
 
 	// IssueNodeToken creates a new node_token for a node.
@@ -15,10 +15,6 @@ type AuthProvider interface {
 
 	// RefreshNodeToken issues a replacement for an expiring node_token.
 	RefreshNodeToken(oldToken string) (string, error)
-
-	// IssueConnectTicket creates a short-lived (30s) one-time ticket
-	// for establishing a transport connection.
-	IssueConnectTicket(nodeID string, connType string) (*ConnectTicket, error)
 
 	// IssueOperationToken creates a session-scoped JWT for authorizing
 	// operations on a Tai node.
@@ -36,12 +32,6 @@ type AuthProvider interface {
 type NodeInfo struct {
 	NodeID string
 	UserID string // Optional: associated user
-}
-
-// ConnectTicket is a short-lived credential for transport connection setup.
-type ConnectTicket struct {
-	Ticket    string // Signed ticket value
-	ExpiresIn int    // Seconds until expiration (default 30)
 }
 
 // TokenScope restricts an OperationToken to specific paths.

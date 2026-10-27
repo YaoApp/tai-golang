@@ -2,6 +2,7 @@ package tai
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -21,8 +22,13 @@ type controlStream struct {
 	mgr    *nodeManager
 	auth   AuthProvider
 
-	mu sync.Mutex // serializes writes
+	mu     sync.Mutex // serializes writes and guards closed
+	closed bool       // set when run returns; the ResponseWriter is invalid afterwards
 }
+
+// errControlClosed is returned by writeMsg after the Control stream's
+// handler has returned.
+var errControlClosed = errors.New("tai: control stream closed")
 
 func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *nodeManager, auth AuthProvider, codec *FrameCodec) *controlStream {
 	f, _ := w.(http.Flusher)
@@ -40,7 +46,7 @@ func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *no
 // run is the main message loop. It reads frames, dispatches by kind, and
 // writes responses. It blocks until the stream closes or ctx is cancelled.
 func (cs *controlStream) run(ctx context.Context) {
-	defer cs.mgr.unregister(cs.nodeID)
+	defer cs.close()
 
 	for {
 		select {
@@ -61,7 +67,21 @@ func (cs *controlStream) run(ctx context.Context) {
 	}
 }
 
-func (cs *controlStream) dispatch(msg *pb.ControlMessage) {
+// close unregisters the stream and stops further writes. It waits for a
+// write in flight, because the ResponseWriter must not be used once the
+// handler that owns it returns.
+func (cs *controlStream) close() {
+	cs.mgr.unregisterStream(cs.nodeID, cs)
+	cs.mu.Lock()
+	cs.closed = true
+	cs.mu.Unlock()
+}
+
+func (cs *controlStream) dispatch(msg *pb.Payload) {
+	if msg.Namespace != NamespaceControl {
+		log.Printf("tai-sdk: unknown control namespace=%q kind=%q node=%s", msg.Namespace, msg.Kind, cs.nodeID)
+		return
+	}
 	switch msg.Kind {
 	case "register":
 		cs.handleRegister(msg.Data)
@@ -93,7 +113,7 @@ func (cs *controlStream) handleRegister(data []byte) {
 		return
 	}
 
-	cs.writeMsg(&pb.ControlMessage{Kind: "register_ack", Data: ackData})
+	cs.writeMsg(&pb.Payload{Namespace: NamespaceControl, Kind: "register_ack", Data: ackData})
 	log.Printf("tai-sdk: node registered: id=%s tai_id=%s", cs.nodeID, ack.TaiId)
 }
 
@@ -113,13 +133,16 @@ func (cs *controlStream) handlePing(data []byte) {
 		return
 	}
 
-	cs.writeMsg(&pb.ControlMessage{Kind: "pong", Data: pongData})
+	cs.writeMsg(&pb.Payload{Namespace: NamespaceControl, Kind: "pong", Data: pongData})
 }
 
-// writeMsg writes a ControlMessage frame and flushes.
-func (cs *controlStream) writeMsg(msg *pb.ControlMessage) error {
+// writeMsg writes a Payload frame and flushes.
+func (cs *controlStream) writeMsg(msg *pb.Payload) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+	if cs.closed {
+		return errControlClosed
+	}
 	if err := cs.codec.WriteFrame(cs.w, msg); err != nil {
 		return err
 	}

@@ -21,10 +21,19 @@ message SessionMessage {
 }
 
 // ---------------------------------------------------------------------------
-// Session lifecycle (carried on L1 Control stream)
+// Session lifecycle. The server opens streams on a Light connection; the
+// first frame is a Payload { namespace: "session", kind, data }. These
+// handshake messages do not consume `seq`.
 // ---------------------------------------------------------------------------
 
-// SessionOpen is sent by the server to open a new session on a Tai node.
+// SessionData is the data of the first frame ("data") of the Session Data
+// stream, which the server opens after receiving SessionOpened.
+message SessionData {
+  string session_id = 1;
+}
+
+// SessionOpen is the data of the first frame ("open") of the Session Control
+// stream.
 message SessionOpen {
   string         session_id = 1;
   string         node_id    = 2;

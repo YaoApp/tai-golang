@@ -66,5 +66,9 @@ jobs:
       - name: Coverage
         shell: bash
         run: |
-          go test -coverprofile=coverage.out -covermode=atomic ./... 2>/dev/null || true
-          go tool cover -func=coverage.out | tail -1
+          # Only packages that have tests: generated packages (pb) have none.
+          pkgs=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./...)
+          go test -count=1 -coverprofile=coverage.out -covermode=atomic $pkgs
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          echo "total coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit !(t >= 90) }' || (echo "coverage ${total}% is below 90%" && exit 1)
