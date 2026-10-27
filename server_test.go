@@ -182,8 +182,9 @@ func TestServerStartWithTLSFilesAndShutdown(t *testing.T) {
 		t.Errorf("well-known TLS info missing: %+v", wk.TLS)
 	}
 
-	// UDP side is bound on the same port: a second UDP listener must fail.
-	if pc, err := net.ListenPacket("udp", "127.0.0.1:"+strconv.Itoa(tcp)); err == nil {
+	// UDP side is bound on the same port: a second UDP listener on the same
+	// (wildcard) address must fail. A loopback-only bind would not conflict on Windows.
+	if pc, err := net.ListenPacket("udp", ":"+strconv.Itoa(tcp)); err == nil {
 		pc.Close()
 		t.Error("UDP port should be taken by H3")
 	}
@@ -205,7 +206,7 @@ func TestServerPlaintextHasNoH3(t *testing.T) {
 	cancel, done := startServer(t, s)
 	defer func() { cancel(); <-done }()
 
-	pc, err := net.ListenPacket("udp", "127.0.0.1:"+strconv.Itoa(tcp))
+	pc, err := net.ListenPacket("udp", ":"+strconv.Itoa(tcp))
 	if err != nil {
 		t.Fatalf("UDP port should be free without TLS: %v", err)
 	}
