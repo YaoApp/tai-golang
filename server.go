@@ -35,6 +35,10 @@ type ServerConfig struct {
 	// Use DefaultAuth() for a built-in JWT implementation.
 	Auth AuthProvider
 
+	// MaxFrameSize sets the maximum Control stream frame payload size in bytes.
+	// 0 uses DefaultMaxFrameSize (16 MB). Range: [64 KB, 64 MB].
+	MaxFrameSize int
+
 	// Pool sets initial connection pool parameters.
 	// Nil uses built-in defaults (Light 2-8, Heavy 2-20).
 	Pool *PoolSettings

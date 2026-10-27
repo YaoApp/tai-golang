@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -15,6 +16,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/yaoapp/tai-golang/pb"
 )
 
 // TestServer is a self-contained test harness that starts HTTP API, H2, and H3
@@ -38,6 +41,8 @@ type TestServer struct {
 
 // NewTestServer creates and starts a TestServer with ephemeral ports,
 // a fresh Ed25519 key pair (for JWT), and a self-signed TLS certificate (for H3).
+// H2 (TCP) and H3 (QUIC/UDP) share the same port number, matching the
+// production design where 6099 serves both TCP and UDP.
 func NewTestServer(t *testing.T) *TestServer {
 	t.Helper()
 
@@ -49,29 +54,40 @@ func NewTestServer(t *testing.T) *TestServer {
 	auth := DefaultAuth(privKey)
 	mgr := newNodeManager()
 	httpSrv := newHTTPServer(auth)
-	transportSrv := newTransportServer(auth, auth.(*defaultAuth), mgr)
+	transportSrv := newTransportServer(auth, auth.(*defaultAuth), mgr, defaultCodec)
+
+	// Generate self-signed TLS cert for H3
+	tlsCfg, certPEM, fingerprint := generateTestTLS(t)
+
+	// Set TLS info so well-known includes ca_certificate and fingerprint
+	auth.(*defaultAuth).SetTLS(string(certPEM), fingerprint)
 
 	// Start HTTP API
 	if err := httpSrv.start("127.0.0.1:0"); err != nil {
 		t.Fatalf("start http server: %v", err)
 	}
 
-	// Start H2 (TCP)
-	if err := transportSrv.startH2("127.0.0.1:0"); err != nil {
+	// Start H2 (TCP/TLS) on ephemeral port — same TLS cert as H3
+	if err := transportSrv.startH2("127.0.0.1:0", tlsCfg); err != nil {
 		httpSrv.close(context.Background())
 		t.Fatalf("start h2 transport: %v", err)
 	}
 
-	// Generate self-signed TLS cert for H3
-	tlsCfg := generateTestTLS(t)
-
-	// Start H3 (QUIC) on an ephemeral UDP port
-	udpAddr := findFreeUDPPort(t)
-	if err := transportSrv.startH3(udpAddr, tlsCfg); err != nil {
+	// Extract the port from H2 address, then bind H3 (UDP) to the same port.
+	// TCP and UDP can share the same port number.
+	h2Addr := transportSrv.h2Addr()
+	_, h2Port, _ := net.SplitHostPort(h2Addr)
+	h3Addr := "127.0.0.1:" + h2Port
+	if err := transportSrv.startH3(h3Addr, tlsCfg); err != nil {
 		transportSrv.close(context.Background())
 		httpSrv.close(context.Background())
 		t.Fatalf("start h3 transport: %v", err)
 	}
+
+	// Set transport_port in well-known to the shared port
+	port := 0
+	fmt.Sscanf(h2Port, "%d", &port)
+	auth.(*defaultAuth).SetTransportPort(port)
 
 	ts := &TestServer{
 		Auth:          auth,
@@ -80,8 +96,8 @@ func NewTestServer(t *testing.T) *TestServer {
 		Nodes:         mgr,
 		TLSConfig:     tlsCfg,
 		HTTPAddr:      httpSrv.addr(),
-		TransportAddr: transportSrv.h2Addr(),
-		H3Addr:        udpAddr,
+		TransportAddr: h2Addr,
+		H3Addr:        h3Addr,
 	}
 
 	t.Cleanup(func() { ts.Close() })
@@ -114,12 +130,23 @@ func (ts *TestServer) IssueTestNodeToken(nodeID string) string {
 	return token
 }
 
+// GoAwayAll sends a go_away message to all connected nodes.
+func (ts *TestServer) GoAwayAll(reason string) {
+	ts.Nodes.goAwayAll(reason, 0)
+}
+
+// SendControl sends an arbitrary control message to a specific node.
+func (ts *TestServer) SendControl(nodeID string, msg *pb.ControlMessage) error {
+	return ts.Nodes.sendControl(nodeID, msg)
+}
+
 // ---------------------------------------------------------------------------
 // TLS helpers
 // ---------------------------------------------------------------------------
 
 // generateTestTLS creates a self-signed TLS certificate in memory.
-func generateTestTLS(t *testing.T) *tls.Config {
+// Returns the tls.Config, the PEM-encoded certificate, and its SHA-256 fingerprint.
+func generateTestTLS(t *testing.T) (cfg *tls.Config, certPEM []byte, fingerprint string) {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -144,7 +171,7 @@ func generateTestTLS(t *testing.T) *tls.Config {
 		t.Fatalf("create certificate: %v", err)
 	}
 
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyDER, _ := x509.MarshalECPrivateKey(key)
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
@@ -153,20 +180,12 @@ func generateTestTLS(t *testing.T) *tls.Config {
 		t.Fatalf("load key pair: %v", err)
 	}
 
-	return &tls.Config{
+	hash := sha256.Sum256(certDER)
+	fingerprint = fmt.Sprintf("sha256:%x", hash)
+
+	cfg = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		NextProtos:   []string{"h3"},
 	}
-}
-
-// findFreeUDPPort binds to :0, records the port, then releases the socket.
-func findFreeUDPPort(t *testing.T) string {
-	t.Helper()
-	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("find free udp port: %v", err)
-	}
-	addr := conn.LocalAddr().String()
-	conn.Close()
-	return addr
+	return cfg, certPEM, fingerprint
 }

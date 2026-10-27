@@ -137,7 +137,7 @@ func TestTransportClose(t *testing.T) {
 func TestTransportH2AddrBeforeStart(t *testing.T) {
 	auth, _ := newTestAuth(t)
 	mgr := newNodeManager()
-	ts := newTransportServer(auth, auth, mgr)
+	ts := newTransportServer(auth, auth, mgr, defaultCodec)
 	if ts.h2Addr() != "" {
 		t.Errorf("h2Addr should be empty before start, got %q", ts.h2Addr())
 	}
@@ -146,7 +146,7 @@ func TestTransportH2AddrBeforeStart(t *testing.T) {
 func TestTransportStartAndAddr(t *testing.T) {
 	auth, _ := newTestAuth(t)
 	mgr := newNodeManager()
-	ts := newTransportServer(auth, auth, mgr)
+	ts := newTransportServer(auth, auth, mgr, defaultCodec)
 
 	if err := ts.start("127.0.0.1:0"); err != nil {
 		t.Fatalf("start: %v", err)
@@ -161,7 +161,7 @@ func TestTransportStartAndAddr(t *testing.T) {
 func TestTransportCloseNilServers(t *testing.T) {
 	auth, _ := newTestAuth(t)
 	mgr := newNodeManager()
-	ts := newTransportServer(auth, auth, mgr)
+	ts := newTransportServer(auth, auth, mgr, defaultCodec)
 	if err := ts.close(context.Background()); err != nil {
 		t.Errorf("close nil servers: %v", err)
 	}

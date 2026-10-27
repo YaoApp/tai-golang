@@ -17,19 +17,21 @@ type controlStream struct {
 	r      io.Reader
 	w      io.Writer
 	f      http.Flusher
+	codec  *FrameCodec
 	mgr    *nodeManager
 	auth   AuthProvider
 
 	mu sync.Mutex // serializes writes
 }
 
-func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *nodeManager, auth AuthProvider) *controlStream {
+func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *nodeManager, auth AuthProvider, codec *FrameCodec) *controlStream {
 	f, _ := w.(http.Flusher)
 	return &controlStream{
 		nodeID: nodeID,
 		r:      r,
 		w:      w,
 		f:      f,
+		codec:  codec,
 		mgr:    mgr,
 		auth:   auth,
 	}
@@ -47,7 +49,7 @@ func (cs *controlStream) run(ctx context.Context) {
 		default:
 		}
 
-		msg, err := readFrame(cs.r)
+		msg, err := cs.codec.ReadFrame(cs.r)
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("tai-sdk: control read error node=%s: %v", cs.nodeID, err)
@@ -118,7 +120,7 @@ func (cs *controlStream) handlePing(data []byte) {
 func (cs *controlStream) writeMsg(msg *pb.ControlMessage) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	if err := writeFrame(cs.w, msg); err != nil {
+	if err := cs.codec.WriteFrame(cs.w, msg); err != nil {
 		return err
 	}
 	if cs.f != nil {

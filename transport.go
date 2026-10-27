@@ -17,6 +17,7 @@ type transportServer struct {
 	auth    AuthProvider
 	tickets ticketValidator
 	mgr     *nodeManager
+	codec   *FrameCodec
 	mux     *http.ServeMux
 	handler http.Handler // authMiddleware(mux), shared by H2 and H3
 
@@ -35,11 +36,12 @@ type ticketValidator interface {
 
 // newTransportServer creates a transport server for Tai connections.
 // auth provides signing keys for Control stream handlers; tickets validates connect_tickets.
-func newTransportServer(auth AuthProvider, tickets ticketValidator, mgr *nodeManager) *transportServer {
+func newTransportServer(auth AuthProvider, tickets ticketValidator, mgr *nodeManager, codec *FrameCodec) *transportServer {
 	t := &transportServer{
 		auth:    auth,
 		tickets: tickets,
 		mgr:     mgr,
+		codec:   codec,
 		mux:     http.NewServeMux(),
 	}
 
@@ -54,28 +56,44 @@ func newTransportServer(auth AuthProvider, tickets ticketValidator, mgr *nodeMan
 	return t
 }
 
-// startH2 starts the HTTP/2 (h2c) listener on the given TCP address.
-func (t *transportServer) startH2(addr string) error {
+// startH2 starts the HTTP/2 listener on the given TCP address.
+// When tlsCfg is non-nil, the listener uses TLS (HTTP/2 over TLS);
+// otherwise it uses cleartext h2c (trusted networks only).
+func (t *transportServer) startH2(addr string, tlsCfg *tls.Config) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("h2 listen: %w", err)
 	}
 	t.h2Listener = ln
 
-	var protos http.Protocols
-	protos.SetHTTP1(true)
-	protos.SetUnencryptedHTTP2(true)
-	t.h2Server = &http.Server{
-		Handler:   t.handler,
-		Protocols: &protos,
-	}
-
-	go func() {
-		log.Printf("tai-sdk: H2 transport listening on %s (TCP)", ln.Addr())
-		if err := t.h2Server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("tai-sdk: H2 transport error: %v", err)
+	if tlsCfg != nil {
+		h2TLS := tlsCfg.Clone()
+		h2TLS.NextProtos = nil // ServeTLS adds "h2" and "http/1.1"
+		t.h2Server = &http.Server{
+			Handler:   t.handler,
+			TLSConfig: h2TLS,
 		}
-	}()
+		go func() {
+			log.Printf("tai-sdk: H2 transport listening on %s (TCP/TLS)", ln.Addr())
+			if err := t.h2Server.ServeTLS(ln, "", ""); err != nil && err != http.ErrServerClosed {
+				log.Printf("tai-sdk: H2 transport error: %v", err)
+			}
+		}()
+	} else {
+		var protos http.Protocols
+		protos.SetHTTP1(true)
+		protos.SetUnencryptedHTTP2(true)
+		t.h2Server = &http.Server{
+			Handler:   t.handler,
+			Protocols: &protos,
+		}
+		go func() {
+			log.Printf("tai-sdk: H2 transport listening on %s (TCP/h2c)", ln.Addr())
+			if err := t.h2Server.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Printf("tai-sdk: H2 transport error: %v", err)
+			}
+		}()
+	}
 	return nil
 }
 
@@ -96,9 +114,9 @@ func (t *transportServer) startH3(addr string, tlsCfg *tls.Config) error {
 	return nil
 }
 
-// start starts H2 only (for tests without TLS).
+// start starts H2 only in h2c mode (for tests without TLS).
 func (t *transportServer) start(addr string) error {
-	return t.startH2(addr)
+	return t.startH2(addr, nil)
 }
 
 // h2Addr returns the H2 (TCP) listener address.
@@ -172,7 +190,7 @@ func (t *transportServer) handleControl(w http.ResponseWriter, r *http.Request) 
 		f.Flush()
 	}
 
-	cs := newControlStream(nodeID, r.Body, w, t.mgr, t.auth)
+	cs := newControlStream(nodeID, r.Body, w, t.mgr, t.auth, t.codec)
 	cs.run(r.Context())
 	log.Printf("tai-sdk: Control stream closed for node %s", nodeID)
 }

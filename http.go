@@ -164,6 +164,7 @@ type refreshRequest struct {
 
 type refreshResponse struct {
 	NodeToken string `json:"node_token"`
+	ExpiresIn int    `json:"expires_in"` // seconds until token expiry
 }
 
 func (s *httpServer) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +181,10 @@ func (s *httpServer) handleTokenRefresh(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(refreshResponse{NodeToken: newToken})
+	json.NewEncoder(w).Encode(refreshResponse{
+		NodeToken: newToken,
+		ExpiresIn: 7 * 24 * 3600, // matches IssueNodeToken TTL
+	})
 }
 
 // ---------------------------------------------------------------------------

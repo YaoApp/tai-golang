@@ -59,10 +59,29 @@ type transportTestCase struct {
 	url       string              // base URL for transport endpoints
 }
 
+// h2TLSClient returns an HTTP/2-over-TLS client that trusts the test server's self-signed cert.
+func h2TLSClient(serverTLS *tls.Config) *http.Client {
+	pool := x509.NewCertPool()
+	for _, cert := range serverTLS.Certificates {
+		if len(cert.Certificate) > 0 {
+			c, _ := x509.ParseCertificate(cert.Certificate[0])
+			if c != nil {
+				pool.AddCert(c)
+			}
+		}
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig:   &tls.Config{RootCAs: pool},
+			ForceAttemptHTTP2: true,
+		},
+	}
+}
+
 // protocolCases returns H2 and H3 test cases for the given TestServer.
 func protocolCases(ts *TestServer) []transportTestCase {
 	return []transportTestCase{
-		{"H2", func() *http.Client { return h2cClient() }, "http://" + ts.TransportAddr},
+		{"H2", func() *http.Client { return h2TLSClient(ts.TLSConfig) }, "https://" + ts.TransportAddr},
 		{"H3", func() *http.Client { return h3TestClient(ts.TLSConfig) }, ts.H3URL()},
 	}
 }
@@ -487,5 +506,61 @@ func TestControlStreamCallback(t *testing.T) {
 
 			pw.Close()
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NewFrameCodec unit tests
+// ---------------------------------------------------------------------------
+
+func TestNewFrameCodecDefault(t *testing.T) {
+	c, err := NewFrameCodec(0)
+	if err != nil {
+		t.Fatalf("NewFrameCodec(0): %v", err)
+	}
+	if c.MaxSize() != DefaultMaxFrameSize {
+		t.Errorf("MaxSize() = %d, want %d", c.MaxSize(), DefaultMaxFrameSize)
+	}
+}
+
+func TestNewFrameCodecCustom(t *testing.T) {
+	c, err := NewFrameCodec(1 << 20) // 1 MB
+	if err != nil {
+		t.Fatalf("NewFrameCodec(1MB): %v", err)
+	}
+	if c.MaxSize() != 1<<20 {
+		t.Errorf("MaxSize() = %d, want %d", c.MaxSize(), 1<<20)
+	}
+}
+
+func TestNewFrameCodecTooSmall(t *testing.T) {
+	_, err := NewFrameCodec(1024)
+	if err == nil {
+		t.Error("expected error for frame size below minimum")
+	}
+}
+
+func TestNewFrameCodecTooLarge(t *testing.T) {
+	_, err := NewFrameCodec(128 * 1024 * 1024)
+	if err == nil {
+		t.Error("expected error for frame size above maximum")
+	}
+}
+
+func TestFrameCodecWriteRead(t *testing.T) {
+	c, _ := NewFrameCodec(256 * 1024)
+	var buf bytes.Buffer
+
+	msg := &pb.ControlMessage{Kind: "test", Data: []byte("hello")}
+	if err := c.WriteFrame(&buf, msg); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+
+	got, err := c.ReadFrame(&buf)
+	if err != nil {
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	if got.Kind != "test" {
+		t.Errorf("Kind = %q, want test", got.Kind)
 	}
 }

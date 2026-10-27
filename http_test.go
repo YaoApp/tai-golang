@@ -29,8 +29,8 @@ func TestWellKnownEndpoint(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if info.TransportPort != 6099 {
-		t.Errorf("TransportPort=%d, want 6099", info.TransportPort)
+	if info.TransportPort <= 0 {
+		t.Errorf("TransportPort=%d, want >0", info.TransportPort)
 	}
 	if info.Version == "" {
 		t.Error("Version should not be empty")

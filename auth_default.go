@@ -43,13 +43,30 @@ func DefaultAuth(privateKey ed25519.PrivateKey) AuthProvider {
 }
 
 type defaultAuth struct {
-	privateKey   ed25519.PrivateKey
-	publicKey    ed25519.PublicKey
-	keyID        string
-	ticketSecret []byte
+	privateKey    ed25519.PrivateKey
+	publicKey     ed25519.PublicKey
+	keyID         string
+	ticketSecret  []byte
+	tlsInfo       *TLSInfo
+	transportPort int // overrides 6099 when non-zero (for tests with ephemeral ports)
 
 	mu          sync.Mutex
 	usedTickets map[string]time.Time // ticket -> expiry, for one-time use enforcement
+}
+
+// SetTLS configures TLS information returned in well-known responses.
+// Call this after DefaultAuth() if the transport uses TLS.
+func (a *defaultAuth) SetTLS(caCertPEM string, fingerprint string) {
+	a.tlsInfo = &TLSInfo{
+		CACertificate: caCertPEM,
+		Fingerprint:   fingerprint,
+	}
+}
+
+// SetTransportPort overrides the transport_port in well-known responses.
+// Used by TestServer to advertise ephemeral ports instead of the default 6099.
+func (a *defaultAuth) SetTransportPort(port int) {
+	a.transportPort = port
 }
 
 // ValidateNodeToken verifies an Ed25519-signed JWT node_token.
@@ -171,10 +188,16 @@ func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
 
 // WellKnownInfo returns default transport metadata.
 // HTTP/3 is listed first as the primary protocol.
+// TLS info is included when configured via SetTLS.
 func (a *defaultAuth) WellKnownInfo() *WellKnownResponse {
+	port := 6099
+	if a.transportPort != 0 {
+		port = a.transportPort
+	}
 	return &WellKnownResponse{
-		TransportPort: 6099,
+		TransportPort: port,
 		Protocols:     []string{"HTTP/3", "HTTP/2"},
+		TLS:           a.tlsInfo,
 		Version:       "0.1.0",
 	}
 }

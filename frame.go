@@ -10,20 +10,44 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// maxFrameSize is the maximum allowed frame payload size (16 MB).
-const maxFrameSize = 16 * 1024 * 1024
+// DefaultMaxFrameSize is the default maximum frame payload size (16 MB).
+const DefaultMaxFrameSize = 16 * 1024 * 1024
 
-// ErrFrameTooLarge is returned when a frame exceeds maxFrameSize.
+const (
+	minFrameSize = 64 * 1024        // 64 KB
+	maxFrameSize = 64 * 1024 * 1024 // 64 MB upper bound
+)
+
+// ErrFrameTooLarge is returned when a frame exceeds the configured max size.
 var ErrFrameTooLarge = errors.New("frame too large")
 
-// writeFrame writes a length-prefixed ControlMessage to w.
+// FrameCodec reads and writes length-prefixed ControlMessage frames.
+// The maximum payload size is configurable; use NewFrameCodec to create one.
+type FrameCodec struct {
+	maxSize int
+}
+
+// NewFrameCodec creates a FrameCodec with the given maximum frame payload size.
+// A maxSize of 0 uses DefaultMaxFrameSize (16 MB).
+// Returns an error if maxSize is outside the allowed range [64 KB, 64 MB].
+func NewFrameCodec(maxSize int) (*FrameCodec, error) {
+	if maxSize == 0 {
+		maxSize = DefaultMaxFrameSize
+	}
+	if maxSize < minFrameSize || maxSize > maxFrameSize {
+		return nil, fmt.Errorf("maxFrameSize %d out of range [%d, %d]", maxSize, minFrameSize, maxFrameSize)
+	}
+	return &FrameCodec{maxSize: maxSize}, nil
+}
+
+// WriteFrame writes a length-prefixed ControlMessage to w.
 // Wire format: 4-byte big-endian length + protobuf payload.
-func writeFrame(w io.Writer, msg *pb.ControlMessage) error {
+func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.ControlMessage) error {
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if len(data) > maxFrameSize {
+	if len(data) > fc.maxSize {
 		return ErrFrameTooLarge
 	}
 
@@ -38,16 +62,16 @@ func writeFrame(w io.Writer, msg *pb.ControlMessage) error {
 	return nil
 }
 
-// readFrame reads a length-prefixed ControlMessage from r.
+// ReadFrame reads a length-prefixed ControlMessage from r.
 // Returns io.EOF when the stream ends cleanly.
-func readFrame(r io.Reader) (*pb.ControlMessage, error) {
+func (fc *FrameCodec) ReadFrame(r io.Reader) (*pb.ControlMessage, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(r, header); err != nil {
 		return nil, err
 	}
 
 	length := binary.BigEndian.Uint32(header)
-	if length > uint32(maxFrameSize) {
+	if length > uint32(fc.maxSize) {
 		return nil, ErrFrameTooLarge
 	}
 
@@ -61,4 +85,22 @@ func readFrame(r io.Reader) (*pb.ControlMessage, error) {
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return msg, nil
+}
+
+// MaxSize returns the configured maximum frame payload size.
+func (fc *FrameCodec) MaxSize() int {
+	return fc.maxSize
+}
+
+// defaultCodec is used by the package-level writeFrame/readFrame functions.
+var defaultCodec = &FrameCodec{maxSize: DefaultMaxFrameSize}
+
+// writeFrame writes a length-prefixed ControlMessage using the default codec.
+func writeFrame(w io.Writer, msg *pb.ControlMessage) error {
+	return defaultCodec.WriteFrame(w, msg)
+}
+
+// readFrame reads a length-prefixed ControlMessage using the default codec.
+func readFrame(r io.Reader) (*pb.ControlMessage, error) {
+	return defaultCodec.ReadFrame(r)
 }
