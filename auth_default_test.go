@@ -211,8 +211,14 @@ func TestWellKnownInfo(t *testing.T) {
 	if info.TransportPort != 6099 {
 		t.Errorf("TransportPort=%d, want 6099", info.TransportPort)
 	}
-	if len(info.Protocols) == 0 {
-		t.Error("Protocols should not be empty")
+	if len(info.Protocols) != 2 {
+		t.Fatalf("Protocols=%v, want [HTTP/3 HTTP/2]", info.Protocols)
+	}
+	if info.Protocols[0] != "HTTP/3" {
+		t.Errorf("Protocols[0]=%q, want HTTP/3 (primary)", info.Protocols[0])
+	}
+	if info.Protocols[1] != "HTTP/2" {
+		t.Errorf("Protocols[1]=%q, want HTTP/2 (fallback)", info.Protocols[1])
 	}
 	if info.Version == "" {
 		t.Error("Version should not be empty")

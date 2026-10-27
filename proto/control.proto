@@ -29,6 +29,14 @@ message Register {
   string   version      = 2; // Tai binary version
   Hardware hardware     = 3; // Hardware information
   repeated string capabilities = 4; // e.g. ["session","tunnel","realtime","container"]
+  repeated ContainerRuntime container_runtimes = 5; // Available container runtimes
+}
+
+// ContainerRuntime describes a container runtime available on the node.
+message ContainerRuntime {
+  string name    = 1; // "docker" | "podman" | "containerd" | "nsjail"
+  string version = 2; // e.g. "27.1.0"
+  string socket  = 3; // e.g. "/var/run/docker.sock"
 }
 
 // RegisterAck is the server response to a successful Register.

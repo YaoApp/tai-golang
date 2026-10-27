@@ -2,23 +2,30 @@ package tai
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"sync"
+
+	"github.com/quic-go/quic-go/http3"
 )
 
-// transportServer handles Tai connections on port 6099 over HTTP/2.
-// Connections are authenticated via connect_ticket in the first request.
+// transportServer handles Tai connections over HTTP/3 (QUIC, primary) and
+// HTTP/2 (TCP, fallback). Both protocols share the same http.Handler.
 type transportServer struct {
-	auth     ticketValidator
-	mux      *http.ServeMux
-	server   *http.Server
-	listener net.Listener
+	auth    AuthProvider
+	tickets ticketValidator
+	mgr     *nodeManager
+	mux     *http.ServeMux
+	handler http.Handler // authMiddleware(mux), shared by H2 and H3
 
-	mu    sync.Mutex
-	nodes map[string]*nodeConn // nodeID -> active connection state
+	// H2 (TCP)
+	h2Server   *http.Server
+	h2Listener net.Listener
+
+	// H3 (QUIC/UDP)
+	h3Server *http3.Server
 }
 
 // ticketValidator is the subset of AuthProvider needed by the transport layer.
@@ -26,18 +33,14 @@ type ticketValidator interface {
 	ValidateConnectTicket(ticket string) (nodeID string, connType string, err error)
 }
 
-// nodeConn tracks a connected Tai node's transport state.
-type nodeConn struct {
-	nodeID   string
-	connType string
-}
-
 // newTransportServer creates a transport server for Tai connections.
-func newTransportServer(auth ticketValidator) *transportServer {
+// auth provides signing keys for Control stream handlers; tickets validates connect_tickets.
+func newTransportServer(auth AuthProvider, tickets ticketValidator, mgr *nodeManager) *transportServer {
 	t := &transportServer{
-		auth:  auth,
-		mux:   http.NewServeMux(),
-		nodes: make(map[string]*nodeConn),
+		auth:    auth,
+		tickets: tickets,
+		mgr:     mgr,
+		mux:     http.NewServeMux(),
 	}
 
 	// Control stream endpoint
@@ -47,49 +50,79 @@ func newTransportServer(auth ticketValidator) *transportServer {
 	t.mux.HandleFunc("POST /v1/tai/session/{sessionID}/control", t.handleSessionControl)
 	t.mux.HandleFunc("POST /v1/tai/session/{sessionID}/data", t.handleSessionData)
 
+	t.handler = t.authMiddleware(t.mux)
 	return t
 }
 
-// start begins listening on the given address with h2c (HTTP/2 cleartext).
-// TLS support will be added in a later phase.
-func (t *transportServer) start(addr string) error {
+// startH2 starts the HTTP/2 (h2c) listener on the given TCP address.
+func (t *transportServer) startH2(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("transport listen: %w", err)
+		return fmt.Errorf("h2 listen: %w", err)
 	}
-	t.listener = ln
+	t.h2Listener = ln
 
 	var protos http.Protocols
 	protos.SetHTTP1(true)
 	protos.SetUnencryptedHTTP2(true)
-	t.server = &http.Server{
-		Handler:   t.authMiddleware(t.mux),
+	t.h2Server = &http.Server{
+		Handler:   t.handler,
 		Protocols: &protos,
 	}
 
 	go func() {
-		log.Printf("tai-sdk: Transport server listening on %s (h2c)", ln.Addr())
-		if err := t.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("tai-sdk: Transport server error: %v", err)
+		log.Printf("tai-sdk: H2 transport listening on %s (TCP)", ln.Addr())
+		if err := t.h2Server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("tai-sdk: H2 transport error: %v", err)
 		}
 	}()
 	return nil
 }
 
-// addr returns the listener address.
-func (t *transportServer) addr() string {
-	if t.listener == nil {
-		return ""
+// startH3 starts the HTTP/3 (QUIC) listener on the given UDP address.
+func (t *transportServer) startH3(addr string, tlsCfg *tls.Config) error {
+	t.h3Server = &http3.Server{
+		Addr:      addr,
+		Handler:   t.handler,
+		TLSConfig: tlsCfg,
 	}
-	return t.listener.Addr().String()
+
+	go func() {
+		log.Printf("tai-sdk: H3 transport listening on %s (QUIC)", addr)
+		if err := t.h3Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("tai-sdk: H3 transport error: %v", err)
+		}
+	}()
+	return nil
 }
 
-// close gracefully shuts down the transport server.
-func (t *transportServer) close(ctx context.Context) error {
-	if t.server == nil {
-		return nil
+// start starts H2 only (for tests without TLS).
+func (t *transportServer) start(addr string) error {
+	return t.startH2(addr)
+}
+
+// h2Addr returns the H2 (TCP) listener address.
+func (t *transportServer) h2Addr() string {
+	if t.h2Listener == nil {
+		return ""
 	}
-	return t.server.Shutdown(ctx)
+	return t.h2Listener.Addr().String()
+}
+
+// close gracefully shuts down both H2 and H3 servers.
+func (t *transportServer) close(ctx context.Context) error {
+	var firstErr error
+	if t.h3Server != nil {
+		if err := t.h3Server.Close(); err != nil {
+			firstErr = err
+		}
+	}
+	if t.h2Server != nil {
+		if err := t.h2Server.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +145,7 @@ func (t *transportServer) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		nodeID, connType, err := t.auth.ValidateConnectTicket(ticket)
+		nodeID, connType, err := t.tickets.ValidateConnectTicket(ticket)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
@@ -125,25 +158,22 @@ func (t *transportServer) authMiddleware(next http.Handler) http.Handler {
 }
 
 // ---------------------------------------------------------------------------
-// Endpoint stubs (implementation in PLAN 3)
+// Stream handlers
 // ---------------------------------------------------------------------------
 
-// handleControl handles the L1 Control stream.
+// handleControl handles the L1 Control stream with full message loop.
 func (t *transportServer) handleControl(w http.ResponseWriter, r *http.Request) {
 	nodeID := r.Context().Value(ctxNodeID).(string)
 	log.Printf("tai-sdk: Control stream opened for node %s", nodeID)
 
-	// Flush headers to establish the bidirectional stream
 	w.Header().Set("Content-Type", "application/x-protobuf")
-	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(http.StatusOK)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
 
-	// PLAN 3 will implement the full Control stream message loop.
-	// For now, keep the connection open until the client disconnects.
-	<-r.Context().Done()
+	cs := newControlStream(nodeID, r.Body, w, t.mgr, t.auth)
+	cs.run(r.Context())
 	log.Printf("tai-sdk: Control stream closed for node %s", nodeID)
 }
 

@@ -91,10 +91,11 @@ func (a *defaultAuth) RefreshNodeToken(oldToken string) (string, error) {
 	return a.IssueNodeToken(info.NodeID)
 }
 
-// IssueConnectTicket creates a 30-second HMAC-signed ticket.
+// IssueConnectTicket creates a 30-second HMAC-signed ticket with a random nonce.
 func (a *defaultAuth) IssueConnectTicket(nodeID string, connType string) (*ConnectTicket, error) {
 	expiry := time.Now().Add(30 * time.Second)
-	payload := fmt.Sprintf("%s|%s|%d", nodeID, connType, expiry.Unix())
+	nonce := generateID("tk")
+	payload := fmt.Sprintf("%s|%s|%d|%s", nodeID, connType, expiry.Unix(), nonce)
 	sig := a.hmacSign([]byte(payload))
 	ticket := base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + sig))
 	return &ConnectTicket{Ticket: ticket, ExpiresIn: 30}, nil
@@ -117,8 +118,8 @@ func (a *defaultAuth) ValidateConnectTicket(ticket string) (nodeID string, connT
 		return "", "", ErrTicketInvalid
 	}
 
-	fields := splitN(payload, "|", 3)
-	if len(fields) != 3 {
+	fields := splitN(payload, "|", 4)
+	if len(fields) < 3 {
 		return "", "", ErrTicketInvalid
 	}
 	nodeID = fields[0]
@@ -169,10 +170,11 @@ func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
 }
 
 // WellKnownInfo returns default transport metadata.
+// HTTP/3 is listed first as the primary protocol.
 func (a *defaultAuth) WellKnownInfo() *WellKnownResponse {
 	return &WellKnownResponse{
 		TransportPort: 6099,
-		Protocols:     []string{"HTTP/2"},
+		Protocols:     []string{"HTTP/3", "HTTP/2"},
 		Version:       "0.1.0",
 	}
 }

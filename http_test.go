@@ -2,11 +2,13 @@ package tai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWellKnownEndpoint(t *testing.T) {
@@ -253,6 +255,61 @@ func TestHeartbeatEndpoint_BadBody(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status=%d, want 400", resp.StatusCode)
+	}
+}
+
+func TestHTTPServerAddrBeforeStart(t *testing.T) {
+	auth, _ := newTestAuth(t)
+	s := newHTTPServer(auth)
+	if s.addr() != "" {
+		t.Errorf("addr should be empty before start, got %q", s.addr())
+	}
+}
+
+func TestHTTPListenAndServe(t *testing.T) {
+	auth, _ := newTestAuth(t)
+	s := newHTTPServer(auth)
+
+	// Start in background goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.listenAndServe("127.0.0.1:0")
+	}()
+
+	// Wait for listener to be ready
+	for i := 0; i < 50; i++ {
+		if s.addr() != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if s.addr() == "" {
+		t.Fatal("server did not start")
+	}
+
+	// Hit the well-known endpoint
+	resp, err := http.Get("http://" + s.addr() + "/.well-known/yao-transport")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status=%d", resp.StatusCode)
+	}
+
+	// Shutdown
+	s.close(context.Background())
+
+	if err := <-errCh; err != nil && err != http.ErrServerClosed {
+		t.Errorf("listenAndServe: %v", err)
+	}
+}
+
+func TestHTTPServerCloseNil(t *testing.T) {
+	auth, _ := newTestAuth(t)
+	s := newHTTPServer(auth)
+	if err := s.close(context.Background()); err != nil {
+		t.Errorf("close nil: %v", err)
 	}
 }
 

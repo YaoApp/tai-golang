@@ -28,15 +28,16 @@ const (
 
 // ComputerStatus is sent periodically (default 60s) with system metrics.
 type ComputerStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // Unix timestamp
-	Cpu           *CPUInfo               `protobuf:"bytes,2,opt,name=cpu,proto3" json:"cpu,omitempty"`
-	Memory        *MemInfo               `protobuf:"bytes,3,opt,name=memory,proto3" json:"memory,omitempty"`
-	Disk          *DiskInfo              `protobuf:"bytes,4,opt,name=disk,proto3" json:"disk,omitempty"`
-	Network       *NetInfo               `protobuf:"bytes,5,opt,name=network,proto3" json:"network,omitempty"`
-	UptimeSec     uint64                 `protobuf:"varint,6,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState    `protogen:"open.v1"`
+	Timestamp         int64                     `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // Unix timestamp
+	Cpu               *CPUInfo                  `protobuf:"bytes,2,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	Memory            *MemInfo                  `protobuf:"bytes,3,opt,name=memory,proto3" json:"memory,omitempty"`
+	Disk              *DiskInfo                 `protobuf:"bytes,4,opt,name=disk,proto3" json:"disk,omitempty"`
+	Network           *NetInfo                  `protobuf:"bytes,5,opt,name=network,proto3" json:"network,omitempty"`
+	UptimeSec         uint64                    `protobuf:"varint,6,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
+	ContainerRuntimes []*ContainerRuntimeStatus `protobuf:"bytes,7,rep,name=container_runtimes,json=containerRuntimes,proto3" json:"container_runtimes,omitempty"` // Runtime health
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ComputerStatus) Reset() {
@@ -111,6 +112,90 @@ func (x *ComputerStatus) GetUptimeSec() uint64 {
 	return 0
 }
 
+func (x *ComputerStatus) GetContainerRuntimes() []*ContainerRuntimeStatus {
+	if x != nil {
+		return x.ContainerRuntimes
+	}
+	return nil
+}
+
+// ContainerRuntimeStatus reports the current state of a container runtime.
+type ContainerRuntimeStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`              // "docker" | "podman" | "containerd" | "nsjail"
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`        // e.g. "27.1.0"
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`          // "running" | "stopped" | "degraded"
+	Containers    uint32                 `protobuf:"varint,4,opt,name=containers,proto3" json:"containers,omitempty"` // Total managed containers
+	Running       uint32                 `protobuf:"varint,5,opt,name=running,proto3" json:"running,omitempty"`       // Currently running containers
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContainerRuntimeStatus) Reset() {
+	*x = ContainerRuntimeStatus{}
+	mi := &file_computer_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContainerRuntimeStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContainerRuntimeStatus) ProtoMessage() {}
+
+func (x *ContainerRuntimeStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_computer_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContainerRuntimeStatus.ProtoReflect.Descriptor instead.
+func (*ContainerRuntimeStatus) Descriptor() ([]byte, []int) {
+	return file_computer_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ContainerRuntimeStatus) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ContainerRuntimeStatus) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ContainerRuntimeStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ContainerRuntimeStatus) GetContainers() uint32 {
+	if x != nil {
+		return x.Containers
+	}
+	return 0
+}
+
+func (x *ContainerRuntimeStatus) GetRunning() uint32 {
+	if x != nil {
+		return x.Running
+	}
+	return 0
+}
+
 type CPUInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UsagePercent  float32                `protobuf:"fixed32,1,opt,name=usage_percent,json=usagePercent,proto3" json:"usage_percent,omitempty"` // 0-100
@@ -122,7 +207,7 @@ type CPUInfo struct {
 
 func (x *CPUInfo) Reset() {
 	*x = CPUInfo{}
-	mi := &file_computer_proto_msgTypes[1]
+	mi := &file_computer_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -134,7 +219,7 @@ func (x *CPUInfo) String() string {
 func (*CPUInfo) ProtoMessage() {}
 
 func (x *CPUInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[1]
+	mi := &file_computer_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -147,7 +232,7 @@ func (x *CPUInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CPUInfo.ProtoReflect.Descriptor instead.
 func (*CPUInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{1}
+	return file_computer_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CPUInfo) GetUsagePercent() float32 {
@@ -182,7 +267,7 @@ type MemInfo struct {
 
 func (x *MemInfo) Reset() {
 	*x = MemInfo{}
-	mi := &file_computer_proto_msgTypes[2]
+	mi := &file_computer_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -194,7 +279,7 @@ func (x *MemInfo) String() string {
 func (*MemInfo) ProtoMessage() {}
 
 func (x *MemInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[2]
+	mi := &file_computer_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -207,7 +292,7 @@ func (x *MemInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemInfo.ProtoReflect.Descriptor instead.
 func (*MemInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{2}
+	return file_computer_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MemInfo) GetTotalMb() uint64 {
@@ -242,7 +327,7 @@ type DiskInfo struct {
 
 func (x *DiskInfo) Reset() {
 	*x = DiskInfo{}
-	mi := &file_computer_proto_msgTypes[3]
+	mi := &file_computer_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -254,7 +339,7 @@ func (x *DiskInfo) String() string {
 func (*DiskInfo) ProtoMessage() {}
 
 func (x *DiskInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[3]
+	mi := &file_computer_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -267,7 +352,7 @@ func (x *DiskInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskInfo.ProtoReflect.Descriptor instead.
 func (*DiskInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{3}
+	return file_computer_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DiskInfo) GetTotalMb() uint64 {
@@ -301,7 +386,7 @@ type NetInfo struct {
 
 func (x *NetInfo) Reset() {
 	*x = NetInfo{}
-	mi := &file_computer_proto_msgTypes[4]
+	mi := &file_computer_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -313,7 +398,7 @@ func (x *NetInfo) String() string {
 func (*NetInfo) ProtoMessage() {}
 
 func (x *NetInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[4]
+	mi := &file_computer_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -326,7 +411,7 @@ func (x *NetInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetInfo.ProtoReflect.Descriptor instead.
 func (*NetInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{4}
+	return file_computer_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *NetInfo) GetRxBytesSec() uint64 {
@@ -355,7 +440,7 @@ type ComputerEvent struct {
 
 func (x *ComputerEvent) Reset() {
 	*x = ComputerEvent{}
-	mi := &file_computer_proto_msgTypes[5]
+	mi := &file_computer_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +452,7 @@ func (x *ComputerEvent) String() string {
 func (*ComputerEvent) ProtoMessage() {}
 
 func (x *ComputerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[5]
+	mi := &file_computer_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +465,7 @@ func (x *ComputerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComputerEvent.ProtoReflect.Descriptor instead.
 func (*ComputerEvent) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{5}
+	return file_computer_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ComputerEvent) GetEventType() string {
@@ -416,7 +501,7 @@ type ImageInfo struct {
 
 func (x *ImageInfo) Reset() {
 	*x = ImageInfo{}
-	mi := &file_computer_proto_msgTypes[6]
+	mi := &file_computer_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +513,7 @@ func (x *ImageInfo) String() string {
 func (*ImageInfo) ProtoMessage() {}
 
 func (x *ImageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[6]
+	mi := &file_computer_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +526,7 @@ func (x *ImageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageInfo.ProtoReflect.Descriptor instead.
 func (*ImageInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{6}
+	return file_computer_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ImageInfo) GetImage() string {
@@ -485,7 +570,7 @@ type ImageList struct {
 
 func (x *ImageList) Reset() {
 	*x = ImageList{}
-	mi := &file_computer_proto_msgTypes[7]
+	mi := &file_computer_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +582,7 @@ func (x *ImageList) String() string {
 func (*ImageList) ProtoMessage() {}
 
 func (x *ImageList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[7]
+	mi := &file_computer_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +595,7 @@ func (x *ImageList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageList.ProtoReflect.Descriptor instead.
 func (*ImageList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{7}
+	return file_computer_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ImageList) GetImages() []*ImageInfo {
@@ -531,7 +616,7 @@ type ImagePull struct {
 
 func (x *ImagePull) Reset() {
 	*x = ImagePull{}
-	mi := &file_computer_proto_msgTypes[8]
+	mi := &file_computer_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +628,7 @@ func (x *ImagePull) String() string {
 func (*ImagePull) ProtoMessage() {}
 
 func (x *ImagePull) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[8]
+	mi := &file_computer_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,7 +641,7 @@ func (x *ImagePull) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImagePull.ProtoReflect.Descriptor instead.
 func (*ImagePull) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{8}
+	return file_computer_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ImagePull) GetImage() string {
@@ -591,7 +676,7 @@ type ImagePulled struct {
 
 func (x *ImagePulled) Reset() {
 	*x = ImagePulled{}
-	mi := &file_computer_proto_msgTypes[9]
+	mi := &file_computer_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -603,7 +688,7 @@ func (x *ImagePulled) String() string {
 func (*ImagePulled) ProtoMessage() {}
 
 func (x *ImagePulled) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[9]
+	mi := &file_computer_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -616,7 +701,7 @@ func (x *ImagePulled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImagePulled.ProtoReflect.Descriptor instead.
 func (*ImagePulled) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{9}
+	return file_computer_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ImagePulled) GetImage() string {
@@ -651,7 +736,7 @@ type ImagePullProgress struct {
 
 func (x *ImagePullProgress) Reset() {
 	*x = ImagePullProgress{}
-	mi := &file_computer_proto_msgTypes[10]
+	mi := &file_computer_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +748,7 @@ func (x *ImagePullProgress) String() string {
 func (*ImagePullProgress) ProtoMessage() {}
 
 func (x *ImagePullProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[10]
+	mi := &file_computer_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +761,7 @@ func (x *ImagePullProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImagePullProgress.ProtoReflect.Descriptor instead.
 func (*ImagePullProgress) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{10}
+	return file_computer_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ImagePullProgress) GetImage() string {
@@ -711,7 +796,7 @@ type ImageDelete struct {
 
 func (x *ImageDelete) Reset() {
 	*x = ImageDelete{}
-	mi := &file_computer_proto_msgTypes[11]
+	mi := &file_computer_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +808,7 @@ func (x *ImageDelete) String() string {
 func (*ImageDelete) ProtoMessage() {}
 
 func (x *ImageDelete) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[11]
+	mi := &file_computer_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +821,7 @@ func (x *ImageDelete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageDelete.ProtoReflect.Descriptor instead.
 func (*ImageDelete) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{11}
+	return file_computer_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ImageDelete) GetImage() string {
@@ -770,7 +855,7 @@ type ImageDeleted struct {
 
 func (x *ImageDeleted) Reset() {
 	*x = ImageDeleted{}
-	mi := &file_computer_proto_msgTypes[12]
+	mi := &file_computer_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +867,7 @@ func (x *ImageDeleted) String() string {
 func (*ImageDeleted) ProtoMessage() {}
 
 func (x *ImageDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[12]
+	mi := &file_computer_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +880,7 @@ func (x *ImageDeleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageDeleted.ProtoReflect.Descriptor instead.
 func (*ImageDeleted) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{12}
+	return file_computer_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ImageDeleted) GetImage() string {
@@ -821,7 +906,7 @@ type ImagePrune struct {
 
 func (x *ImagePrune) Reset() {
 	*x = ImagePrune{}
-	mi := &file_computer_proto_msgTypes[13]
+	mi := &file_computer_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -833,7 +918,7 @@ func (x *ImagePrune) String() string {
 func (*ImagePrune) ProtoMessage() {}
 
 func (x *ImagePrune) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[13]
+	mi := &file_computer_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -846,7 +931,7 @@ func (x *ImagePrune) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImagePrune.ProtoReflect.Descriptor instead.
 func (*ImagePrune) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{13}
+	return file_computer_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ImagePrune) GetKeepLatest() uint32 {
@@ -866,7 +951,7 @@ type ImagePruned struct {
 
 func (x *ImagePruned) Reset() {
 	*x = ImagePruned{}
-	mi := &file_computer_proto_msgTypes[14]
+	mi := &file_computer_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -878,7 +963,7 @@ func (x *ImagePruned) String() string {
 func (*ImagePruned) ProtoMessage() {}
 
 func (x *ImagePruned) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[14]
+	mi := &file_computer_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -891,7 +976,7 @@ func (x *ImagePruned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImagePruned.ProtoReflect.Descriptor instead.
 func (*ImagePruned) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{14}
+	return file_computer_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ImagePruned) GetFreedMb() uint64 {
@@ -914,13 +999,14 @@ type ContainerInfo struct {
 	Image         string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
 	State         string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"` // "created" | "running" | "stopped" | "paused"
 	Ports         []*PortMapping         `protobuf:"bytes,4,rep,name=ports,proto3" json:"ports,omitempty"`
+	Runtime       string                 `protobuf:"bytes,5,opt,name=runtime,proto3" json:"runtime,omitempty"` // "docker" | "podman" | "containerd"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContainerInfo) Reset() {
 	*x = ContainerInfo{}
-	mi := &file_computer_proto_msgTypes[15]
+	mi := &file_computer_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -932,7 +1018,7 @@ func (x *ContainerInfo) String() string {
 func (*ContainerInfo) ProtoMessage() {}
 
 func (x *ContainerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[15]
+	mi := &file_computer_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -945,7 +1031,7 @@ func (x *ContainerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerInfo.ProtoReflect.Descriptor instead.
 func (*ContainerInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{15}
+	return file_computer_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ContainerInfo) GetId() string {
@@ -976,6 +1062,13 @@ func (x *ContainerInfo) GetPorts() []*PortMapping {
 	return nil
 }
 
+func (x *ContainerInfo) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
 type PortMapping struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	HostPort      uint32                 `protobuf:"varint,1,opt,name=host_port,json=hostPort,proto3" json:"host_port,omitempty"`
@@ -987,7 +1080,7 @@ type PortMapping struct {
 
 func (x *PortMapping) Reset() {
 	*x = PortMapping{}
-	mi := &file_computer_proto_msgTypes[16]
+	mi := &file_computer_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +1092,7 @@ func (x *PortMapping) String() string {
 func (*PortMapping) ProtoMessage() {}
 
 func (x *PortMapping) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[16]
+	mi := &file_computer_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1105,7 @@ func (x *PortMapping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortMapping.ProtoReflect.Descriptor instead.
 func (*PortMapping) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{16}
+	return file_computer_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PortMapping) GetHostPort() uint32 {
@@ -1049,7 +1142,7 @@ type ContainerList struct {
 
 func (x *ContainerList) Reset() {
 	*x = ContainerList{}
-	mi := &file_computer_proto_msgTypes[17]
+	mi := &file_computer_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1154,7 @@ func (x *ContainerList) String() string {
 func (*ContainerList) ProtoMessage() {}
 
 func (x *ContainerList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[17]
+	mi := &file_computer_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1167,7 @@ func (x *ContainerList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerList.ProtoReflect.Descriptor instead.
 func (*ContainerList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{17}
+	return file_computer_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ContainerList) GetContainers() []*ContainerInfo {
@@ -1088,14 +1181,15 @@ type ContainerCreate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ContainerId   string                 `protobuf:"bytes,1,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	Image         string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
-	Config        []byte                 `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"` // JSON container configuration
+	Config        []byte                 `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"`   // JSON container configuration
+	Runtime       string                 `protobuf:"bytes,4,opt,name=runtime,proto3" json:"runtime,omitempty"` // Target runtime; empty = node default
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContainerCreate) Reset() {
 	*x = ContainerCreate{}
-	mi := &file_computer_proto_msgTypes[18]
+	mi := &file_computer_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1107,7 +1201,7 @@ func (x *ContainerCreate) String() string {
 func (*ContainerCreate) ProtoMessage() {}
 
 func (x *ContainerCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[18]
+	mi := &file_computer_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1120,7 +1214,7 @@ func (x *ContainerCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerCreate.ProtoReflect.Descriptor instead.
 func (*ContainerCreate) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{18}
+	return file_computer_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ContainerCreate) GetContainerId() string {
@@ -1144,6 +1238,13 @@ func (x *ContainerCreate) GetConfig() []byte {
 	return nil
 }
 
+func (x *ContainerCreate) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
 type ContainerStart struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ContainerId   string                 `protobuf:"bytes,1,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
@@ -1153,7 +1254,7 @@ type ContainerStart struct {
 
 func (x *ContainerStart) Reset() {
 	*x = ContainerStart{}
-	mi := &file_computer_proto_msgTypes[19]
+	mi := &file_computer_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1165,7 +1266,7 @@ func (x *ContainerStart) String() string {
 func (*ContainerStart) ProtoMessage() {}
 
 func (x *ContainerStart) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[19]
+	mi := &file_computer_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1178,7 +1279,7 @@ func (x *ContainerStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerStart.ProtoReflect.Descriptor instead.
 func (*ContainerStart) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{19}
+	return file_computer_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ContainerStart) GetContainerId() string {
@@ -1198,7 +1299,7 @@ type ContainerStop struct {
 
 func (x *ContainerStop) Reset() {
 	*x = ContainerStop{}
-	mi := &file_computer_proto_msgTypes[20]
+	mi := &file_computer_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1210,7 +1311,7 @@ func (x *ContainerStop) String() string {
 func (*ContainerStop) ProtoMessage() {}
 
 func (x *ContainerStop) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[20]
+	mi := &file_computer_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1223,7 +1324,7 @@ func (x *ContainerStop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerStop.ProtoReflect.Descriptor instead.
 func (*ContainerStop) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{20}
+	return file_computer_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ContainerStop) GetContainerId() string {
@@ -1250,7 +1351,7 @@ type ContainerDestroy struct {
 
 func (x *ContainerDestroy) Reset() {
 	*x = ContainerDestroy{}
-	mi := &file_computer_proto_msgTypes[21]
+	mi := &file_computer_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1262,7 +1363,7 @@ func (x *ContainerDestroy) String() string {
 func (*ContainerDestroy) ProtoMessage() {}
 
 func (x *ContainerDestroy) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[21]
+	mi := &file_computer_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1275,7 +1376,7 @@ func (x *ContainerDestroy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDestroy.ProtoReflect.Descriptor instead.
 func (*ContainerDestroy) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{21}
+	return file_computer_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ContainerDestroy) GetContainerId() string {
@@ -1304,7 +1405,7 @@ type ProcessInfo struct {
 
 func (x *ProcessInfo) Reset() {
 	*x = ProcessInfo{}
-	mi := &file_computer_proto_msgTypes[22]
+	mi := &file_computer_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1316,7 +1417,7 @@ func (x *ProcessInfo) String() string {
 func (*ProcessInfo) ProtoMessage() {}
 
 func (x *ProcessInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[22]
+	mi := &file_computer_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1329,7 +1430,7 @@ func (x *ProcessInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessInfo.ProtoReflect.Descriptor instead.
 func (*ProcessInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{22}
+	return file_computer_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ProcessInfo) GetPid() uint32 {
@@ -1369,7 +1470,7 @@ type ProcessList struct {
 
 func (x *ProcessList) Reset() {
 	*x = ProcessList{}
-	mi := &file_computer_proto_msgTypes[23]
+	mi := &file_computer_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1482,7 @@ func (x *ProcessList) String() string {
 func (*ProcessList) ProtoMessage() {}
 
 func (x *ProcessList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[23]
+	mi := &file_computer_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1495,7 @@ func (x *ProcessList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessList.ProtoReflect.Descriptor instead.
 func (*ProcessList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{23}
+	return file_computer_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ProcessList) GetProcesses() []*ProcessInfo {
@@ -1416,7 +1517,7 @@ type PortInfo struct {
 
 func (x *PortInfo) Reset() {
 	*x = PortInfo{}
-	mi := &file_computer_proto_msgTypes[24]
+	mi := &file_computer_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1428,7 +1529,7 @@ func (x *PortInfo) String() string {
 func (*PortInfo) ProtoMessage() {}
 
 func (x *PortInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[24]
+	mi := &file_computer_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1441,7 +1542,7 @@ func (x *PortInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortInfo.ProtoReflect.Descriptor instead.
 func (*PortInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{24}
+	return file_computer_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PortInfo) GetPort() uint32 {
@@ -1481,7 +1582,7 @@ type PortList struct {
 
 func (x *PortList) Reset() {
 	*x = PortList{}
-	mi := &file_computer_proto_msgTypes[25]
+	mi := &file_computer_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1493,7 +1594,7 @@ func (x *PortList) String() string {
 func (*PortList) ProtoMessage() {}
 
 func (x *PortList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[25]
+	mi := &file_computer_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1506,7 +1607,7 @@ func (x *PortList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortList.ProtoReflect.Descriptor instead.
 func (*PortList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{25}
+	return file_computer_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PortList) GetPorts() []*PortInfo {
@@ -1527,7 +1628,7 @@ type RuntimeInfo struct {
 
 func (x *RuntimeInfo) Reset() {
 	*x = RuntimeInfo{}
-	mi := &file_computer_proto_msgTypes[26]
+	mi := &file_computer_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1539,7 +1640,7 @@ func (x *RuntimeInfo) String() string {
 func (*RuntimeInfo) ProtoMessage() {}
 
 func (x *RuntimeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[26]
+	mi := &file_computer_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1552,7 +1653,7 @@ func (x *RuntimeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeInfo.ProtoReflect.Descriptor instead.
 func (*RuntimeInfo) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{26}
+	return file_computer_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RuntimeInfo) GetName() string {
@@ -1589,7 +1690,7 @@ type RuntimeList struct {
 
 func (x *RuntimeList) Reset() {
 	*x = RuntimeList{}
-	mi := &file_computer_proto_msgTypes[27]
+	mi := &file_computer_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1601,7 +1702,7 @@ func (x *RuntimeList) String() string {
 func (*RuntimeList) ProtoMessage() {}
 
 func (x *RuntimeList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[27]
+	mi := &file_computer_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1614,7 +1715,7 @@ func (x *RuntimeList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeList.ProtoReflect.Descriptor instead.
 func (*RuntimeList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{27}
+	return file_computer_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RuntimeList) GetRuntimes() []*RuntimeInfo {
@@ -1633,7 +1734,7 @@ type ConfigGet struct {
 
 func (x *ConfigGet) Reset() {
 	*x = ConfigGet{}
-	mi := &file_computer_proto_msgTypes[28]
+	mi := &file_computer_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1645,7 +1746,7 @@ func (x *ConfigGet) String() string {
 func (*ConfigGet) ProtoMessage() {}
 
 func (x *ConfigGet) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[28]
+	mi := &file_computer_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1658,7 +1759,7 @@ func (x *ConfigGet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigGet.ProtoReflect.Descriptor instead.
 func (*ConfigGet) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{28}
+	return file_computer_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ConfigGet) GetKey() string {
@@ -1677,7 +1778,7 @@ type ConfigValues struct {
 
 func (x *ConfigValues) Reset() {
 	*x = ConfigValues{}
-	mi := &file_computer_proto_msgTypes[29]
+	mi := &file_computer_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1689,7 +1790,7 @@ func (x *ConfigValues) String() string {
 func (*ConfigValues) ProtoMessage() {}
 
 func (x *ConfigValues) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[29]
+	mi := &file_computer_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1702,7 +1803,7 @@ func (x *ConfigValues) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigValues.ProtoReflect.Descriptor instead.
 func (*ConfigValues) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{29}
+	return file_computer_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ConfigValues) GetValues() []byte {
@@ -1722,7 +1823,7 @@ type ConfigSet struct {
 
 func (x *ConfigSet) Reset() {
 	*x = ConfigSet{}
-	mi := &file_computer_proto_msgTypes[30]
+	mi := &file_computer_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1734,7 +1835,7 @@ func (x *ConfigSet) String() string {
 func (*ConfigSet) ProtoMessage() {}
 
 func (x *ConfigSet) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[30]
+	mi := &file_computer_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1747,7 +1848,7 @@ func (x *ConfigSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigSet.ProtoReflect.Descriptor instead.
 func (*ConfigSet) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{30}
+	return file_computer_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ConfigSet) GetKey() string {
@@ -1775,7 +1876,7 @@ type ComputerUpgrade struct {
 
 func (x *ComputerUpgrade) Reset() {
 	*x = ComputerUpgrade{}
-	mi := &file_computer_proto_msgTypes[31]
+	mi := &file_computer_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1787,7 +1888,7 @@ func (x *ComputerUpgrade) String() string {
 func (*ComputerUpgrade) ProtoMessage() {}
 
 func (x *ComputerUpgrade) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[31]
+	mi := &file_computer_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1800,7 +1901,7 @@ func (x *ComputerUpgrade) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComputerUpgrade.ProtoReflect.Descriptor instead.
 func (*ComputerUpgrade) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{31}
+	return file_computer_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ComputerUpgrade) GetVersion() string {
@@ -1834,7 +1935,7 @@ type ComputerRestart struct {
 
 func (x *ComputerRestart) Reset() {
 	*x = ComputerRestart{}
-	mi := &file_computer_proto_msgTypes[32]
+	mi := &file_computer_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1846,7 +1947,7 @@ func (x *ComputerRestart) String() string {
 func (*ComputerRestart) ProtoMessage() {}
 
 func (x *ComputerRestart) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[32]
+	mi := &file_computer_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1859,7 +1960,7 @@ func (x *ComputerRestart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComputerRestart.ProtoReflect.Descriptor instead.
 func (*ComputerRestart) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{32}
+	return file_computer_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ComputerRestart) GetReason() string {
@@ -1886,7 +1987,7 @@ type SandboxCreate struct {
 
 func (x *SandboxCreate) Reset() {
 	*x = SandboxCreate{}
-	mi := &file_computer_proto_msgTypes[33]
+	mi := &file_computer_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1898,7 +1999,7 @@ func (x *SandboxCreate) String() string {
 func (*SandboxCreate) ProtoMessage() {}
 
 func (x *SandboxCreate) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[33]
+	mi := &file_computer_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1911,7 +2012,7 @@ func (x *SandboxCreate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxCreate.ProtoReflect.Descriptor instead.
 func (*SandboxCreate) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{33}
+	return file_computer_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SandboxCreate) GetSandboxId() string {
@@ -1938,7 +2039,7 @@ type SandboxDestroy struct {
 
 func (x *SandboxDestroy) Reset() {
 	*x = SandboxDestroy{}
-	mi := &file_computer_proto_msgTypes[34]
+	mi := &file_computer_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1950,7 +2051,7 @@ func (x *SandboxDestroy) String() string {
 func (*SandboxDestroy) ProtoMessage() {}
 
 func (x *SandboxDestroy) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[34]
+	mi := &file_computer_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1963,7 +2064,7 @@ func (x *SandboxDestroy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxDestroy.ProtoReflect.Descriptor instead.
 func (*SandboxDestroy) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{34}
+	return file_computer_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SandboxDestroy) GetSandboxId() string {
@@ -1988,7 +2089,7 @@ type SandboxList struct {
 
 func (x *SandboxList) Reset() {
 	*x = SandboxList{}
-	mi := &file_computer_proto_msgTypes[35]
+	mi := &file_computer_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2000,7 +2101,7 @@ func (x *SandboxList) String() string {
 func (*SandboxList) ProtoMessage() {}
 
 func (x *SandboxList) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[35]
+	mi := &file_computer_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2013,7 +2114,7 @@ func (x *SandboxList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxList.ProtoReflect.Descriptor instead.
 func (*SandboxList) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{35}
+	return file_computer_proto_rawDescGZIP(), []int{36}
 }
 
 type SandboxInspect struct {
@@ -2025,7 +2126,7 @@ type SandboxInspect struct {
 
 func (x *SandboxInspect) Reset() {
 	*x = SandboxInspect{}
-	mi := &file_computer_proto_msgTypes[36]
+	mi := &file_computer_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2037,7 +2138,7 @@ func (x *SandboxInspect) String() string {
 func (*SandboxInspect) ProtoMessage() {}
 
 func (x *SandboxInspect) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[36]
+	mi := &file_computer_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2050,7 +2151,7 @@ func (x *SandboxInspect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxInspect.ProtoReflect.Descriptor instead.
 func (*SandboxInspect) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{36}
+	return file_computer_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SandboxInspect) GetSandboxId() string {
@@ -2069,7 +2170,7 @@ type SandboxPause struct {
 
 func (x *SandboxPause) Reset() {
 	*x = SandboxPause{}
-	mi := &file_computer_proto_msgTypes[37]
+	mi := &file_computer_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2081,7 +2182,7 @@ func (x *SandboxPause) String() string {
 func (*SandboxPause) ProtoMessage() {}
 
 func (x *SandboxPause) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[37]
+	mi := &file_computer_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2094,7 +2195,7 @@ func (x *SandboxPause) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxPause.ProtoReflect.Descriptor instead.
 func (*SandboxPause) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{37}
+	return file_computer_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SandboxPause) GetSandboxId() string {
@@ -2113,7 +2214,7 @@ type SandboxResume struct {
 
 func (x *SandboxResume) Reset() {
 	*x = SandboxResume{}
-	mi := &file_computer_proto_msgTypes[38]
+	mi := &file_computer_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2125,7 +2226,7 @@ func (x *SandboxResume) String() string {
 func (*SandboxResume) ProtoMessage() {}
 
 func (x *SandboxResume) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[38]
+	mi := &file_computer_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2138,7 +2239,7 @@ func (x *SandboxResume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxResume.ProtoReflect.Descriptor instead.
 func (*SandboxResume) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{38}
+	return file_computer_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SandboxResume) GetSandboxId() string {
@@ -2159,7 +2260,7 @@ type SandboxCreated struct {
 
 func (x *SandboxCreated) Reset() {
 	*x = SandboxCreated{}
-	mi := &file_computer_proto_msgTypes[39]
+	mi := &file_computer_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2171,7 +2272,7 @@ func (x *SandboxCreated) String() string {
 func (*SandboxCreated) ProtoMessage() {}
 
 func (x *SandboxCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[39]
+	mi := &file_computer_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2184,7 +2285,7 @@ func (x *SandboxCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxCreated.ProtoReflect.Descriptor instead.
 func (*SandboxCreated) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{39}
+	return file_computer_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SandboxCreated) GetSandboxId() string {
@@ -2218,7 +2319,7 @@ type SandboxDestroyed struct {
 
 func (x *SandboxDestroyed) Reset() {
 	*x = SandboxDestroyed{}
-	mi := &file_computer_proto_msgTypes[40]
+	mi := &file_computer_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2230,7 +2331,7 @@ func (x *SandboxDestroyed) String() string {
 func (*SandboxDestroyed) ProtoMessage() {}
 
 func (x *SandboxDestroyed) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[40]
+	mi := &file_computer_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2243,7 +2344,7 @@ func (x *SandboxDestroyed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxDestroyed.ProtoReflect.Descriptor instead.
 func (*SandboxDestroyed) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{40}
+	return file_computer_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SandboxDestroyed) GetSandboxId() string {
@@ -2271,7 +2372,7 @@ type SandboxError struct {
 
 func (x *SandboxError) Reset() {
 	*x = SandboxError{}
-	mi := &file_computer_proto_msgTypes[41]
+	mi := &file_computer_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2283,7 +2384,7 @@ func (x *SandboxError) String() string {
 func (*SandboxError) ProtoMessage() {}
 
 func (x *SandboxError) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[41]
+	mi := &file_computer_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2296,7 +2397,7 @@ func (x *SandboxError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxError.ProtoReflect.Descriptor instead.
 func (*SandboxError) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{41}
+	return file_computer_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SandboxError) GetSandboxId() string {
@@ -2332,7 +2433,7 @@ type DaemonStarted struct {
 
 func (x *DaemonStarted) Reset() {
 	*x = DaemonStarted{}
-	mi := &file_computer_proto_msgTypes[42]
+	mi := &file_computer_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2344,7 +2445,7 @@ func (x *DaemonStarted) String() string {
 func (*DaemonStarted) ProtoMessage() {}
 
 func (x *DaemonStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[42]
+	mi := &file_computer_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2357,7 +2458,7 @@ func (x *DaemonStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStarted.ProtoReflect.Descriptor instead.
 func (*DaemonStarted) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{42}
+	return file_computer_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *DaemonStarted) GetDaemonId() string {
@@ -2398,7 +2499,7 @@ type DaemonHealth struct {
 
 func (x *DaemonHealth) Reset() {
 	*x = DaemonHealth{}
-	mi := &file_computer_proto_msgTypes[43]
+	mi := &file_computer_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2410,7 +2511,7 @@ func (x *DaemonHealth) String() string {
 func (*DaemonHealth) ProtoMessage() {}
 
 func (x *DaemonHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[43]
+	mi := &file_computer_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2423,7 +2524,7 @@ func (x *DaemonHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonHealth.ProtoReflect.Descriptor instead.
 func (*DaemonHealth) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{43}
+	return file_computer_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *DaemonHealth) GetDaemonId() string {
@@ -2451,7 +2552,7 @@ type DaemonStopped struct {
 
 func (x *DaemonStopped) Reset() {
 	*x = DaemonStopped{}
-	mi := &file_computer_proto_msgTypes[44]
+	mi := &file_computer_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2463,7 +2564,7 @@ func (x *DaemonStopped) String() string {
 func (*DaemonStopped) ProtoMessage() {}
 
 func (x *DaemonStopped) ProtoReflect() protoreflect.Message {
-	mi := &file_computer_proto_msgTypes[44]
+	mi := &file_computer_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2476,7 +2577,7 @@ func (x *DaemonStopped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonStopped.ProtoReflect.Descriptor instead.
 func (*DaemonStopped) Descriptor() ([]byte, []int) {
-	return file_computer_proto_rawDescGZIP(), []int{44}
+	return file_computer_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *DaemonStopped) GetDaemonId() string {
@@ -2504,7 +2605,7 @@ var File_computer_proto protoreflect.FileDescriptor
 
 const file_computer_proto_rawDesc = "" +
 	"\n" +
-	"\x0ecomputer.proto\x12\x03tai\"\xde\x01\n" +
+	"\x0ecomputer.proto\x12\x03tai\"\xaa\x02\n" +
 	"\x0eComputerStatus\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12\x1e\n" +
 	"\x03cpu\x18\x02 \x01(\v2\f.tai.CPUInfoR\x03cpu\x12$\n" +
@@ -2512,7 +2613,16 @@ const file_computer_proto_rawDesc = "" +
 	"\x04disk\x18\x04 \x01(\v2\r.tai.DiskInfoR\x04disk\x12&\n" +
 	"\anetwork\x18\x05 \x01(\v2\f.tai.NetInfoR\anetwork\x12\x1d\n" +
 	"\n" +
-	"uptime_sec\x18\x06 \x01(\x04R\tuptimeSec\"`\n" +
+	"uptime_sec\x18\x06 \x01(\x04R\tuptimeSec\x12J\n" +
+	"\x12container_runtimes\x18\a \x03(\v2\x1b.tai.ContainerRuntimeStatusR\x11containerRuntimes\"\x98\x01\n" +
+	"\x16ContainerRuntimeStatus\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x1e\n" +
+	"\n" +
+	"containers\x18\x04 \x01(\rR\n" +
+	"containers\x12\x18\n" +
+	"\arunning\x18\x05 \x01(\rR\arunning\"`\n" +
 	"\aCPUInfo\x12#\n" +
 	"\rusage_percent\x18\x01 \x01(\x02R\fusagePercent\x12\x17\n" +
 	"\aload_1m\x18\x02 \x01(\x02R\x06load1m\x12\x17\n" +
@@ -2568,12 +2678,13 @@ const file_computer_proto_rawDesc = "" +
 	"keepLatest\"M\n" +
 	"\vImagePruned\x12\x19\n" +
 	"\bfreed_mb\x18\x01 \x01(\x04R\afreedMb\x12#\n" +
-	"\rremoved_count\x18\x02 \x01(\rR\fremovedCount\"s\n" +
+	"\rremoved_count\x18\x02 \x01(\rR\fremovedCount\"\x8d\x01\n" +
 	"\rContainerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x14\n" +
 	"\x05state\x18\x03 \x01(\tR\x05state\x12&\n" +
-	"\x05ports\x18\x04 \x03(\v2\x10.tai.PortMappingR\x05ports\"m\n" +
+	"\x05ports\x18\x04 \x03(\v2\x10.tai.PortMappingR\x05ports\x12\x18\n" +
+	"\aruntime\x18\x05 \x01(\tR\aruntime\"m\n" +
 	"\vPortMapping\x12\x1b\n" +
 	"\thost_port\x18\x01 \x01(\rR\bhostPort\x12%\n" +
 	"\x0econtainer_port\x18\x02 \x01(\rR\rcontainerPort\x12\x1a\n" +
@@ -2581,11 +2692,12 @@ const file_computer_proto_rawDesc = "" +
 	"\rContainerList\x122\n" +
 	"\n" +
 	"containers\x18\x01 \x03(\v2\x12.tai.ContainerInfoR\n" +
-	"containers\"b\n" +
+	"containers\"|\n" +
 	"\x0fContainerCreate\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x16\n" +
-	"\x06config\x18\x03 \x01(\fR\x06config\"3\n" +
+	"\x06config\x18\x03 \x01(\fR\x06config\x12\x18\n" +
+	"\aruntime\x18\x04 \x01(\tR\aruntime\"3\n" +
 	"\x0eContainerStart\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\"S\n" +
 	"\rContainerStop\x12!\n" +
@@ -2688,70 +2800,72 @@ func file_computer_proto_rawDescGZIP() []byte {
 	return file_computer_proto_rawDescData
 }
 
-var file_computer_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_computer_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_computer_proto_goTypes = []any{
-	(*ComputerStatus)(nil),    // 0: tai.ComputerStatus
-	(*CPUInfo)(nil),           // 1: tai.CPUInfo
-	(*MemInfo)(nil),           // 2: tai.MemInfo
-	(*DiskInfo)(nil),          // 3: tai.DiskInfo
-	(*NetInfo)(nil),           // 4: tai.NetInfo
-	(*ComputerEvent)(nil),     // 5: tai.ComputerEvent
-	(*ImageInfo)(nil),         // 6: tai.ImageInfo
-	(*ImageList)(nil),         // 7: tai.ImageList
-	(*ImagePull)(nil),         // 8: tai.ImagePull
-	(*ImagePulled)(nil),       // 9: tai.ImagePulled
-	(*ImagePullProgress)(nil), // 10: tai.ImagePullProgress
-	(*ImageDelete)(nil),       // 11: tai.ImageDelete
-	(*ImageDeleted)(nil),      // 12: tai.ImageDeleted
-	(*ImagePrune)(nil),        // 13: tai.ImagePrune
-	(*ImagePruned)(nil),       // 14: tai.ImagePruned
-	(*ContainerInfo)(nil),     // 15: tai.ContainerInfo
-	(*PortMapping)(nil),       // 16: tai.PortMapping
-	(*ContainerList)(nil),     // 17: tai.ContainerList
-	(*ContainerCreate)(nil),   // 18: tai.ContainerCreate
-	(*ContainerStart)(nil),    // 19: tai.ContainerStart
-	(*ContainerStop)(nil),     // 20: tai.ContainerStop
-	(*ContainerDestroy)(nil),  // 21: tai.ContainerDestroy
-	(*ProcessInfo)(nil),       // 22: tai.ProcessInfo
-	(*ProcessList)(nil),       // 23: tai.ProcessList
-	(*PortInfo)(nil),          // 24: tai.PortInfo
-	(*PortList)(nil),          // 25: tai.PortList
-	(*RuntimeInfo)(nil),       // 26: tai.RuntimeInfo
-	(*RuntimeList)(nil),       // 27: tai.RuntimeList
-	(*ConfigGet)(nil),         // 28: tai.ConfigGet
-	(*ConfigValues)(nil),      // 29: tai.ConfigValues
-	(*ConfigSet)(nil),         // 30: tai.ConfigSet
-	(*ComputerUpgrade)(nil),   // 31: tai.ComputerUpgrade
-	(*ComputerRestart)(nil),   // 32: tai.ComputerRestart
-	(*SandboxCreate)(nil),     // 33: tai.SandboxCreate
-	(*SandboxDestroy)(nil),    // 34: tai.SandboxDestroy
-	(*SandboxList)(nil),       // 35: tai.SandboxList
-	(*SandboxInspect)(nil),    // 36: tai.SandboxInspect
-	(*SandboxPause)(nil),      // 37: tai.SandboxPause
-	(*SandboxResume)(nil),     // 38: tai.SandboxResume
-	(*SandboxCreated)(nil),    // 39: tai.SandboxCreated
-	(*SandboxDestroyed)(nil),  // 40: tai.SandboxDestroyed
-	(*SandboxError)(nil),      // 41: tai.SandboxError
-	(*DaemonStarted)(nil),     // 42: tai.DaemonStarted
-	(*DaemonHealth)(nil),      // 43: tai.DaemonHealth
-	(*DaemonStopped)(nil),     // 44: tai.DaemonStopped
+	(*ComputerStatus)(nil),         // 0: tai.ComputerStatus
+	(*ContainerRuntimeStatus)(nil), // 1: tai.ContainerRuntimeStatus
+	(*CPUInfo)(nil),                // 2: tai.CPUInfo
+	(*MemInfo)(nil),                // 3: tai.MemInfo
+	(*DiskInfo)(nil),               // 4: tai.DiskInfo
+	(*NetInfo)(nil),                // 5: tai.NetInfo
+	(*ComputerEvent)(nil),          // 6: tai.ComputerEvent
+	(*ImageInfo)(nil),              // 7: tai.ImageInfo
+	(*ImageList)(nil),              // 8: tai.ImageList
+	(*ImagePull)(nil),              // 9: tai.ImagePull
+	(*ImagePulled)(nil),            // 10: tai.ImagePulled
+	(*ImagePullProgress)(nil),      // 11: tai.ImagePullProgress
+	(*ImageDelete)(nil),            // 12: tai.ImageDelete
+	(*ImageDeleted)(nil),           // 13: tai.ImageDeleted
+	(*ImagePrune)(nil),             // 14: tai.ImagePrune
+	(*ImagePruned)(nil),            // 15: tai.ImagePruned
+	(*ContainerInfo)(nil),          // 16: tai.ContainerInfo
+	(*PortMapping)(nil),            // 17: tai.PortMapping
+	(*ContainerList)(nil),          // 18: tai.ContainerList
+	(*ContainerCreate)(nil),        // 19: tai.ContainerCreate
+	(*ContainerStart)(nil),         // 20: tai.ContainerStart
+	(*ContainerStop)(nil),          // 21: tai.ContainerStop
+	(*ContainerDestroy)(nil),       // 22: tai.ContainerDestroy
+	(*ProcessInfo)(nil),            // 23: tai.ProcessInfo
+	(*ProcessList)(nil),            // 24: tai.ProcessList
+	(*PortInfo)(nil),               // 25: tai.PortInfo
+	(*PortList)(nil),               // 26: tai.PortList
+	(*RuntimeInfo)(nil),            // 27: tai.RuntimeInfo
+	(*RuntimeList)(nil),            // 28: tai.RuntimeList
+	(*ConfigGet)(nil),              // 29: tai.ConfigGet
+	(*ConfigValues)(nil),           // 30: tai.ConfigValues
+	(*ConfigSet)(nil),              // 31: tai.ConfigSet
+	(*ComputerUpgrade)(nil),        // 32: tai.ComputerUpgrade
+	(*ComputerRestart)(nil),        // 33: tai.ComputerRestart
+	(*SandboxCreate)(nil),          // 34: tai.SandboxCreate
+	(*SandboxDestroy)(nil),         // 35: tai.SandboxDestroy
+	(*SandboxList)(nil),            // 36: tai.SandboxList
+	(*SandboxInspect)(nil),         // 37: tai.SandboxInspect
+	(*SandboxPause)(nil),           // 38: tai.SandboxPause
+	(*SandboxResume)(nil),          // 39: tai.SandboxResume
+	(*SandboxCreated)(nil),         // 40: tai.SandboxCreated
+	(*SandboxDestroyed)(nil),       // 41: tai.SandboxDestroyed
+	(*SandboxError)(nil),           // 42: tai.SandboxError
+	(*DaemonStarted)(nil),          // 43: tai.DaemonStarted
+	(*DaemonHealth)(nil),           // 44: tai.DaemonHealth
+	(*DaemonStopped)(nil),          // 45: tai.DaemonStopped
 }
 var file_computer_proto_depIdxs = []int32{
-	1,  // 0: tai.ComputerStatus.cpu:type_name -> tai.CPUInfo
-	2,  // 1: tai.ComputerStatus.memory:type_name -> tai.MemInfo
-	3,  // 2: tai.ComputerStatus.disk:type_name -> tai.DiskInfo
-	4,  // 3: tai.ComputerStatus.network:type_name -> tai.NetInfo
-	6,  // 4: tai.ImageList.images:type_name -> tai.ImageInfo
-	16, // 5: tai.ContainerInfo.ports:type_name -> tai.PortMapping
-	15, // 6: tai.ContainerList.containers:type_name -> tai.ContainerInfo
-	22, // 7: tai.ProcessList.processes:type_name -> tai.ProcessInfo
-	24, // 8: tai.PortList.ports:type_name -> tai.PortInfo
-	26, // 9: tai.RuntimeList.runtimes:type_name -> tai.RuntimeInfo
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	2,  // 0: tai.ComputerStatus.cpu:type_name -> tai.CPUInfo
+	3,  // 1: tai.ComputerStatus.memory:type_name -> tai.MemInfo
+	4,  // 2: tai.ComputerStatus.disk:type_name -> tai.DiskInfo
+	5,  // 3: tai.ComputerStatus.network:type_name -> tai.NetInfo
+	1,  // 4: tai.ComputerStatus.container_runtimes:type_name -> tai.ContainerRuntimeStatus
+	7,  // 5: tai.ImageList.images:type_name -> tai.ImageInfo
+	17, // 6: tai.ContainerInfo.ports:type_name -> tai.PortMapping
+	16, // 7: tai.ContainerList.containers:type_name -> tai.ContainerInfo
+	23, // 8: tai.ProcessList.processes:type_name -> tai.ProcessInfo
+	25, // 9: tai.PortList.ports:type_name -> tai.PortInfo
+	27, // 10: tai.RuntimeList.runtimes:type_name -> tai.RuntimeInfo
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_computer_proto_init() }
@@ -2765,7 +2879,7 @@ func file_computer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_computer_proto_rawDesc), len(file_computer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   45,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

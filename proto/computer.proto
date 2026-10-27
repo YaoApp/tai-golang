@@ -20,6 +20,16 @@ message ComputerStatus {
   DiskInfo disk       = 4;
   NetInfo  network    = 5;
   uint64   uptime_sec = 6;
+  repeated ContainerRuntimeStatus container_runtimes = 7; // Runtime health
+}
+
+// ContainerRuntimeStatus reports the current state of a container runtime.
+message ContainerRuntimeStatus {
+  string name       = 1; // "docker" | "podman" | "containerd" | "nsjail"
+  string version    = 2; // e.g. "27.1.0"
+  string status     = 3; // "running" | "stopped" | "degraded"
+  uint32 containers = 4; // Total managed containers
+  uint32 running    = 5; // Currently running containers
 }
 
 message CPUInfo {
@@ -113,10 +123,11 @@ message ImagePruned {
 // ---------------------------------------------------------------------------
 
 message ContainerInfo {
-  string id    = 1;
-  string image = 2;
-  string state = 3; // "created" | "running" | "stopped" | "paused"
+  string id      = 1;
+  string image   = 2;
+  string state   = 3; // "created" | "running" | "stopped" | "paused"
   repeated PortMapping ports = 4;
+  string runtime = 5; // "docker" | "podman" | "containerd"
 }
 
 message PortMapping {
@@ -136,6 +147,7 @@ message ContainerCreate {
   string container_id = 1;
   string image        = 2;
   bytes  config       = 3; // JSON container configuration
+  string runtime      = 4; // Target runtime; empty = node default
 }
 
 message ContainerStart {
