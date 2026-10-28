@@ -28,10 +28,10 @@ type MockLightConn struct {
 	h2Server *http2.Server         // H2 only (Tai is server after reversal)
 	h2Conn   net.Conn              // H2 only
 
-	mu       sync.Mutex
-	streams  chan *MockLightStream // accepted streams
-	closeFn  func()
-	closed   bool
+	mu      sync.Mutex
+	streams chan *MockLightStream // accepted streams
+	closeFn func()
+	closed  bool
 }
 
 // MockLightStream wraps an accepted stream from Yao. Read/Write are the

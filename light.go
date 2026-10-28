@@ -40,7 +40,7 @@ type lightPool struct {
 	auth    AuthProvider
 	changed chan struct{} // closed+replaced on each pool change (broadcast)
 	done    chan struct{} // closed on pool shutdown
-	closed  bool         // set by close(), guards idempotency
+	closed  bool          // set by close(), guards idempotency
 }
 
 func newLightPool(cfg *pb.PoolConfig, codec *FrameCodec, mgr *nodeManager, auth AuthProvider) *lightPool {
@@ -91,7 +91,7 @@ type lightConn struct {
 	session *webtransport.Session // H3 only
 	h2cc    *http2.ClientConn     // H2 only (role-reversed: Yao is HTTP/2 client)
 	h2conn  net.Conn              // underlying TCP for H2
-	h2Done  chan struct{}          // H2 only: closed to unblock handleLightH2
+	h2Done  chan struct{}         // H2 only: closed to unblock handleLightH2
 	active  atomic.Int32
 	closed  atomic.Bool
 	pool    *lightPool
@@ -338,7 +338,7 @@ func (lc *lightConn) openStreamH2(ctx context.Context) (*LightStream, error) {
 // drains the peer's EOF before releasing the stream quota (active--).
 type LightStream struct {
 	w       io.WriteCloser
-	r       io.ReadCloser         // nil for H2 until response headers arrive
+	r       io.ReadCloser // nil for H2 until response headers arrive
 	conn    *lightConn
 	closed  atomic.Bool           // prevents double active decrement
 	gotResp atomic.Bool           // true after first response byte
@@ -489,7 +489,7 @@ func (p *lightPool) handleLightH2(conn net.Conn, cm *pb.Connect) {
 
 	// Role reversal: Yao becomes HTTP/2 client on this TCP connection.
 	t := &http2.Transport{
-		AllowHTTP:       true,         // connection is already established, no TLS needed at this layer
+		AllowHTTP:       true,             // connection is already established, no TLS needed at this layer
 		ReadIdleTimeout: 20 * time.Second, // send HTTP/2 PING when idle to keep NAT mapping alive
 		PingTimeout:     10 * time.Second,
 	}
