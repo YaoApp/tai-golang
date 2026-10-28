@@ -162,6 +162,9 @@ func TestLightSessionRejected(t *testing.T) {
 
 func TestLightSessionWithoutHandlerIsClosed(t *testing.T) {
 	ts := NewTestServer(t)
+	// Clear the handler registered by lightPool to test the defense-in-depth
+	// path in handleLight where no handler is set.
+	ts.Transport.lightHandler.Store(nil)
 
 	_, sess, err := dialLight(ts, lightHeader(ts.IssueTestNodeToken("light-nh"), "light-nh"))
 	if err != nil {

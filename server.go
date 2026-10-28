@@ -190,11 +190,12 @@ type wellKnownConfigurer interface {
 // server is the Server implementation: it wires the HTTP API (5099), the
 // TCP/UDP transport (6099) and the node manager.
 type server struct {
-	cfg  ServerConfig
-	auth AuthProvider
-	mgr  *nodeManager
-	http *httpServer
-	tr   *transportServer
+	cfg   ServerConfig
+	auth  AuthProvider
+	mgr   *nodeManager
+	http  *httpServer
+	tr    *transportServer
+	light *lightPool
 
 	// Overrides used by the test harness: listen addresses (default
 	// ":<port>") and an in-memory TLS configuration (default: cfg.TLS files).
@@ -246,13 +247,15 @@ func newServer(cfg *ServerConfig) (*server, error) {
 	}
 	mgr := newNodeManager()
 	mgr.pool = pool
+	light := newLightPool(pool, codec, mgr, c.Auth)
 	s := &server{
-		cfg:  c,
-		auth: c.Auth,
-		mgr:  mgr,
-		http: newHTTPServer(c.Auth),
-		tr:   newTransportServer(c.Auth, mgr, codec),
-		done: make(chan struct{}),
+		cfg:   c,
+		auth:  c.Auth,
+		mgr:   mgr,
+		light: light,
+		http:  newHTTPServer(c.Auth),
+		tr:    newTransportServer(c.Auth, mgr, codec),
+		done:  make(chan struct{}),
 	}
 	s.tr.unauthTimeout = c.UnauthTimeout
 	s.tr.quicConfig = c.QUIC
@@ -275,6 +278,10 @@ func (s *server) bind() error {
 	if err != nil {
 		return err
 	}
+
+	// Register Light pool handlers before starting listeners so the first
+	// accepted connections already reach the pool.
+	s.light.initLightHandlers(s.tr)
 
 	tcpAddr := s.transportListenAddr
 	if tcpAddr == "" {
@@ -408,6 +415,10 @@ func (s *server) Close() error {
 		if !bound {
 			return
 		}
+		// Release all Light pool connections before closing TCP so the
+		// serveTai goroutines that block in handleLightH2 can return.
+		s.light.close()
+
 		timeout := s.cfg.ShutdownTimeout
 		if timeout == 0 {
 			timeout = DefaultShutdownTimeout

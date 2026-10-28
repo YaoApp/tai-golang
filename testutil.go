@@ -1,6 +1,7 @@
 package tai
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -119,6 +120,18 @@ func (ts *TestServer) GoAwayAll(reason string) {
 // SendControl sends an arbitrary control message to a specific node.
 func (ts *TestServer) SendControl(nodeID string, msg *pb.Payload) error {
 	return ts.Nodes.sendControl(nodeID, msg)
+}
+
+// LightConnCount returns the number of Light connections for a node.
+func (ts *TestServer) LightConnCount(nodeID string) int {
+	s := ts.Server.(*server)
+	return s.light.connCount(nodeID)
+}
+
+// OpenLightStream opens a bidirectional stream on the Light pool to nodeID.
+func (ts *TestServer) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (*LightStream, error) {
+	s := ts.Server.(*server)
+	return s.light.OpenStream(ctx, nodeID, firstFrame)
 }
 
 // ---------------------------------------------------------------------------
