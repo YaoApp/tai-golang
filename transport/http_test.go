@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"net/http"
@@ -50,7 +51,7 @@ func TestHTTPServerStartAndWellKnown(t *testing.T) {
 	if err := hs.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	defer hs.Close(nil)
+	defer hs.Close(context.Background())
 
 	addr := hs.Addr()
 	if addr == "" {

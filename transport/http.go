@@ -88,6 +88,9 @@ func (s *HTTPServer) Close(ctx context.Context) error {
 	if srv == nil {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return srv.Shutdown(ctx)
 }
 
