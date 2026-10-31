@@ -1,4 +1,4 @@
-package tai
+package transport
 
 import (
 	"bufio"
@@ -13,50 +13,37 @@ import (
 	"time"
 )
 
-// ALPN protocol names on the 6099 TCP listener.
-const (
-	alpnH2  = "h2"
-	alpnTai = "tai/2"
-)
+// AlpnH2 is the TLS ALPN protocol name for HTTP/2.
+const AlpnH2 = "h2"
 
-// h2cPreface is the beginning of the HTTP/2 client connection preface. A
-// plaintext connection that starts with it is served as h2c; any other
-// plaintext connection speaks the Tai frame protocol.
+// AlpnTai is the TLS ALPN protocol name for the Tai frame protocol.
+const AlpnTai = "tai/2"
+
 const h2cPreface = "PRI * HTTP/2.0"
 
-// Accept retry delays after a transient listener error; same bounds as
-// net/http.
 const (
 	acceptBackoffMin = 5 * time.Millisecond
 	acceptBackoffMax = time.Second
 )
 
-// taiConnHandler serves one TCP connection that speaks the Tai frame
-// protocol (ALPN "tai/2", or plaintext that is not HTTP/2). st carries the
-// connection's authorization state and unauthorized timer; the handler owns
-// conn and must return when conn is closed.
-type taiConnHandler func(conn net.Conn, st *connState)
+// taiConnHandler serves one TCP connection speaking the Tai frame protocol.
+type taiConnHandler func(conn net.Conn, st *ConnState)
 
-// tcpMux is the 6099 TCP side of the transport server. It accepts TCP
-// connections, completes the TLS handshake or peeks the first bytes, then
-// routes each connection to the HTTP/2 server or the Tai frame handler.
+// tcpMux is the TCP side of the transport server.
 type tcpMux struct {
 	ln       net.Listener
-	tlsCfg   *tls.Config // nil: plaintext (h2c and Tai frames)
+	tlsCfg   *tls.Config
 	h2Server *http.Server
 	h2Ln     *chanListener
 	h2Done   chan struct{}
 	wg       sync.WaitGroup
 
 	mu     sync.Mutex
-	conns  map[net.Conn]struct{} // connections still owned by the mux
+	conns  map[net.Conn]struct{}
 	closed bool
 }
 
-// startTCP starts the TCP listener on addr. With tlsCfg the listener speaks
-// TLS and routes by ALPN ("h2", "tai/2"); without it the listener is
-// plaintext and routes by the first bytes (trusted networks only).
-func (t *transportServer) startTCP(addr string, tlsCfg *tls.Config) error {
+func (t *Server) startTCP(addr string, tlsCfg *tls.Config) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("tcp listen: %w", err)
@@ -69,7 +56,7 @@ func (t *transportServer) startTCP(addr string, tlsCfg *tls.Config) error {
 	}
 	if tlsCfg != nil {
 		m.tlsCfg = tlsCfg.Clone()
-		m.tlsCfg.NextProtos = []string{alpnH2, alpnTai}
+		m.tlsCfg.NextProtos = []string{AlpnH2, AlpnTai}
 	}
 
 	var protos http.Protocols
@@ -102,26 +89,16 @@ func (t *transportServer) startTCP(addr string, tlsCfg *tls.Config) error {
 	return nil
 }
 
-// start starts the TCP listener in plaintext mode (for tests without TLS).
-func (t *transportServer) start(addr string) error {
+// Start starts the TCP listener in plaintext mode.
+func (t *Server) Start(addr string) error {
 	return t.startTCP(addr, nil)
 }
 
-// tcpAddr returns the TCP listener address, or "" when not started.
-func (t *transportServer) tcpAddr() string {
-	if t.tcp == nil {
-		return ""
-	}
-	return t.tcp.ln.Addr().String()
+func (t *Server) tcpConnContext(ctx context.Context, c net.Conn) context.Context {
+	return t.connContext(ctx, func() { c.Close() })
 }
 
-// setTaiHandler registers the handler for Tai frame connections; it may be
-// called while the server is running and applies to later connections.
-func (t *transportServer) setTaiHandler(h taiConnHandler) {
-	t.taiHandler.Store(&h)
-}
-
-func (t *transportServer) acceptLoop(m *tcpMux) {
+func (t *Server) acceptLoop(m *tcpMux) {
 	var delay time.Duration
 	for {
 		conn, err := m.ln.Accept()
@@ -129,8 +106,6 @@ func (t *transportServer) acceptLoop(m *tcpMux) {
 			if m.isClosed() || errors.Is(err, net.ErrClosed) {
 				return
 			}
-			// Transient failures (for example running out of file
-			// descriptors) must not stop the listener: retry with backoff.
 			if delay == 0 {
 				delay = acceptBackoffMin
 			} else if delay *= 2; delay > acceptBackoffMax {
@@ -153,10 +128,7 @@ func (t *transportServer) acceptLoop(m *tcpMux) {
 	}
 }
 
-// routeTCP identifies the protocol of an accepted connection and hands it to
-// the HTTP/2 server or the Tai frame handler. The TLS handshake and the first
-// bytes must arrive within the unauthorized timeout.
-func (t *transportServer) routeTCP(m *tcpMux, raw net.Conn) {
+func (t *Server) routeTCP(m *tcpMux, raw net.Conn) {
 	timeout := t.unauthTimeoutOrDefault()
 	raw.SetDeadline(time.Now().Add(timeout))
 
@@ -180,20 +152,20 @@ func (t *transportServer) routeTCP(m *tcpMux, raw net.Conn) {
 			raw.Close()
 			return
 		}
-		conn, proto = &peekedConn{Conn: raw, r: br}, alpnTai
+		conn, proto = &peekedConn{Conn: raw, r: br}, AlpnTai
 		if isH2 {
-			proto = alpnH2
+			proto = AlpnH2
 		}
 	}
 	conn.SetDeadline(time.Time{})
 
 	switch proto {
-	case alpnH2:
+	case AlpnH2:
 		m.release(raw)
 		if !m.h2Ln.push(conn) {
 			conn.Close()
 		}
-	case alpnTai:
+	case AlpnTai:
 		t.serveTai(m, raw, conn, timeout)
 	default:
 		log.Printf("tai-sdk: TCP connection from %s negotiated unsupported protocol %q", raw.RemoteAddr(), proto)
@@ -202,9 +174,7 @@ func (t *transportServer) routeTCP(m *tcpMux, raw net.Conn) {
 	}
 }
 
-// serveTai runs the registered Tai frame handler on conn, or closes conn when
-// none is registered.
-func (t *transportServer) serveTai(m *tcpMux, raw, conn net.Conn, timeout time.Duration) {
+func (t *Server) serveTai(m *tcpMux, raw, conn net.Conn, timeout time.Duration) {
 	defer m.release(raw)
 	defer conn.Close()
 
@@ -213,20 +183,18 @@ func (t *transportServer) serveTai(m *tcpMux, raw, conn net.Conn, timeout time.D
 		log.Printf("tai-sdk: Tai frame connection from %s rejected: no handler registered", raw.RemoteAddr())
 		return
 	}
-	st := newConnState(func() { conn.Close() }, timeout)
+	st := NewConnState(func() { conn.Close() }, timeout)
 	(*h)(conn, st)
 }
 
-func (t *transportServer) unauthTimeoutOrDefault() time.Duration {
+func (t *Server) unauthTimeoutOrDefault() time.Duration {
 	if t.unauthTimeout > 0 {
 		return t.unauthTimeout
 	}
 	return DefaultUnauthTimeout
 }
 
-// closeTCP stops accepting, closes connections still owned by the mux, and
-// shuts the HTTP/2 server down.
-func (t *transportServer) closeTCP(ctx context.Context) error {
+func (t *Server) closeTCP(ctx context.Context) error {
 	m := t.tcp
 	if m == nil {
 		return nil
@@ -259,7 +227,6 @@ func (m *tcpMux) isClosed() bool {
 	return m.closed
 }
 
-// track registers conn as owned by the mux; false when the mux is closed.
 func (m *tcpMux) track(conn net.Conn) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -276,8 +243,6 @@ func (m *tcpMux) release(conn net.Conn) {
 	m.mu.Unlock()
 }
 
-// peekH2Preface reports whether the buffered connection starts with the
-// HTTP/2 preface. It blocks until enough bytes arrive or the deadline hits.
 func peekH2Preface(br *bufio.Reader) (bool, error) {
 	b, err := br.Peek(1)
 	if err != nil {
@@ -293,8 +258,6 @@ func peekH2Preface(br *bufio.Reader) (bool, error) {
 	return string(b) == h2cPreface, nil
 }
 
-// peekedConn reads through a bufio.Reader that already holds the bytes
-// consumed while identifying the protocol.
 type peekedConn struct {
 	net.Conn
 	r *bufio.Reader
@@ -302,8 +265,6 @@ type peekedConn struct {
 
 func (c *peekedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
-// chanListener is a net.Listener fed by routeTCP with already identified
-// HTTP/2 connections.
 type chanListener struct {
 	addr net.Addr
 	ch   chan net.Conn
@@ -331,7 +292,6 @@ func (l *chanListener) Close() error {
 
 func (l *chanListener) Addr() net.Addr { return l.addr }
 
-// push hands conn to the HTTP/2 server; false when the listener is closed.
 func (l *chanListener) push(conn net.Conn) bool {
 	select {
 	case l.ch <- conn:

@@ -10,7 +10,7 @@
 //	server, err := tai.NewServer(&tai.ServerConfig{
 //	    TransportPort: 6099,
 //	    HTTPPort:      5099,
-//	    Auth:          tai.DefaultAuth(privateKey),
+//	    Auth:          auth.DefaultAuth(privateKey),
 //	})
 //	server.Start(ctx)
 package tai
@@ -31,68 +31,70 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/transport"
+	"github.com/yaoapp/tai-golang/types"
+)
+
+// Re-export types from sub-packages for backward compatibility.
+type (
+	Node               = types.Node
+	NodeRuntime        = types.NodeRuntime
+	AuthProvider       = types.AuthProvider
+	NodeInfo           = types.NodeInfo
+	TokenScope         = types.TokenScope
+	WellKnownResponse  = types.WellKnownResponse
+	TLSInfo            = types.TLSInfo
+	SessionMsg         = types.SessionMsg
+	ControlMsg         = types.ControlMsg
+	OpenSessionRequest = types.OpenSessionRequest
+	SessionRequest     = types.SessionRequest
+	ToolDefinition     = types.ToolDefinition
+	ToolHandler        = types.ToolHandler
+	TunnelProvider     = types.TunnelProvider
+	TunnelBindRequest  = types.TunnelBindRequest
+)
+
+// Re-export constants.
+const (
+	NamespaceControl = types.NamespaceControl
+	NamespaceSession = types.NamespaceSession
+)
+
+// Re-export errors.
+var (
+	ErrNodeNotFound = types.ErrNodeNotFound
 )
 
 // ServerConfig holds configuration for a Tai transport server.
 type ServerConfig struct {
-	// TransportPort is the port for Tai connections (TCP + UDP).
-	// Default: 6099.
-	TransportPort int
-
-	// HTTPPort is the port for the HTTP API (well-known, token refresh, heartbeat, tai call).
-	// Default: 5099.
-	HTTPPort int
-
-	// TLS configures TLS for transport connections.
-	// Nil means no TLS (plaintext h2c, for trusted networks only).
-	TLS *TLSConfig
-
-	// Auth provides authentication and token management.
-	// Use DefaultAuth() for a built-in JWT implementation.
-	Auth AuthProvider
-
-	// MaxFrameSize sets the maximum Control stream frame payload size in bytes.
-	// 0 uses DefaultMaxFrameSize (16 MB). Range: [64 KB, 64 MB].
-	MaxFrameSize int
-
-	// UnauthTimeout bounds how long a connection may stay unauthorized after
-	// its transport handshake. 0 uses DefaultUnauthTimeout (5s).
-	UnauthTimeout time.Duration
-
-	// QUIC tunes the QUIC listener (keep-alive period, idle timeout, stream
-	// limits). Datagrams and stream reset partial delivery are always
-	// enabled because WebTransport requires them. Nil uses quic-go defaults.
-	QUIC *quic.Config
-
-	// ShutdownTimeout bounds how long Close waits for in-flight HTTP/2
-	// requests before closing their connections. 0 uses
-	// DefaultShutdownTimeout (5s).
+	TransportPort   int
+	HTTPPort        int
+	TLS             *TLSConfig
+	Auth            AuthProvider
+	MaxFrameSize    int
+	UnauthTimeout   time.Duration
+	QUIC            *quic.Config
 	ShutdownTimeout time.Duration
-
-	// Pool sets the connection pool parameters sent in register_ack.
-	// Nil, or a zero field, uses the default of that field.
-	Pool *PoolSettings
+	Pool            *PoolSettings
 }
 
 // TLSConfig holds TLS certificate paths.
 type TLSConfig struct {
-	CertFile string // Path to TLS certificate PEM
-	KeyFile  string // Path to TLS private key PEM
+	CertFile string
+	KeyFile  string
 }
 
-// PoolSettings configures the Light and Heavy pools the node maintains. A
-// zero field selects its default; NewServer rejects a minimum above its
-// maximum.
+// PoolSettings configures the Light and Heavy pools.
 type PoolSettings struct {
-	LightMin            uint32 // Minimum Light connections (default 2)
-	LightMax            uint32 // Maximum Light connections (default 8)
-	LightMaxStreams     uint32 // Maximum streams per Light connection (default 256)
-	LightIdleTimeoutSec uint32 // Idle Light connection reclaim (default 300)
-	HeavyMin            uint32 // Minimum Heavy idle connections (default 2)
-	HeavyMax            uint32 // Maximum Heavy active connections (default 20)
-	HeavyMaxIdle        uint32 // Maximum Heavy idle connections (default 6)
-	HeavyIdleTimeoutSec uint32 // Idle Heavy connection reclaim (default 300)
-	HeavyHealthCheckSec uint32 // Heavy health check interval (default 30)
+	LightMin            uint32
+	LightMax            uint32
+	LightMaxStreams      uint32
+	LightIdleTimeoutSec uint32
+	HeavyMin            uint32
+	HeavyMax            uint32
+	HeavyMaxIdle        uint32
+	HeavyIdleTimeoutSec uint32
+	HeavyHealthCheckSec uint32
 }
 
 // poolConfig returns the register_ack pool_config with defaults applied.
@@ -130,49 +132,43 @@ func (p *PoolSettings) poolConfig() (*pb.PoolConfig, error) {
 	return cfg, nil
 }
 
+// Session represents an active agent session on a Tai node.
+type Session interface {
+	ID() string
+	Prompt(req *PromptRequest) error
+	Cancel() error
+	Steer(message string) error
+	Resolve(requestID string, resolution []byte) error
+	RecvEvent() (*SessionMsg, error)
+	RecvAction() (*SessionMsg, error)
+	Close(ctx context.Context) error
+}
+
+// PromptRequest is the input for Session.Prompt().
+type PromptRequest struct {
+	Message     string
+	Attachments []types.Attachment
+}
+
 // Server is a Tai transport server that accepts and manages Tai node connections.
 type Server interface {
-	// Start begins listening for Tai connections. Blocks until ctx is cancelled.
 	Start(ctx context.Context) error
-
-	// Addr returns the transport listener address (host:port).
 	Addr() string
-
-	// Nodes returns all currently connected nodes.
 	Nodes() []*Node
-
-	// NodeByID returns a connected node by its ID, or nil if not found.
 	NodeByID(nodeID string) *Node
-
-	// OpenSession opens a new session on a specific node.
 	OpenSession(ctx context.Context, req *OpenSessionRequest) (*Session, error)
-
-	// RegisterTool registers a server tool available for `tai call`.
-	// Automatically pushes the updated tool list to all connected nodes.
 	RegisterTool(tool *ToolDefinition) error
-
-	// UnregisterTool removes a server tool by name.
 	UnregisterTool(name string) error
-
-	// SendControl sends a control message to a specific node.
 	SendControl(nodeID string, msg *ControlMsg) error
-
-	// OnNodeRegister sets a callback for node registration events.
 	OnNodeRegister(fn func(node *Node) error)
-
-	// OnSessionEvent sets a callback for session data stream events.
 	OnSessionEvent(fn func(sessionID string, msg *SessionMsg))
-
-	// Close gracefully shuts down the server.
 	Close() error
 }
 
-// ErrNotImplemented is returned by Server methods whose behavior is not yet
-// available in this SDK version.
+// ErrNotImplemented is returned by Server methods not yet available.
 var ErrNotImplemented = errors.New("tai: not implemented")
 
-// DefaultShutdownTimeout is how long Close waits for in-flight HTTP/2
-// requests (such as Control streams) before closing their connections.
+// DefaultShutdownTimeout is how long Close waits for in-flight requests.
 const DefaultShutdownTimeout = 5 * time.Second
 
 const (
@@ -180,25 +176,20 @@ const (
 	defaultHTTPPort      = 5099
 )
 
-// wellKnownConfigurer is implemented by the default AuthProvider so the
-// server can advertise its TLS certificate and bound transport port.
+// wellKnownConfigurer is implemented by the default AuthProvider.
 type wellKnownConfigurer interface {
 	SetTLS(caCertPEM string, fingerprint string)
 	SetTransportPort(port int)
 }
 
-// server is the Server implementation: it wires the HTTP API (5099), the
-// TCP/UDP transport (6099) and the node manager.
+// server is the Server implementation.
 type server struct {
 	cfg   ServerConfig
 	auth  AuthProvider
-	mgr   *nodeManager
-	http  *httpServer
-	tr    *transportServer
-	light *lightPool
+	mgr   *transport.NodeManager
+	http  *transport.HTTPServer
+	tr    *transport.Server
 
-	// Overrides used by the test harness: listen addresses (default
-	// ":<port>") and an in-memory TLS configuration (default: cfg.TLS files).
 	httpListenAddr      string
 	transportListenAddr string
 	tlsCfg              *tls.Config
@@ -215,8 +206,7 @@ type server struct {
 	sessionEvent func(sessionID string, msg *SessionMsg)
 }
 
-// NewServer creates a transport server from cfg. Nothing is bound until
-// Start. It fails when cfg.Auth is nil or cfg.MaxFrameSize is out of range.
+// NewServer creates a transport server from cfg.
 func NewServer(cfg *ServerConfig) (Server, error) {
 	return newServer(cfg)
 }
@@ -225,7 +215,7 @@ func newServer(cfg *ServerConfig) (*server, error) {
 	if cfg == nil || cfg.Auth == nil {
 		return nil, errors.New("tai: ServerConfig.Auth is required")
 	}
-	codec, err := NewFrameCodec(cfg.MaxFrameSize)
+	codec, err := transport.NewFrameCodec(cfg.MaxFrameSize)
 	if err != nil {
 		return nil, err
 	}
@@ -245,25 +235,21 @@ func newServer(cfg *ServerConfig) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	mgr := newNodeManager()
-	mgr.pool = pool
-	light := newLightPool(pool, codec, mgr, c.Auth)
+	mgr := transport.NewNodeManager(pool)
 	s := &server{
-		cfg:   c,
-		auth:  c.Auth,
-		mgr:   mgr,
-		light: light,
-		http:  newHTTPServer(c.Auth),
-		tr:    newTransportServer(c.Auth, mgr, codec),
-		done:  make(chan struct{}),
+		cfg:  c,
+		auth: c.Auth,
+		mgr:  mgr,
+		http: transport.NewHTTPServer(c.Auth),
+		tr:   transport.NewServer(c.Auth, mgr, codec),
+		done: make(chan struct{}),
 	}
-	s.tr.unauthTimeout = c.UnauthTimeout
-	s.tr.quicConfig = c.QUIC
+	s.tr.SetUnauthTimeout(c.UnauthTimeout)
+	s.tr.SetQUICConfig(c.QUIC)
 	return s, nil
 }
 
-// bind opens every listener: the HTTP API, TCP, and (with TLS) UDP/H3 on the
-// same port number as TCP.
+// bind opens every listener.
 func (s *server) bind() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,26 +265,25 @@ func (s *server) bind() error {
 		return err
 	}
 
-	// Register Light pool handlers before starting listeners so the first
-	// accepted connections already reach the pool.
-	s.light.initLightHandlers(s.tr)
+	pool, _ := s.cfg.Pool.poolConfig()
+	s.tr.InitLightPool(pool)
 
 	tcpAddr := s.transportListenAddr
 	if tcpAddr == "" {
 		tcpAddr = ":" + strconv.Itoa(s.cfg.TransportPort)
 	}
-	if err := s.tr.startTCP(tcpAddr, tlsCfg); err != nil {
+	if err := s.tr.StartTCP(tcpAddr, tlsCfg); err != nil {
 		return err
 	}
-	s.tcpAddr = s.tr.tcpAddr()
+	s.tcpAddr = s.tr.TCPAddr()
 	host, port, _ := net.SplitHostPort(s.tcpAddr)
 
 	if tlsCfg != nil {
-		if err := s.tr.startH3(net.JoinHostPort(host, port), tlsCfg); err != nil {
-			s.tr.close(context.Background())
+		if err := s.tr.StartH3(net.JoinHostPort(host, port), tlsCfg); err != nil {
+			s.tr.Close(context.Background())
 			return err
 		}
-		s.udpAddr = s.tr.h3Addr()
+		s.udpAddr = s.tr.H3Addr()
 	}
 
 	if wk, ok := s.auth.(wellKnownConfigurer); ok {
@@ -310,23 +295,18 @@ func (s *server) bind() error {
 		}
 	}
 
-	// The HTTP API starts last so well-known never advertises a stale port or
-	// missing TLS information.
 	httpAddr := s.httpListenAddr
 	if httpAddr == "" {
 		httpAddr = ":" + strconv.Itoa(s.cfg.HTTPPort)
 	}
-	if err := s.http.start(httpAddr); err != nil {
-		s.tr.close(context.Background())
+	if err := s.http.Start(httpAddr); err != nil {
+		s.tr.Close(context.Background())
 		return err
 	}
 	s.bound = true
 	return nil
 }
 
-// loadTLS returns the TLS configuration, the certificate PEM advertised in
-// well-known, and the leaf certificate fingerprint. All are zero when TLS is
-// not configured.
 func (s *server) loadTLS() (*tls.Config, []byte, string, error) {
 	cfg := s.tlsCfg
 	var certPEM []byte
@@ -355,8 +335,6 @@ func (s *server) loadTLS() (*tls.Config, []byte, string, error) {
 	return cfg, certPEM, fmt.Sprintf("sha256:%x", sum), nil
 }
 
-// Start binds the listeners and blocks until ctx is cancelled, then shuts the
-// server down. Bind failures are returned immediately.
 func (s *server) Start(ctx context.Context) error {
 	if err := s.bind(); err != nil {
 		return err
@@ -368,16 +346,15 @@ func (s *server) Start(ctx context.Context) error {
 	return s.Close()
 }
 
-// Addr returns the TCP transport address, or "" before Start has bound it.
 func (s *server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.tcpAddr
 }
 
-func (s *server) Nodes() []*Node { return s.mgr.allNodes() }
+func (s *server) Nodes() []*Node { return s.mgr.AllNodes() }
 
-func (s *server) NodeByID(nodeID string) *Node { return s.mgr.nodeByID(nodeID) }
+func (s *server) NodeByID(nodeID string) *Node { return s.mgr.NodeByID(nodeID) }
 
 func (s *server) OpenSession(ctx context.Context, req *OpenSessionRequest) (*Session, error) {
 	return nil, ErrNotImplemented
@@ -388,14 +365,14 @@ func (s *server) RegisterTool(tool *ToolDefinition) error { return ErrNotImpleme
 func (s *server) UnregisterTool(name string) error { return ErrNotImplemented }
 
 func (s *server) SendControl(nodeID string, msg *ControlMsg) error {
-	return s.mgr.sendControl(nodeID, &pb.Payload{
+	return s.mgr.SendControl(nodeID, &pb.Payload{
 		Namespace: NamespaceControl,
 		Kind:      msg.Kind,
 		Data:      msg.Data,
 	})
 }
 
-func (s *server) OnNodeRegister(fn func(node *Node) error) { s.mgr.setOnRegister(fn) }
+func (s *server) OnNodeRegister(fn func(node *Node) error) { s.mgr.SetOnRegister(fn) }
 
 func (s *server) OnSessionEvent(fn func(sessionID string, msg *SessionMsg)) {
 	s.mu.Lock()
@@ -403,8 +380,6 @@ func (s *server) OnSessionEvent(fn func(sessionID string, msg *SessionMsg)) {
 	s.mu.Unlock()
 }
 
-// Close shuts down the transport and HTTP servers. It is safe to call more
-// than once and before Start.
 func (s *server) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
@@ -415,9 +390,7 @@ func (s *server) Close() error {
 		if !bound {
 			return
 		}
-		// Release all Light pool connections before closing TCP so the
-		// serveTai goroutines that block in handleLightH2 can return.
-		s.light.close()
+		s.tr.CloseLightPool()
 
 		timeout := s.cfg.ShutdownTimeout
 		if timeout == 0 {
@@ -425,8 +398,8 @@ func (s *server) Close() error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		err := s.tr.close(ctx)
-		if herr := s.http.close(ctx); herr != nil && err == nil {
+		err := s.tr.Close(ctx)
+		if herr := s.http.Close(ctx); herr != nil && err == nil {
 			err = herr
 		}
 		s.closeErr = err

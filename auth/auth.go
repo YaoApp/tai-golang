@@ -1,4 +1,5 @@
-package tai
+// Package auth provides the default JWT-based AuthProvider implementation.
+package auth
 
 import (
 	"crypto/ed25519"
@@ -10,18 +11,18 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/yaoapp/tai-golang/types"
 )
 
-// Sentinel errors returned by DefaultAuthProvider.
+// Sentinel errors returned by DefaultAuth.
 var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrTokenExpired = errors.New("token expired")
-	ErrNodeNotFound = errors.New("node not found")
 )
 
-// DefaultAuth creates a DefaultAuthProvider with the given Ed25519 private key.
-// The private key is used for signing node_tokens and OperationTokens.
-func DefaultAuth(privateKey ed25519.PrivateKey) AuthProvider {
+// DefaultAuth creates an AuthProvider backed by Ed25519 JWT signing.
+// The private key signs node_tokens and OperationTokens.
+func DefaultAuth(privateKey ed25519.PrivateKey) types.AuthProvider {
 	keyID := hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)[:8])
 	return &defaultAuth{
 		privateKey: privateKey,
@@ -35,24 +36,22 @@ type defaultAuth struct {
 	publicKey  ed25519.PublicKey
 	keyID      string
 
-	mu            sync.RWMutex // guards tlsInfo and transportPort
-	tlsInfo       *TLSInfo
-	transportPort int // overrides 6099 when non-zero (for tests with ephemeral ports)
+	mu            sync.RWMutex
+	tlsInfo       *types.TLSInfo
+	transportPort int
 }
 
 // SetTLS configures TLS information returned in well-known responses.
-// Call this after DefaultAuth() if the transport uses TLS.
 func (a *defaultAuth) SetTLS(caCertPEM string, fingerprint string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.tlsInfo = &TLSInfo{
+	a.tlsInfo = &types.TLSInfo{
 		CACertificate: caCertPEM,
 		Fingerprint:   fingerprint,
 	}
 }
 
 // SetTransportPort overrides the transport_port in well-known responses.
-// Used by TestServer to advertise ephemeral ports instead of the default 6099.
 func (a *defaultAuth) SetTransportPort(port int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -60,7 +59,7 @@ func (a *defaultAuth) SetTransportPort(port int) {
 }
 
 // ValidateNodeToken verifies an Ed25519-signed JWT node_token.
-func (a *defaultAuth) ValidateNodeToken(token string) (*NodeInfo, error) {
+func (a *defaultAuth) ValidateNodeToken(token string) (*types.NodeInfo, error) {
 	claims := &nodeTokenClaims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
@@ -71,7 +70,7 @@ func (a *defaultAuth) ValidateNodeToken(token string) (*NodeInfo, error) {
 	if err != nil {
 		return nil, ErrUnauthorized
 	}
-	return &NodeInfo{NodeID: claims.NodeID, UserID: claims.UserID}, nil
+	return &types.NodeInfo{NodeID: claims.NodeID, UserID: claims.UserID}, nil
 }
 
 // IssueNodeToken creates a new node_token valid for 7 days.
@@ -82,7 +81,7 @@ func (a *defaultAuth) IssueNodeToken(nodeID string) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
-			ID:        generateID("nt"),
+			ID:        GenerateID("nt"),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -99,7 +98,7 @@ func (a *defaultAuth) RefreshNodeToken(oldToken string) (string, error) {
 }
 
 // IssueOperationToken creates a session-scoped JWT valid for 30 minutes.
-func (a *defaultAuth) IssueOperationToken(nodeID, sessionID string, ops []string, scope *TokenScope) (string, error) {
+func (a *defaultAuth) IssueOperationToken(nodeID, sessionID string, ops []string, scope *types.TokenScope) (string, error) {
 	now := time.Now()
 	var paths []string
 	if scope != nil {
@@ -113,7 +112,7 @@ func (a *defaultAuth) IssueOperationToken(nodeID, sessionID string, ops []string
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Minute)),
-			ID:        generateID("op"),
+			ID:        GenerateID("op"),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
@@ -126,21 +125,18 @@ func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
 }
 
 // WellKnownInfo returns default transport metadata.
-// HTTP/3 is listed first as the primary protocol.
-// TLS info is included when configured via SetTLS.
-func (a *defaultAuth) WellKnownInfo() *WellKnownResponse {
+func (a *defaultAuth) WellKnownInfo() *types.WellKnownResponse {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	port := 6099
 	if a.transportPort != 0 {
 		port = a.transportPort
 	}
-	// QUIC requires TLS: without TLS only the TCP (HTTP/2) path exists.
 	protocols := []string{"HTTP/2"}
 	if a.tlsInfo != nil {
 		protocols = []string{"HTTP/3", "HTTP/2"}
 	}
-	return &WellKnownResponse{
+	return &types.WellKnownResponse{
 		TransportPort: port,
 		Protocols:     protocols,
 		TLS:           a.tlsInfo,
@@ -166,7 +162,8 @@ type opTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func generateID(prefix string) string {
+// GenerateID creates a random prefixed identifier (e.g. "nt_a1b2c3...").
+func GenerateID(prefix string) string {
 	b := make([]byte, 12)
 	rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)

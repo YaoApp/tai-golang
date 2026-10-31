@@ -1,7 +1,9 @@
-package tai
+// Package types defines shared data types for the Tai SDK.
+// It has no dependencies beyond the standard library.
+package types
 
 // AuthProvider defines the authentication interface for the transport server.
-// The SDK ships a default JWT-based implementation via DefaultAuth().
+// The SDK ships a default JWT-based implementation via auth.DefaultAuth().
 // Servers (e.g. Yao) can supply their own implementation to integrate with
 // their user database and token infrastructure.
 type AuthProvider interface {

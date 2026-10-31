@@ -1,9 +1,11 @@
-package tai
+package auth
 
 import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
 func newTestAuth(t *testing.T) (*defaultAuth, ed25519.PrivateKey) {
@@ -98,7 +100,7 @@ func TestIssueOperationToken(t *testing.T) {
 func TestIssueOperationToken_WithScope(t *testing.T) {
 	auth, _ := newTestAuth(t)
 
-	scope := &TokenScope{Paths: []string{"/tmp", "/home"}}
+	scope := &types.TokenScope{Paths: []string{"/tmp", "/home"}}
 	token, err := auth.IssueOperationToken("node-006", "sess-002", []string{"file.read"}, scope)
 	if err != nil {
 		t.Fatalf("issue with scope: %v", err)
@@ -123,7 +125,6 @@ func TestSigningPublicKey(t *testing.T) {
 func TestWellKnownInfo(t *testing.T) {
 	auth, _ := newTestAuth(t)
 
-	// Without TLS there is no QUIC: only the TCP path is advertised.
 	if plain := auth.WellKnownInfo(); len(plain.Protocols) != 1 || plain.Protocols[0] != "HTTP/2" {
 		t.Errorf("Protocols without TLS=%v, want [HTTP/2]", plain.Protocols)
 	}
@@ -137,10 +138,10 @@ func TestWellKnownInfo(t *testing.T) {
 		t.Fatalf("Protocols=%v, want [HTTP/3 HTTP/2]", info.Protocols)
 	}
 	if info.Protocols[0] != "HTTP/3" {
-		t.Errorf("Protocols[0]=%q, want HTTP/3 (primary)", info.Protocols[0])
+		t.Errorf("Protocols[0]=%q, want HTTP/3", info.Protocols[0])
 	}
 	if info.Protocols[1] != "HTTP/2" {
-		t.Errorf("Protocols[1]=%q, want HTTP/2 (fallback)", info.Protocols[1])
+		t.Errorf("Protocols[1]=%q, want HTTP/2", info.Protocols[1])
 	}
 	if info.Version == "" {
 		t.Error("Version should not be empty")
@@ -170,8 +171,8 @@ func TestWellKnownConfigureConcurrently(t *testing.T) {
 }
 
 func TestGenerateID(t *testing.T) {
-	id1 := generateID("test")
-	id2 := generateID("test")
+	id1 := GenerateID("test")
+	id2 := GenerateID("test")
 	if id1 == id2 {
 		t.Error("IDs should be unique")
 	}

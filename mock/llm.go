@@ -1,4 +1,5 @@
-package tai
+// Package mock provides test doubles for the Tai SDK.
+package mock
 
 import (
 	"encoding/json"
@@ -9,12 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-// ---------------------------------------------------------------------------
-// MockLLM — OpenAI-compatible /v1/chat/completions server for testing.
-// Supports streaming (SSE) and non-streaming responses, tool_call simulation,
-// request recording, and multi-turn scripted handlers.
-// ---------------------------------------------------------------------------
 
 // ChatHandler produces a response for a given chat completion request.
 type ChatHandler func(req *ChatCompletionRequest) *ChatCompletionResponse
@@ -30,8 +25,7 @@ type MockLLM struct {
 	requests []ChatCompletionRequest
 }
 
-// NewMockLLM starts a MockLLM on an ephemeral port. The server is
-// automatically closed when the test finishes.
+// NewMockLLM starts a MockLLM on an ephemeral port.
 func NewMockLLM(t *testing.T, handler ChatHandler) *MockLLM {
 	t.Helper()
 
@@ -55,8 +49,7 @@ func NewMockLLM(t *testing.T, handler ChatHandler) *MockLLM {
 	return m
 }
 
-// URL returns the base URL without a trailing slash (e.g. "http://127.0.0.1:PORT").
-// The caller (or SDK NormalizeBaseURL) appends "/v1" as needed.
+// URL returns the base URL (e.g. "http://127.0.0.1:PORT").
 func (m *MockLLM) URL() string {
 	return "http://" + m.addr
 }
@@ -70,8 +63,7 @@ func (m *MockLLM) Requests() []ChatCompletionRequest {
 	return out
 }
 
-// AssertRequestCount fails the test if the number of recorded requests
-// does not equal n.
+// AssertRequestCount fails the test if the number of recorded requests does not equal n.
 func (m *MockLLM) AssertRequestCount(t *testing.T, n int) {
 	t.Helper()
 	m.mu.Lock()
@@ -83,7 +75,7 @@ func (m *MockLLM) AssertRequestCount(t *testing.T, n int) {
 }
 
 // ---------------------------------------------------------------------------
-// Request / Response types (OpenAI chat completions subset)
+// Request / Response types
 // ---------------------------------------------------------------------------
 
 // ChatCompletionRequest mirrors the OpenAI chat completion request body.
@@ -94,9 +86,7 @@ type ChatCompletionRequest struct {
 	Stream   bool          `json:"stream"`
 }
 
-// ChatMessage is a single message in the conversation. Content is always
-// exposed as a string; UnmarshalJSON handles the OpenAI multi-modal array
-// format ([{type:"text",text:"..."}]) transparently.
+// ChatMessage is a single message in the conversation.
 type ChatMessage struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
@@ -104,9 +94,7 @@ type ChatMessage struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-// UnmarshalJSON handles content as either a plain string or an OpenAI
-// content-parts array. PiG and other OpenAI-compatible providers send
-// content as [{type:"text",text:"..."}] for multi-modal messages.
+// UnmarshalJSON handles content as either a plain string or an OpenAI content-parts array.
 func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 	type alias ChatMessage
 	raw := struct {
@@ -119,13 +107,11 @@ func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 	if len(raw.Content) == 0 || string(raw.Content) == "null" {
 		return nil
 	}
-	// Try string first (the common case for tool results and simple messages).
 	var s string
 	if err := json.Unmarshal(raw.Content, &s); err == nil {
 		m.Content = s
 		return nil
 	}
-	// Try array of content parts (PiG/OpenAI multi-modal format).
 	var parts []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -138,7 +124,6 @@ func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 		}
 		return nil
 	}
-	// Fallback: use raw JSON as string.
 	m.Content = string(raw.Content)
 	return nil
 }
@@ -163,7 +148,7 @@ type ToolCall struct {
 	Function ToolCallFunc `json:"function"`
 }
 
-// ToolCallFunc holds the function name and arguments inside a ToolCall.
+// ToolCallFunc holds the function name and arguments.
 type ToolCallFunc struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
@@ -193,10 +178,7 @@ type ChatUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// ---------------------------------------------------------------------------
-// Streaming types (SSE chunked response)
-// ---------------------------------------------------------------------------
-
+// Streaming types
 type chatChunk struct {
 	ID      string        `json:"id"`
 	Object  string        `json:"object"`
@@ -237,8 +219,7 @@ func TextResponse(content string) *ChatCompletionResponse {
 	}
 }
 
-// ToolCallResponse creates a ChatCompletionResponse where the assistant
-// invokes one or more tool calls.
+// ToolCallResponse creates a response where the assistant invokes tool calls.
 func ToolCallResponse(calls ...ToolCall) *ChatCompletionResponse {
 	return &ChatCompletionResponse{
 		ID:      "chatcmpl-mock",
@@ -270,8 +251,6 @@ func MakeToolCall(id, name, argsJSON string) ToolCall {
 }
 
 // ScriptHandler returns a ChatHandler that replays responses in order.
-// After all scripted responses are consumed, subsequent requests receive
-// a default TextResponse("(end of script)").
 func ScriptHandler(responses ...*ChatCompletionResponse) ChatHandler {
 	var mu sync.Mutex
 	idx := 0
@@ -320,7 +299,6 @@ func (m *MockLLM) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// writeStream sends the response as SSE chunks (OpenAI streaming format).
 func (m *MockLLM) writeStream(w http.ResponseWriter, resp *ChatCompletionResponse) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -340,13 +318,11 @@ func (m *MockLLM) writeStream(w http.ResponseWriter, resp *ChatCompletionRespons
 
 	choice := resp.Choices[0]
 
-	// Role chunk
 	writeChunk(w, flusher, resp, chunkChoice{
 		Index: 0,
 		Delta: chunkDelta{Role: "assistant"},
 	})
 
-	// Content or tool_calls
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, tc := range choice.Message.ToolCalls {
 			writeChunk(w, flusher, resp, chunkChoice{
@@ -361,7 +337,6 @@ func (m *MockLLM) writeStream(w http.ResponseWriter, resp *ChatCompletionRespons
 			FinishReason: &finish,
 		})
 	} else {
-		// Split content into per-character deltas for realistic streaming
 		content := choice.Message.Content
 		for _, ch := range content {
 			writeChunk(w, flusher, resp, chunkChoice{

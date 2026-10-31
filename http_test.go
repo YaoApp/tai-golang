@@ -8,10 +8,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yaoapp/tai-golang/mock"
+	"github.com/yaoapp/tai-golang/transport"
+	"github.com/yaoapp/tai-golang/types"
 )
 
 func TestWellKnownEndpoint(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
 	resp, err := http.Get(ts.HTTPURL() + "/.well-known/yao-transport")
 	if err != nil {
@@ -23,7 +27,7 @@ func TestWellKnownEndpoint(t *testing.T) {
 		t.Fatalf("status=%d, want 200", resp.StatusCode)
 	}
 
-	var info WellKnownResponse
+	var info types.WellKnownResponse
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -37,7 +41,7 @@ func TestWellKnownEndpoint(t *testing.T) {
 }
 
 func TestConnectNotServedOnHTTPPort(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
 	resp, err := http.Post(ts.HTTPURL()+"/v1/tai/connect", "application/json", strings.NewReader("{}"))
 	if err != nil {
@@ -51,10 +55,10 @@ func TestConnectNotServedOnHTTPPort(t *testing.T) {
 }
 
 func TestTokenRefreshEndpoint(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 	oldToken := ts.IssueTestNodeToken("refresh-node")
 
-	body, _ := json.Marshal(refreshRequest{NodeToken: oldToken})
+	body, _ := json.Marshal(transport.RefreshRequest{NodeToken: oldToken})
 	resp, err := http.Post(ts.HTTPURL()+"/v1/tai/token/refresh", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -65,7 +69,7 @@ func TestTokenRefreshEndpoint(t *testing.T) {
 		t.Fatalf("status=%d, want 200", resp.StatusCode)
 	}
 
-	var rr refreshResponse
+	var rr transport.RefreshResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -79,9 +83,9 @@ func TestTokenRefreshEndpoint(t *testing.T) {
 }
 
 func TestTokenRefreshEndpoint_InvalidToken(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
-	body, _ := json.Marshal(refreshRequest{NodeToken: "bad-token"})
+	body, _ := json.Marshal(transport.RefreshRequest{NodeToken: "bad-token"})
 	resp, err := http.Post(ts.HTTPURL()+"/v1/tai/token/refresh", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -94,7 +98,7 @@ func TestTokenRefreshEndpoint_InvalidToken(t *testing.T) {
 }
 
 func TestTokenRefreshEndpoint_BadBody(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
 	resp, err := http.Post(ts.HTTPURL()+"/v1/tai/token/refresh", "application/json", strings.NewReader("not json"))
 	if err != nil {
@@ -108,10 +112,10 @@ func TestTokenRefreshEndpoint_BadBody(t *testing.T) {
 }
 
 func TestHeartbeatEndpoint(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 	token := ts.IssueTestNodeToken("hb-node")
 
-	body, _ := json.Marshal(heartbeatRequest{
+	body, _ := json.Marshal(transport.HeartbeatRequest{
 		TaiID:     "hb-node",
 		NodeToken: token,
 		Timestamp: 1000000,
@@ -128,9 +132,9 @@ func TestHeartbeatEndpoint(t *testing.T) {
 }
 
 func TestHeartbeatEndpoint_InvalidToken(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
-	body, _ := json.Marshal(heartbeatRequest{
+	body, _ := json.Marshal(transport.HeartbeatRequest{
 		TaiID:     "hb-node",
 		NodeToken: "bad",
 		Timestamp: 1000000,
@@ -147,7 +151,7 @@ func TestHeartbeatEndpoint_InvalidToken(t *testing.T) {
 }
 
 func TestHeartbeatEndpoint_BadBody(t *testing.T) {
-	ts := NewTestServer(t)
+	ts := mock.NewTestServer(t)
 
 	resp, err := http.Post(ts.HTTPURL()+"/v1/tai/heartbeat", "application/json", strings.NewReader("{{"))
 	if err != nil {
@@ -161,36 +165,33 @@ func TestHeartbeatEndpoint_BadBody(t *testing.T) {
 }
 
 func TestHTTPServerAddrBeforeStart(t *testing.T) {
-	auth, _ := newTestAuth(t)
-	s := newHTTPServer(auth)
-	if s.addr() != "" {
-		t.Errorf("addr should be empty before start, got %q", s.addr())
+	a := testAuth(t)
+	s := transport.NewHTTPServer(a)
+	if s.Addr() != "" {
+		t.Errorf("addr should be empty before start, got %q", s.Addr())
 	}
 }
 
 func TestHTTPListenAndServe(t *testing.T) {
-	auth, _ := newTestAuth(t)
-	s := newHTTPServer(auth)
+	a := testAuth(t)
+	s := transport.NewHTTPServer(a)
 
-	// Start in background goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.listenAndServe("127.0.0.1:0")
+		errCh <- s.ListenAndServe("127.0.0.1:0")
 	}()
 
-	// Wait for listener to be ready
 	for i := 0; i < 50; i++ {
-		if s.addr() != "" {
+		if s.Addr() != "" {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if s.addr() == "" {
+	if s.Addr() == "" {
 		t.Fatal("server did not start")
 	}
 
-	// Hit the well-known endpoint
-	resp, err := http.Get("http://" + s.addr() + "/.well-known/yao-transport")
+	resp, err := http.Get("http://" + s.Addr() + "/.well-known/yao-transport")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -199,8 +200,7 @@ func TestHTTPListenAndServe(t *testing.T) {
 		t.Errorf("status=%d", resp.StatusCode)
 	}
 
-	// Shutdown
-	s.close(context.Background())
+	s.Close(context.Background())
 
 	if err := <-errCh; err != nil && err != http.ErrServerClosed {
 		t.Errorf("listenAndServe: %v", err)
@@ -208,9 +208,9 @@ func TestHTTPListenAndServe(t *testing.T) {
 }
 
 func TestHTTPServerCloseNil(t *testing.T) {
-	auth, _ := newTestAuth(t)
-	s := newHTTPServer(auth)
-	if err := s.close(context.Background()); err != nil {
+	a := testAuth(t)
+	s := transport.NewHTTPServer(a)
+	if err := s.Close(context.Background()); err != nil {
 		t.Errorf("close nil: %v", err)
 	}
 }
@@ -231,7 +231,7 @@ func TestExtractBearer(t *testing.T) {
 		if tt.header != "" {
 			req.Header.Set("Authorization", tt.header)
 		}
-		got := extractBearer(req)
+		got := transport.ExtractBearer(req)
 		if got != tt.want {
 			t.Errorf("extractBearer(%q)=%q, want %q", tt.header, got, tt.want)
 		}

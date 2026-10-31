@@ -1,4 +1,4 @@
-package tai
+package mock
 
 import (
 	"bufio"

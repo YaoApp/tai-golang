@@ -1,4 +1,6 @@
-package tai
+// Package transport implements the Tai Transport Protocol v2 server:
+// TCP (HTTP/2), QUIC (HTTP/3, WebTransport), and the Tai frame protocol.
+package transport
 
 import (
 	"encoding/binary"
@@ -22,7 +24,6 @@ const (
 var ErrFrameTooLarge = errors.New("frame too large")
 
 // FrameCodec reads and writes length-prefixed Payload frames.
-// The maximum payload size is configurable; use NewFrameCodec to create one.
 type FrameCodec struct {
 	maxSize int
 }
@@ -41,7 +42,6 @@ func NewFrameCodec(maxSize int) (*FrameCodec, error) {
 }
 
 // WriteFrame writes a length-prefixed Payload to w.
-// Wire format: 4-byte big-endian length + protobuf payload.
 func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.Payload) error {
 	data, err := proto.Marshal(msg)
 	if err != nil {
@@ -63,7 +63,6 @@ func (fc *FrameCodec) WriteFrame(w io.Writer, msg *pb.Payload) error {
 }
 
 // ReadFrame reads a length-prefixed Payload from r.
-// Returns io.EOF when the stream ends cleanly.
 func (fc *FrameCodec) ReadFrame(r io.Reader) (*pb.Payload, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(r, header); err != nil {
@@ -92,15 +91,56 @@ func (fc *FrameCodec) MaxSize() int {
 	return fc.maxSize
 }
 
-// defaultCodec is used by the package-level writeFrame/readFrame functions.
-var defaultCodec = &FrameCodec{maxSize: DefaultMaxFrameSize}
-
-// writeFrame writes a length-prefixed Payload using the default codec.
-func writeFrame(w io.Writer, msg *pb.Payload) error {
-	return defaultCodec.WriteFrame(w, msg)
+// DefaultCodec returns a FrameCodec with DefaultMaxFrameSize.
+func DefaultCodec() *FrameCodec {
+	return &FrameCodec{maxSize: DefaultMaxFrameSize}
 }
 
-// readFrame reads a length-prefixed Payload using the default codec.
-func readFrame(r io.Reader) (*pb.Payload, error) {
-	return defaultCodec.ReadFrame(r)
+// WriteFrame writes a length-prefixed Payload using the default codec.
+func WriteFrame(w io.Writer, msg *pb.Payload) error {
+	return DefaultCodec().WriteFrame(w, msg)
+}
+
+// ReadFrame reads a length-prefixed Payload using the default codec.
+func ReadFrame(r io.Reader) (*pb.Payload, error) {
+	return DefaultCodec().ReadFrame(r)
+}
+
+// WriteProtoMsg writes a length-prefixed protobuf message.
+// Used for Connect/ConnectAck frames on Light and Heavy connections.
+func WriteProtoMsg(w io.Writer, msg proto.Message, maxSize int) error {
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	if len(data) > maxSize {
+		return ErrFrameTooLarge
+	}
+	header := make([]byte, 4)
+	binary.BigEndian.PutUint32(header, uint32(len(data)))
+	if _, err := w.Write(header); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
+	return nil
+}
+
+// ReadProtoMsg reads a length-prefixed protobuf message.
+// Used for Connect/ConnectAck frames on Light and Heavy connections.
+func ReadProtoMsg(r io.Reader, msg proto.Message, maxSize int) error {
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return err
+	}
+	length := binary.BigEndian.Uint32(header)
+	if int(length) > maxSize {
+		return ErrFrameTooLarge
+	}
+	data := make([]byte, length)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	return proto.Unmarshal(data, msg)
 }

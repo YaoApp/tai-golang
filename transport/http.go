@@ -1,4 +1,4 @@
-package tai
+package transport
 
 import (
 	"context"
@@ -9,23 +9,22 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
-// httpServer handles the HTTP API on port 5099.
-// Endpoints: well-known, token refresh, heartbeat, tai call.
-// Connection authentication (`POST /v1/tai/connect`) lives on the transport
-// port (6099), not here.
-type httpServer struct {
-	auth     AuthProvider
+// HTTPServer handles the HTTP API on port 5099.
+type HTTPServer struct {
+	auth     types.AuthProvider
 	mux      *http.ServeMux
 	mu       sync.Mutex
 	server   *http.Server
 	listener net.Listener
 }
 
-// newHTTPServer creates an httpServer wired to the given AuthProvider.
-func newHTTPServer(auth AuthProvider) *httpServer {
-	s := &httpServer{
+// NewHTTPServer creates an HTTPServer wired to the given AuthProvider.
+func NewHTTPServer(auth types.AuthProvider) *HTTPServer {
+	s := &HTTPServer{
 		auth: auth,
 		mux:  http.NewServeMux(),
 	}
@@ -35,8 +34,8 @@ func newHTTPServer(auth AuthProvider) *httpServer {
 	return s
 }
 
-// listenAndServe starts the HTTP server on the given address (blocking).
-func (s *httpServer) listenAndServe(addr string) error {
+// ListenAndServe starts the HTTP server on the given address (blocking).
+func (s *HTTPServer) ListenAndServe(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("http listen: %w", err)
@@ -51,8 +50,8 @@ func (s *httpServer) listenAndServe(addr string) error {
 	return s.server.Serve(ln)
 }
 
-// start starts the HTTP server in the background.
-func (s *httpServer) start(addr string) error {
+// Start starts the HTTP server in the background.
+func (s *HTTPServer) Start(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("http listen: %w", err)
@@ -71,8 +70,8 @@ func (s *httpServer) start(addr string) error {
 	return nil
 }
 
-// addr returns the listener address.
-func (s *httpServer) addr() string {
+// Addr returns the listener address.
+func (s *HTTPServer) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.listener == nil {
@@ -81,8 +80,8 @@ func (s *httpServer) addr() string {
 	return s.listener.Addr().String()
 }
 
-// close gracefully shuts down the HTTP server.
-func (s *httpServer) close(ctx context.Context) error {
+// Close gracefully shuts down the HTTP server.
+func (s *HTTPServer) Close(ctx context.Context) error {
 	s.mu.Lock()
 	srv := s.server
 	s.mu.Unlock()
@@ -93,53 +92,48 @@ func (s *httpServer) close(ctx context.Context) error {
 }
 
 // ---------------------------------------------------------------------------
-// GET /.well-known/yao-transport
+// Handlers
 // ---------------------------------------------------------------------------
 
-func (s *httpServer) handleWellKnown(w http.ResponseWriter, r *http.Request) {
+func (s *HTTPServer) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	info := s.auth.WellKnownInfo()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/tai/token/refresh
-// ---------------------------------------------------------------------------
-
-type refreshRequest struct {
+// RefreshRequest is the JSON body of POST /v1/tai/token/refresh.
+type RefreshRequest struct {
 	NodeToken string `json:"node_token"`
 }
 
-type refreshResponse struct {
+// RefreshResponse is the JSON body of the token refresh response.
+type RefreshResponse struct {
 	NodeToken string `json:"node_token"`
-	ExpiresIn int    `json:"expires_in"` // seconds until token expiry
+	ExpiresIn int    `json:"expires_in"`
 }
 
-func (s *httpServer) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
+func (s *HTTPServer) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request body")
+		HTTPError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	newToken, err := s.auth.RefreshNodeToken(req.NodeToken)
 	if err != nil {
-		httpError(w, http.StatusUnauthorized, "refresh failed")
+		HTTPError(w, http.StatusUnauthorized, "refresh failed")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(refreshResponse{
+	json.NewEncoder(w).Encode(RefreshResponse{
 		NodeToken: newToken,
-		ExpiresIn: 7 * 24 * 3600, // matches IssueNodeToken TTL
+		ExpiresIn: 7 * 24 * 3600,
 	})
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/tai/heartbeat
-// ---------------------------------------------------------------------------
-
-type heartbeatRequest struct {
+// HeartbeatRequest is the JSON body of POST /v1/tai/heartbeat.
+type HeartbeatRequest struct {
 	TaiID        string   `json:"tai_id"`
 	NodeToken    string   `json:"node_token"`
 	Sessions     []string `json:"sessions"`
@@ -147,15 +141,15 @@ type heartbeatRequest struct {
 	Timestamp    int64    `json:"timestamp"`
 }
 
-func (s *httpServer) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
-	var req heartbeatRequest
+func (s *HTTPServer) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var req HeartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request body")
+		HTTPError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if _, err := s.auth.ValidateNodeToken(req.NodeToken); err != nil {
-		httpError(w, http.StatusUnauthorized, "invalid node_token")
+		HTTPError(w, http.StatusUnauthorized, "invalid node_token")
 		return
 	}
 
@@ -166,7 +160,8 @@ func (s *httpServer) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func extractBearer(r *http.Request) string {
+// ExtractBearer extracts the token from a "Bearer <token>" Authorization header.
+func ExtractBearer(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
 		return ""
@@ -174,12 +169,14 @@ func extractBearer(r *http.Request) string {
 	return strings.TrimPrefix(auth, "Bearer ")
 }
 
-type errorResponse struct {
+// ErrorResponse is the JSON error body.
+type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-func httpError(w http.ResponseWriter, code int, msg string) {
+// HTTPError writes a JSON error response.
+func HTTPError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(errorResponse{Error: msg})
+	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
 }

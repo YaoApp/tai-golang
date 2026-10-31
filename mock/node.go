@@ -1,4 +1,4 @@
-package tai
+package mock
 
 import (
 	"bytes"
@@ -15,45 +15,39 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/transport"
+	"github.com/yaoapp/tai-golang/types"
 	"google.golang.org/protobuf/proto"
 )
 
 // MockNode simulates a Tai client for SDK self-contained testing.
-// It supports both high-level Start/Stop and low-level step-by-step APIs.
 type MockNode struct {
-	// ID is the unique node identifier.
-	ID string
-	// Hardware is the node hardware info sent in register.
+	ID       string
 	Hardware *pb.Hardware
-	// Runtimes is the list of container runtimes.
 	Runtimes []*pb.ContainerRuntime
-	// Caps is the capability list (e.g. "session", "tunnel").
-	Caps []string
-	// Version is the Tai binary version string.
-	Version string
+	Caps     []string
+	Version  string
 
-	serverURL  string // HTTP API base URL (http://host:port)
-	h2Addr     string // H2 transport address (host:port, TCP)
-	h3Addr     string // H3 transport address (host:port, UDP)
+	serverURL  string
+	h2Addr     string
+	h3Addr     string
 	nodeToken  string
 	taiID      string
 	poolConfig *pb.PoolConfig
 	publicKey  []byte
 	keyID      string
 
-	codec *FrameCodec
+	codec *transport.FrameCodec
 
-	// Control stream
 	mu         sync.Mutex
 	controlR   io.ReadCloser
 	controlW   io.Writer
 	controlF   http.Flusher
 	httpResp   *http.Response
 	httpClient *http.Client
-	protocol   string          // "H3" or "H2"
-	pendingCh  chan httpResult // set by Connect, consumed by Register
+	protocol   string
+	pendingCh  chan httpResult
 
-	// Lifecycle
 	registered chan struct{}
 	pingCancel context.CancelFunc
 	recvCancel context.CancelFunc
@@ -61,8 +55,12 @@ type MockNode struct {
 	stopped    bool
 }
 
+type httpResult struct {
+	resp *http.Response
+	err  error
+}
+
 // NewMockNode creates a MockNode for testing.
-// h2Addr is the H2 transport (TCP) address; h3Addr is the H3 transport (QUIC) address.
 func NewMockNode(id string, serverHTTPURL string, h2Addr string, h3Addr string) *MockNode {
 	return &MockNode{
 		ID:        id,
@@ -70,7 +68,7 @@ func NewMockNode(id string, serverHTTPURL string, h2Addr string, h3Addr string) 
 		serverURL: serverHTTPURL,
 		h2Addr:    h2Addr,
 		h3Addr:    h3Addr,
-		codec:     defaultCodec,
+		codec:     transport.DefaultCodec(),
 		Hardware: &pb.Hardware{
 			Os:         "linux",
 			Arch:       "amd64",
@@ -83,17 +81,14 @@ func NewMockNode(id string, serverHTTPURL string, h2Addr string, h3Addr string) 
 	}
 }
 
-// OnControl registers a handler called for each downstream Control message
-// (e.g. go_away, key.rotation). Called from the recv goroutine.
+// OnControl registers a handler for downstream Control messages.
 func (m *MockNode) OnControl(fn func(*pb.Payload)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onControl = fn
 }
 
-// Start runs the full connection flow: discover -> connect (authorize, open
-// control) -> register -> ping.
-// It blocks until registration completes or ctx is cancelled.
+// Start runs the full connection flow: discover -> connect -> register -> ping.
 func (m *MockNode) Start(ctx context.Context) error {
 	wk, err := m.Discover()
 	if err != nil {
@@ -124,8 +119,7 @@ func (m *MockNode) WaitRegistered(timeout time.Duration) error {
 	}
 }
 
-// Stop closes the Control stream, cancels background goroutines, and
-// releases the HTTP client transport (including QUIC/UDP sockets).
+// Stop closes the Control stream and releases resources.
 func (m *MockNode) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -174,7 +168,7 @@ func (m *MockNode) PoolConfig() *pb.PoolConfig {
 	return m.poolConfig
 }
 
-// Protocol returns "H3" or "H2" depending on which transport was used.
+// Protocol returns "H3" or "H2".
 func (m *MockNode) Protocol() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -185,8 +179,8 @@ func (m *MockNode) Protocol() string {
 // Low-level API
 // ---------------------------------------------------------------------------
 
-// Discover calls GET /.well-known/yao-transport and returns the response.
-func (m *MockNode) Discover() (*WellKnownResponse, error) {
+// Discover calls GET /.well-known/yao-transport.
+func (m *MockNode) Discover() (*types.WellKnownResponse, error) {
 	resp, err := http.Get(m.serverURL + "/.well-known/yao-transport")
 	if err != nil {
 		return nil, err
@@ -197,19 +191,19 @@ func (m *MockNode) Discover() (*WellKnownResponse, error) {
 		return nil, fmt.Errorf("well-known: status %d", resp.StatusCode)
 	}
 
-	var wk WellKnownResponse
+	var wk types.WellKnownResponse
 	if err := json.NewDecoder(resp.Body).Decode(&wk); err != nil {
 		return nil, fmt.Errorf("decode well-known: %w", err)
 	}
 	return &wk, nil
 }
 
-// Connect establishes an H3 or H2 Control connection: it authorizes the
-// connection with POST /v1/tai/connect (node_token) and then opens the
-// Control stream on the same connection.
-// protocols should be ordered by preference (H3 first). The nodeToken must be
-// set (SetNodeToken). Each protocol attempt uses a fresh client and pipe, so
-// fallback works even if the first attempt fails.
+type connectRequest struct {
+	NodeID      string `json:"node_id"`
+	ConnectType string `json:"connect_type"`
+}
+
+// Connect establishes a Control connection.
 func (m *MockNode) Connect(ctx context.Context, protocols []string) error {
 	if m.nodeToken == "" {
 		return fmt.Errorf("nodeToken not set; call SetNodeToken or use TestServer.IssueTestNodeToken")
@@ -245,8 +239,6 @@ func (m *MockNode) Connect(ctx context.Context, protocols []string) error {
 }
 
 // Register sends register and reads register_ack.
-// Must be called after Connect. The first call also finalizes the HTTP response
-// (the server sends 200 OK after receiving and processing the register frame).
 func (m *MockNode) Register() (*pb.RegisterAck, error) {
 	reg := &pb.Register{
 		NodeId:            m.ID,
@@ -261,12 +253,10 @@ func (m *MockNode) Register() (*pb.RegisterAck, error) {
 		return nil, fmt.Errorf("marshal register: %w", err)
 	}
 
-	// Write register frame to the pipe. This triggers the server to respond.
-	if err := m.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "register", Data: regData}); err != nil {
+	if err := m.SendControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "register", Data: regData}); err != nil {
 		return nil, fmt.Errorf("send register: %w", err)
 	}
 
-	// Await the HTTP response if not yet received (first call after Connect).
 	if err := m.ensureControlReader(); err != nil {
 		return nil, fmt.Errorf("control stream: %w", err)
 	}
@@ -291,7 +281,6 @@ func (m *MockNode) Register() (*pb.RegisterAck, error) {
 	m.keyID = ack.KeyId
 	m.mu.Unlock()
 
-	// Signal registration complete
 	select {
 	case <-m.registered:
 	default:
@@ -301,7 +290,6 @@ func (m *MockNode) Register() (*pb.RegisterAck, error) {
 	return ack, nil
 }
 
-// ensureControlReader waits for the pending HTTP response if it hasn't arrived yet.
 func (m *MockNode) ensureControlReader() error {
 	m.mu.Lock()
 	ch := m.pendingCh
@@ -309,7 +297,7 @@ func (m *MockNode) ensureControlReader() error {
 	m.mu.Unlock()
 
 	if ch == nil {
-		return nil // already received
+		return nil
 	}
 
 	res := <-ch
@@ -327,7 +315,7 @@ func (m *MockNode) ensureControlReader() error {
 	return nil
 }
 
-// StartPing starts a background goroutine that sends pings at the given interval.
+// StartPing starts background pings.
 func (m *MockNode) StartPing(ctx context.Context, interval time.Duration) {
 	pingCtx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
@@ -344,7 +332,7 @@ func (m *MockNode) StartPing(ctx context.Context, interval time.Duration) {
 			case <-ticker.C:
 				ping := &pb.Ping{Timestamp: time.Now().Unix()}
 				pingData, _ := proto.Marshal(ping)
-				m.SendControl(&pb.Payload{Namespace: NamespaceControl, Kind: "ping", Data: pingData})
+				m.SendControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "ping", Data: pingData})
 			}
 		}
 	}()
@@ -377,7 +365,16 @@ func (m *MockNode) RecvControl() (*pb.Payload, error) {
 	return m.codec.ReadFrame(r)
 }
 
-// RefreshToken calls POST /v1/tai/token/refresh with the current node_token.
+type refreshRequest struct {
+	NodeToken string `json:"node_token"`
+}
+
+type refreshResponse struct {
+	NodeToken string `json:"node_token"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+// RefreshToken calls POST /v1/tai/token/refresh.
 func (m *MockNode) RefreshToken() (string, error) {
 	body, _ := json.Marshal(refreshRequest{NodeToken: m.nodeToken})
 	resp, err := http.Post(m.serverURL+"/v1/tai/token/refresh", "application/json", bytes.NewReader(body))
@@ -398,22 +395,15 @@ func (m *MockNode) RefreshToken() (string, error) {
 	return rr.NodeToken, nil
 }
 
-// ---------------------------------------------------------------------------
-// Internal
-// ---------------------------------------------------------------------------
-
 // SetNodeToken sets the node_token for authentication.
 func (m *MockNode) SetNodeToken(token string) {
 	m.nodeToken = token
 }
 
-// httpResult pairs a response with its error from an async Do call.
-type httpResult struct {
-	resp *http.Response
-	err  error
-}
+// ---------------------------------------------------------------------------
+// Internal
+// ---------------------------------------------------------------------------
 
-// closeClient releases the transport of client (including QUIC/UDP sockets).
 func closeClient(client *http.Client) {
 	switch t := client.Transport.(type) {
 	case *http3.Transport:
@@ -423,11 +413,8 @@ func closeClient(client *http.Client) {
 	}
 }
 
-// authorize sends POST /v1/tai/connect on client's connection with the
-// node_token. The response body is drained before returning so the Control
-// request that follows reuses the same connection.
 func (m *MockNode) authorize(ctx context.Context, client *http.Client, baseURL string) error {
-	body, _ := json.Marshal(connectRequest{NodeID: m.ID, ConnectType: connTypeControl})
+	body, _ := json.Marshal(connectRequest{NodeID: m.ID, ConnectType: transport.ConnTypeControl})
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/tai/connect", bytes.NewReader(body))
 	if err != nil {
 		return err

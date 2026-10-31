@@ -1,4 +1,4 @@
-package tai
+package mock
 
 import (
 	"context"
@@ -18,29 +18,29 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/transport"
+	"github.com/yaoapp/tai-golang/types"
 )
 
 // MockLightConn is a Light connection from MockNode to the SDK server.
-// It wraps either an H3 WebTransport session or a reversed H2 connection.
 type MockLightConn struct {
-	proto    string                // "H3" or "H2"
-	session  *webtransport.Session // H3 only
-	h2Server *http2.Server         // H2 only (Tai is server after reversal)
-	h2Conn   net.Conn              // H2 only
+	proto    string
+	session  *webtransport.Session
+	h2Server *http2.Server
+	h2Conn   net.Conn
 
 	mu      sync.Mutex
-	streams chan *MockLightStream // accepted streams
+	streams chan *MockLightStream
 	closeFn func()
 	closed  bool
 }
 
-// MockLightStream wraps an accepted stream from Yao. Read/Write are the
-// stream payload; FirstFrame is the Payload envelope Yao wrote first.
+// MockLightStream wraps an accepted stream from Yao.
 type MockLightStream struct {
 	FirstFrame *pb.Payload
 	r          io.ReadCloser
 	w          io.WriteCloser
-	codec      *FrameCodec
+	codec      *transport.FrameCodec
 }
 
 func (s *MockLightStream) Read(p []byte) (int, error)  { return s.r.Read(p) }
@@ -55,7 +55,7 @@ func (s *MockLightStream) Close() error {
 	return rerr
 }
 
-// RecvFrame reads a length-prefixed Payload (SessionMessage etc.) from the stream.
+// RecvFrame reads a length-prefixed Payload from the stream.
 func (s *MockLightStream) RecvFrame() (*pb.Payload, error) {
 	return s.codec.ReadFrame(s.r)
 }
@@ -65,7 +65,7 @@ func (s *MockLightStream) SendFrame(msg *pb.Payload) error {
 	return s.codec.WriteFrame(s.w, msg)
 }
 
-// ConnectLightH3 opens an H3 (WebTransport) Light connection to the SDK.
+// ConnectLightH3 opens an H3 (WebTransport) Light connection.
 func (m *MockNode) ConnectLightH3(ctx context.Context) (*MockLightConn, error) {
 	if m.nodeToken == "" {
 		return nil, fmt.Errorf("nodeToken not set")
@@ -111,13 +111,12 @@ func (m *MockNode) ConnectLightH3(ctx context.Context) (*MockLightConn, error) {
 		},
 	}
 
-	// Accept streams from Yao in background
 	go lc.acceptH3Streams(m.codec)
 
 	return lc, nil
 }
 
-func (lc *MockLightConn) acceptH3Streams(codec *FrameCodec) {
+func (lc *MockLightConn) acceptH3Streams(codec *transport.FrameCodec) {
 	for {
 		stream, err := lc.session.AcceptStream(lc.session.Context())
 		if err != nil {
@@ -159,7 +158,7 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 		var err error
 		conn, err = tls.DialWithDialer(&net.Dialer{}, "tcp", m.h2Addr, &tls.Config{
 			RootCAs:    pool,
-			NextProtos: []string{alpnTai},
+			NextProtos: []string{transport.AlpnTai},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("dial H2 light TLS: %w", err)
@@ -172,25 +171,22 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 		}
 	}
 
-	// Send Connect frame
 	connectMsg := &pb.Connect{
 		NodeId:      m.ID,
 		NodeToken:   m.nodeToken,
-		ConnectType: connTypeLight,
+		ConnectType: transport.ConnTypeLight,
 	}
-	if err := WriteProtoMsg(conn, connectMsg, maxConnectFrameSize); err != nil {
+	if err := transport.WriteProtoMsg(conn, connectMsg, 4*1024); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("write connect: %w", err)
 	}
 
-	// Read ConnectAck
 	var ack pb.ConnectAck
-	if err := ReadProtoMsg(conn, &ack, maxConnectFrameSize); err != nil {
+	if err := transport.ReadProtoMsg(conn, &ack, 4*1024); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("read connect_ack: %w", err)
 	}
 
-	// Role reversal: Tai becomes HTTP/2 server on this connection.
 	lc := &MockLightConn{
 		proto:   "H2",
 		h2Conn:  conn,
@@ -201,7 +197,6 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 	h2s := &http2.Server{}
 	lc.h2Server = h2s
 
-	// Serve HTTP/2 in background — Yao sends POST /v1/tai/stream as requests
 	go func() {
 		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +212,7 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 	return lc, nil
 }
 
-func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, codec *FrameCodec) {
+func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, codec *transport.FrameCodec) {
 	firstFrame, err := codec.ReadFrame(r.Body)
 	if err != nil {
 		log.Printf("mocknode: light H2 read first frame: %v", err)
@@ -231,9 +226,6 @@ func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, 
 		f.Flush()
 	}
 
-	// Pipe connects the MockLightStream.Write → ResponseWriter. When the
-	// test closes pw (via stream.Close()), io.Copy returns, the handler
-	// returns, and HTTP/2 sends END_STREAM to the SDK side.
 	pr, pw := io.Pipe()
 	stream := &MockLightStream{
 		FirstFrame: firstFrame,
@@ -248,7 +240,7 @@ func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, 
 	io.Copy(fw, pr)
 }
 
-// AcceptStream waits for the next stream opened by Yao. Returns nil after Close.
+// AcceptStream waits for the next stream opened by Yao.
 func (lc *MockLightConn) AcceptStream(ctx context.Context) (*MockLightStream, error) {
 	select {
 	case s, ok := <-lc.streams:
@@ -277,20 +269,19 @@ func (lc *MockLightConn) Close() {
 // Protocol returns "H3" or "H2".
 func (lc *MockLightConn) Protocol() string { return lc.proto }
 
-// SendSessionMessage writes a SessionMessage as a Payload frame to the stream.
+// SendSessionMessage writes a SessionMessage as a Payload frame.
 func (s *MockLightStream) SendSessionMessage(seq uint64, kind string, data []byte) error {
 	smData, err := proto.Marshal(&pb.SessionMessage{Seq: seq, Kind: kind, Data: data})
 	if err != nil {
 		return err
 	}
 	return s.codec.WriteFrame(s.w, &pb.Payload{
-		Namespace: NamespaceSession,
+		Namespace: types.NamespaceSession,
 		Kind:      kind,
 		Data:      smData,
 	})
 }
 
-// flushWriter wraps an http.ResponseWriter so each Write also flushes.
 type flushWriter struct {
 	w http.ResponseWriter
 }
