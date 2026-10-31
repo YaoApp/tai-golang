@@ -433,8 +433,8 @@ func (p *lightPool) handleLightH2(conn net.Conn, cm *pb.Connect) {
 
 	t := &http2.Transport{
 		AllowHTTP:       true,
-		ReadIdleTimeout: 20 * time.Second,
-		PingTimeout:     10 * time.Second,
+		ReadIdleTimeout: 300 * time.Second,
+		PingTimeout:     15 * time.Second,
 	}
 	cc, err := t.NewClientConn(conn)
 	if err != nil {
