@@ -120,3 +120,41 @@ opToken, _ := provider.IssueOperationToken("node-1", "sess-1", []string{"session
 - `ElicitationResponse` — Elicitation reply (`"accept"` / `"decline"` / `"cancel"`)
 - `ConfigOptionValue` — Config value (`"id"` / `"boolean"`)
 - `SessionUpdateOptions` — Runtime updates (workspace, access policy, mounts, LLM, env, resources)
+
+## Workspace
+
+See [Workspace API](workspace.md) for full documentation.
+
+```go
+import "github.com/yaoapp/tai-golang/workspace"
+
+workspace.Init(server, nodeID, nil)
+
+ws, err := workspace.Open(ctx, "workspace-id")
+ws, err := workspace.Create(ctx, "/path", workspace.Meta{Name: "proj"})
+entries, err := workspace.List(ctx, workspace.ListOptions{})
+err := workspace.Delete(ctx, "workspace-id")
+```
+
+### Key Interfaces
+
+| Interface | Description |
+|-----------|-------------|
+| `Workspace` | Top-level object: `WorkspaceFS` + branch management + history + GC |
+| `WorkspaceFS` | `fs.FS` + `Create` / `Remove` / `RemoveAll` / `Rename` / `MkdirAll` / `Symlink` / `Watch` |
+| `Branch` | Branch-scoped file operations (`FS()`) + version control (`Commit` / `Diff` / `Rollback`) |
+| `History` | Commit queries: `Query` / `FileHistory` / `BranchLog` |
+| `Watcher` | Real-time file change events via `Events()` channel |
+| `Transport` | Injected transport layer: `OpenLightStream` / `HeavyPick` / `HeavyReturn` |
+
+### Key Types
+
+- `Meta` — Workspace metadata (`Name`, `Owner`)
+- `BranchInfo` — Branch summary (`Name`, `Head`, `Meta`)
+- `CommitInfo` — Commit details (`ID`, `Parent`, `Message`, `Time`)
+- `FileDiff` — File change between commits (`Path`, `Type`, `OldPath`)
+- `MergeOptions` / `MergeResult` — Merge configuration and outcome
+- `GCOptions` / `GCResult` — Garbage collection configuration and outcome
+- `WatchEvent` — File change notification (`Type`, `Path`)
+- `ChannelPolicy` — Transport channel selection (`SizeThreshold`, `TextExts`, `BinaryExts`)
+- `ErrorResponse` — Structured remote error (`Code`, `Message`)

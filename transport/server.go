@@ -38,6 +38,9 @@ type Server struct {
 	// Light pool
 	light *lightPool
 
+	// Heavy pool
+	heavy *heavyPool
+
 	// H3 (QUIC/UDP)
 	h3Server     *http3.Server
 	wtServer     *webtransport.Server
@@ -388,6 +391,62 @@ func (t *Server) CloseLightPool() {
 	if t.light != nil {
 		t.light.close()
 	}
+}
+
+// InitHeavyPool creates and initializes the Heavy pool.
+// Must be called after InitLightPool so the light pool can route
+// Heavy connections to it.
+func (t *Server) InitHeavyPool(cfg *pb.PoolConfig) {
+	pool := newHeavyPool(cfg, t.mgr, t.auth)
+	t.heavy = pool
+	if t.light != nil {
+		t.light.setHeavyPool(pool)
+	}
+}
+
+// CloseHeavyPool closes the Heavy pool.
+func (t *Server) CloseHeavyPool() {
+	if t.heavy != nil {
+		t.heavy.Close()
+	}
+}
+
+// HeavyConnCount returns the number of Heavy connections for a node.
+func (t *Server) HeavyConnCount(nodeID string) int {
+	if t.heavy == nil {
+		return 0
+	}
+	return t.heavy.ConnCount(nodeID)
+}
+
+// HeavyPick returns an idle Heavy connection for nodeID.
+func (t *Server) HeavyPick(nodeID string) (net.Conn, error) {
+	if t.heavy == nil {
+		return nil, fmt.Errorf("heavy pool not initialized")
+	}
+	return t.heavy.Pick(nodeID)
+}
+
+// HeavyReturn marks a Heavy connection as idle.
+func (t *Server) HeavyReturn(conn net.Conn) {
+	if t.heavy != nil {
+		t.heavy.Return(conn)
+	}
+}
+
+// HeavyRemove removes a Heavy connection from the pool.
+func (t *Server) HeavyRemove(conn net.Conn) {
+	if t.heavy != nil {
+		t.heavy.Remove(conn)
+	}
+}
+
+// HeavyIdleCount returns the number of idle Heavy connections for a node.
+func (t *Server) HeavyIdleCount(nodeID string) int {
+	if t.heavy == nil {
+		return 0
+	}
+	return t.heavy.IdleCount(nodeID)
 }
 
 // light is the Light connection pool.

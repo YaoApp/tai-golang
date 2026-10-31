@@ -79,8 +79,9 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 	httpSrv := transport.NewHTTPServer(a)
 	light := pool // pool config for light pool init
 
-	// Initialize light pool before starting listeners.
+	// Initialize light and heavy pools before starting listeners.
 	tr.InitLightPool(light)
+	tr.InitHeavyPool(light)
 
 	// Start TCP+H3 transport.
 	if err := tr.StartTCP("127.0.0.1:0", tlsCfg); err != nil {
@@ -125,6 +126,7 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 		TransportAddr: tcpAddr,
 		H3Addr:        tr.H3Addr(),
 		closeFn: func() {
+			tr.CloseHeavyPool()
 			tr.CloseLightPool()
 			tr.Close(context.Background())
 			httpSrv.Close(context.Background())
@@ -178,6 +180,21 @@ func (ts *TestServer) LightConnCount(nodeID string) int {
 // OpenLightStream opens a bidirectional stream on the Light pool.
 func (ts *TestServer) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (*transport.LightStream, error) {
 	return ts.Transport.OpenLightStream(ctx, nodeID, firstFrame)
+}
+
+// HeavyConnCount returns the number of Heavy connections for a node.
+func (ts *TestServer) HeavyConnCount(nodeID string) int {
+	return ts.Transport.HeavyConnCount(nodeID)
+}
+
+// HeavyPick returns an idle Heavy connection for nodeID.
+func (ts *TestServer) HeavyPick(nodeID string) (net.Conn, error) {
+	return ts.Transport.HeavyPick(nodeID)
+}
+
+// HeavyReturn marks a Heavy connection as idle.
+func (ts *TestServer) HeavyReturn(conn net.Conn) {
+	ts.Transport.HeavyReturn(conn)
 }
 
 // ---------------------------------------------------------------------------

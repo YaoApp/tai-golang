@@ -31,6 +31,7 @@ type lightPool struct {
 	codec   *FrameCodec
 	mgr     *NodeManager
 	auth    types.AuthProvider
+	heavy   *heavyPool
 	changed chan struct{}
 	done    chan struct{}
 	closed  bool
@@ -419,7 +420,7 @@ func (p *lightPool) handleTaiConn(conn net.Conn, st *ConnState) {
 	case ConnTypeLight:
 		p.handleLightH2(conn, &cm)
 	case ConnTypeHeavy:
-		log.Printf("tai-sdk: Heavy connection from %s deferred to PLAN 9", cm.NodeId)
+		p.handleHeavyConn(conn, &cm)
 	default:
 		log.Printf("tai-sdk: unknown connect_type %q from %s", cm.ConnectType, cm.NodeId)
 	}
@@ -463,6 +464,21 @@ func (p *lightPool) handleLightH2(conn net.Conn, cm *pb.Connect) {
 		p.removeConn(lc)
 	}
 	log.Printf("tai-sdk: Light H2 connection released for node %s", cm.NodeId)
+}
+
+func (p *lightPool) handleHeavyConn(conn net.Conn, cm *pb.Connect) {
+	if p.heavy == nil {
+		log.Printf("tai-sdk: Heavy connection from %s rejected: no heavy pool", cm.NodeId)
+		conn.Close()
+		return
+	}
+	p.heavy.Accept(conn, cm.NodeId)
+}
+
+func (p *lightPool) setHeavyPool(hp *heavyPool) {
+	p.mu.Lock()
+	p.heavy = hp
+	p.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------

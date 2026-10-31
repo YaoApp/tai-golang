@@ -11,6 +11,9 @@ var (
 	// and pool.adjust timed out.
 	ErrNoLightConn = errors.New("tai: no light connection available")
 
+	// ErrNoHeavyConn is returned when no idle Heavy connection is available.
+	ErrNoHeavyConn = errors.New("tai: no heavy connection available")
+
 	// ErrSessionClosed is returned by session methods after the session
 	// has been closed.
 	ErrSessionClosed = errors.New("tai: session closed")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,31 +24,34 @@ func docsDir() string {
 	return "../docs"
 }
 
-// docOrder defines the reading order for documentation files.
-// Files not in this list are appended at the end alphabetically.
-var docOrder = []string{
-	"index.md",
-	"quickstart.md",
-	"architecture.md",
-	"api-reference.md",
-	"session-protocol.md",
-	"events.md",
-	"uri.md",
-	"demo-guide.md",
+// docEntry represents a documentation file with its display title.
+type docEntry struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
 }
 
-// List returns all .md files in the docs directory, ordered by reading sequence.
+// loadDocOrder reads docs.json for the ordered list of documentation files.
+// Returns nil if the file is missing or invalid.
+func loadDocOrder(dir string) []docEntry {
+	data, err := os.ReadFile(filepath.Join(dir, "docs.json"))
+	if err != nil {
+		return nil
+	}
+	var entries []docEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil
+	}
+	return entries
+}
+
+// List returns all .md files in the docs directory, ordered by docs.json.
+// Files not listed in docs.json are appended alphabetically.
 func (h *DocsHandler) List(w http.ResponseWriter, _ *http.Request) {
 	dir := docsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		writeJSON(w, []any{})
 		return
-	}
-
-	type docEntry struct {
-		Name  string `json:"name"`
-		Title string `json:"title"`
 	}
 
 	// Index all .md files by name.
@@ -58,18 +62,26 @@ func (h *DocsHandler) List(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	// Ordered list: known files first, then remaining alphabetically.
 	var docs []docEntry
-	for _, name := range docOrder {
-		if fileSet[name] {
-			title := extractTitle(filepath.Join(dir, name))
-			if title == "" {
-				title = strings.TrimSuffix(name, ".md")
+
+	// Use docs.json order if available.
+	if order := loadDocOrder(dir); len(order) > 0 {
+		for _, entry := range order {
+			if fileSet[entry.Name] {
+				title := entry.Title
+				if title == "" {
+					title = extractTitle(filepath.Join(dir, entry.Name))
+				}
+				if title == "" {
+					title = strings.TrimSuffix(entry.Name, ".md")
+				}
+				docs = append(docs, docEntry{Name: entry.Name, Title: title})
+				delete(fileSet, entry.Name)
 			}
-			docs = append(docs, docEntry{Name: name, Title: title})
-			delete(fileSet, name)
 		}
 	}
+
+	// Append remaining .md files not in docs.json.
 	for _, e := range entries {
 		if fileSet[e.Name()] {
 			title := extractTitle(filepath.Join(dir, e.Name()))

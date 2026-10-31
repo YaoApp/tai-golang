@@ -282,6 +282,7 @@ func (s *server) bind() error {
 
 	pool, _ := s.cfg.Pool.poolConfig()
 	s.tr.InitLightPool(pool)
+	s.tr.InitHeavyPool(pool)
 
 	tcpAddr := s.transportListenAddr
 	if tcpAddr == "" {
@@ -465,6 +466,7 @@ func (s *server) Close() error {
 		if !bound {
 			return
 		}
+		s.tr.CloseHeavyPool()
 		s.tr.CloseLightPool()
 
 		timeout := s.cfg.ShutdownTimeout

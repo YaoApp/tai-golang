@@ -1,0 +1,11 @@
+[
+  { "name": "index.md", "title": "Tai SDK Documentation" },
+  { "name": "quickstart.md", "title": "Quick Start" },
+  { "name": "architecture.md", "title": "Architecture" },
+  { "name": "api-reference.md", "title": "API Reference" },
+  { "name": "workspace.md", "title": "Workspace API" },
+  { "name": "session-protocol.md", "title": "Session Protocol" },
+  { "name": "events.md", "title": "ACP Events Reference" },
+  { "name": "uri.md", "title": "Resource URI Convention" },
+  { "name": "demo-guide.md", "title": "Demo App Guide" }
+]

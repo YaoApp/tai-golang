@@ -8,7 +8,7 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 **Session full chain implemented** — Transport (L0–L2), Light pool, Session 17-method interface, ACP event stream, dual-stream (ctrl + data) architecture, and the QA demo app are all working end-to-end.
 
-Not yet implemented: OperationToken signing/validation in session handshake, Heavy pool, Workspace remote API, Server Tools, Tunnel, Reconnection, Realtime.
+Not yet implemented: OperationToken signing/validation in session handshake, Server Tools, Tunnel, Reconnection, Realtime.
 
 ## Install
 
@@ -104,9 +104,10 @@ The SDK embeds into your application as a library — no separate process. Tai n
 ```
 server.go             Server + Session interfaces, NewServer, OpenSession
 session/              Session implementation (17 methods, dual-stream)
+workspace/            Remote workspace API (fs.FS + write extensions, branch, history, watch)
 types/                Shared types (SessionRequest, Event, Message, Permission, etc.)
 auth/                 AuthProvider interface + DefaultAuth (Ed25519 JWT)
-transport/            Transport server (TCP/UDP, H2/H3, Light pool, frame codec)
+transport/            Transport server (TCP/UDP, H2/H3, Light pool, Heavy pool, frame codec)
 proto/                Protobuf source files (control, session, computer, servertool)
 pb/                   Generated Go code from protobuf
 app/                  QA demo application (API server + React frontend)
@@ -120,6 +121,7 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 - [Quick Start](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [API Reference](docs/api-reference.md)
+- [Workspace API](docs/workspace.md)
 - [Session Protocol](docs/session-protocol.md)
 - [ACP Events Reference](docs/events.md)
 - [Resource URI Convention](docs/uri.md)
@@ -139,13 +141,13 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo --port 3000
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
 - **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
 - **Demo App**: React frontend + Go API server for manual E2E testing
+- **Heavy Pool**: Connection-level exclusive TCP pool with Pick/Return lifecycle
+- **Workspace**: Remote file operations (fs.FS + write extensions), 33 command kinds, branch management, history, watch
 - **Test Infrastructure**: MockNode, MockLLM, TestServer, 90%+ coverage
 
 ## Not Yet Implemented
 
 - OperationToken signing/validation in session handshake
-- Heavy connection pool + large file transfer
-- Workspace remote API (file CRUD, Watch, sync)
 - Server Tools (RegisterTool / tai call)
 - Reconnection (recovery buffer + seq replay)
 - Tunnel
