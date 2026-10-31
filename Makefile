@@ -2,7 +2,7 @@ PROTO_DIR  := proto
 PB_DIR     := pb
 PROTO_FILES := $(wildcard $(PROTO_DIR)/*.proto)
 
-.PHONY: proto test lint clean
+.PHONY: proto test lint fmt vet clean
 
 # Generate Go code from .proto files
 proto:
@@ -18,10 +18,22 @@ proto:
 test:
 	go test ./...
 
-# Lint proto files (requires buf: https://buf.build)
-lint:
-	@command -v buf >/dev/null 2>&1 && buf lint $(PROTO_DIR) || echo "buf not installed, skipping proto lint"
+# Format all Go source files
+fmt:
+	gofmt -w .
+
+# Run go vet on all packages
+vet:
 	go vet ./...
+
+# Lint: format check + vet + optional proto lint
+lint:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "unformatted files (run make fmt):"; echo "$$unformatted"; exit 1; \
+	fi
+	go vet ./...
+	@command -v buf >/dev/null 2>&1 && buf lint $(PROTO_DIR) || echo "buf not installed, skipping proto lint"
 
 # Remove generated files
 clean:

@@ -88,7 +88,7 @@ type TLSConfig struct {
 type PoolSettings struct {
 	LightMin            uint32
 	LightMax            uint32
-	LightMaxStreams      uint32
+	LightMaxStreams     uint32
 	LightIdleTimeoutSec uint32
 	HeavyMin            uint32
 	HeavyMax            uint32
@@ -184,11 +184,11 @@ type wellKnownConfigurer interface {
 
 // server is the Server implementation.
 type server struct {
-	cfg   ServerConfig
-	auth  AuthProvider
-	mgr   *transport.NodeManager
-	http  *transport.HTTPServer
-	tr    *transport.Server
+	cfg  ServerConfig
+	auth AuthProvider
+	mgr  *transport.NodeManager
+	http *transport.HTTPServer
+	tr   *transport.Server
 
 	httpListenAddr      string
 	transportListenAddr string

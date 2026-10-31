@@ -3,7 +3,7 @@ package types
 // Providers is the parsed form of SessionRequest.LLM.
 // It carries the model configuration for a session.
 type Providers struct {
-	Primary ProviderSpec          `json:"primary"`
+	Primary ProviderSpec            `json:"primary"`
 	Roles   map[string]ProviderSpec `json:"roles,omitempty"`
 }
 

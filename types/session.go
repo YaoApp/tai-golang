@@ -19,7 +19,7 @@ type SessionRequest struct {
 	MaxDuration uint32 `json:"maxDuration,omitempty"` // seconds
 
 	// Agent configuration
-	LLM      json.RawMessage   `json:"llm,omitempty"`      // Providers matrix JSON
+	LLM      json.RawMessage   `json:"llm,omitempty"` // Providers matrix JSON
 	Env      map[string]string `json:"env,omitempty"`
 	Config   json.RawMessage   `json:"config,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -28,7 +28,7 @@ type SessionRequest struct {
 
 // McpServer describes an MCP server to attach to the session.
 type McpServer struct {
-	Type    string            `json:"type"`              // "stdio" | "sse" | "streamable-http"
+	Type    string            `json:"type"` // "stdio" | "sse" | "streamable-http"
 	Name    string            `json:"name"`
 	Command string            `json:"command,omitempty"` // stdio only
 	Args    []string          `json:"args,omitempty"`    // stdio only
@@ -42,7 +42,7 @@ type McpServer struct {
 type OpenSessionRequest struct {
 	NodeID    string
 	SessionID string
-	Token     string          // OperationToken JWT
+	Token     string // OperationToken JWT
 	Request   *SessionRequest
 }
 

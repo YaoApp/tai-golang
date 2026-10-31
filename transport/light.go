@@ -468,4 +468,3 @@ func (p *lightPool) handleLightH2(conn net.Conn, cm *pb.Connect) {
 // ---------------------------------------------------------------------------
 // Length-prefixed protobuf helpers (reused by mock)
 // ---------------------------------------------------------------------------
-
