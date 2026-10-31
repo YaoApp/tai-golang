@@ -468,3 +468,13 @@ func (p *lightPool) handleLightH2(conn net.Conn, cm *pb.Connect) {
 // ---------------------------------------------------------------------------
 // Length-prefixed protobuf helpers (reused by mock)
 // ---------------------------------------------------------------------------
+
+// NewLightStreamForTest creates a LightStream from raw io handles.
+// Intended for unit tests only.
+func NewLightStreamForTest(r io.ReadCloser, w io.WriteCloser) *LightStream {
+	return &LightStream{
+		r:    r,
+		w:    w,
+		conn: &lightConn{},
+	}
+}

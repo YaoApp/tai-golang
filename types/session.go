@@ -28,12 +28,21 @@ type SessionRequest struct {
 
 // McpServer describes an MCP server to attach to the session.
 type McpServer struct {
-	Type    string            `json:"type"` // "stdio" | "sse" | "streamable-http"
+	Type    string            `json:"type"` // "stdio" | "http"
 	Name    string            `json:"name"`
 	Command string            `json:"command,omitempty"` // stdio only
 	Args    []string          `json:"args,omitempty"`    // stdio only
-	URL     string            `json:"url,omitempty"`     // sse / streamable-http
+	Env     []EnvVariable     `json:"env,omitempty"`     // stdio only: environment variables
+	URL     string            `json:"url,omitempty"`     // http: endpoint URL
 	Headers map[string]string `json:"headers,omitempty"`
+	Meta    map[string]any    `json:"_meta,omitempty"`
+}
+
+// EnvVariable is an ACP v2 environment variable key-value pair.
+type EnvVariable struct {
+	Name  string         `json:"name"`
+	Value string         `json:"value"`
+	Meta  map[string]any `json:"_meta,omitempty"`
 }
 
 // OpenSessionRequest is the transport-level wrapper for opening a session.
@@ -62,3 +71,6 @@ const (
 	SessionClosing SessionStatus = "closing"
 	SessionClosed  SessionStatus = "closed"
 )
+
+// RealtimeConfig is a placeholder for Realtime extension configuration.
+type RealtimeConfig struct{}

@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -29,8 +30,10 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/session"
 	"github.com/yaoapp/tai-golang/transport"
 	"github.com/yaoapp/tai-golang/types"
 )
@@ -48,10 +51,12 @@ type (
 	ControlMsg         = types.ControlMsg
 	OpenSessionRequest = types.OpenSessionRequest
 	SessionRequest     = types.SessionRequest
+	UserMessage        = types.UserMessage
 	ToolDefinition     = types.ToolDefinition
 	ToolHandler        = types.ToolHandler
 	TunnelProvider     = types.TunnelProvider
 	TunnelBindRequest  = types.TunnelBindRequest
+	RealtimeConfig     = types.RealtimeConfig
 )
 
 // Re-export constants.
@@ -132,22 +137,32 @@ func (p *PoolSettings) poolConfig() (*pb.PoolConfig, error) {
 	return cfg, nil
 }
 
-// Session represents an active agent session on a Tai node.
+// Session mirrors tai/runtime/types.Session — full 17-method alignment.
 type Session interface {
 	ID() string
-	Prompt(req *PromptRequest) error
-	Cancel() error
-	Steer(message string) error
-	Resolve(requestID string, resolution []byte) error
-	RecvEvent() (*SessionMsg, error)
-	RecvAction() (*SessionMsg, error)
-	Close(ctx context.Context) error
-}
+	NodeID() string
+	Status() types.SessionStatus
 
-// PromptRequest is the input for Session.Prompt().
-type PromptRequest struct {
-	Message     string
-	Attachments []types.Attachment
+	Prompt(msg *types.UserMessage) error
+	Followup(msg *types.UserMessage) (types.Disposition, error)
+	Cancel() error
+	Steer(msg *types.UserMessage) (types.Disposition, error)
+
+	UpdateQueue(action *types.QueueAction) error
+
+	ResolvePermission(requestID string, resp *types.PermissionResponse) error
+	ResolveElicitation(id string, resp *types.ElicitationResponse) error
+	SetConfigOption(configID string, value *types.ConfigOptionValue) error
+
+	UpdateSession(ctx context.Context, opts *types.SessionUpdateOptions) error
+
+	RecvEvent() (*types.SessionMsg, error)
+	RecvAction() (*types.SessionMsg, error)
+
+	StartRealtime(cfg *types.RealtimeConfig) error
+	StopRealtime() error
+
+	Close(ctx context.Context) error
 }
 
 // Server is a Tai transport server that accepts and manages Tai node connections.
@@ -156,7 +171,7 @@ type Server interface {
 	Addr() string
 	Nodes() []*Node
 	NodeByID(nodeID string) *Node
-	OpenSession(ctx context.Context, req *OpenSessionRequest) (*Session, error)
+	OpenSession(ctx context.Context, req *OpenSessionRequest) (Session, error)
 	RegisterTool(tool *ToolDefinition) error
 	UnregisterTool(name string) error
 	SendControl(nodeID string, msg *ControlMsg) error
@@ -356,8 +371,68 @@ func (s *server) Nodes() []*Node { return s.mgr.AllNodes() }
 
 func (s *server) NodeByID(nodeID string) *Node { return s.mgr.NodeByID(nodeID) }
 
-func (s *server) OpenSession(ctx context.Context, req *OpenSessionRequest) (*Session, error) {
-	return nil, ErrNotImplemented
+func (s *server) OpenSession(ctx context.Context, req *OpenSessionRequest) (Session, error) {
+	// 1. Build SessionOpen protobuf
+	pbReq := sessionRequestToProto(req.Request)
+	openData, err := proto.Marshal(&pb.SessionOpen{
+		SessionId: req.SessionID,
+		NodeId:    req.NodeID,
+		Token:     req.Token,
+		Request:   pbReq,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal SessionOpen: %w", err)
+	}
+
+	// 2. Open ctrl stream (first frame = "open")
+	ctrlStream, err := s.tr.OpenLightStream(ctx, req.NodeID, &pb.Payload{
+		Namespace: NamespaceSession,
+		Kind:      "open",
+		Data:      openData,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open ctrl stream: %w", err)
+	}
+
+	// 3. Read opened/error response
+	codec := transport.DefaultCodec()
+	respFrame, err := codec.ReadFrame(ctrlStream)
+	if err != nil {
+		ctrlStream.Close()
+		return nil, fmt.Errorf("read opened: %w", err)
+	}
+	switch respFrame.Kind {
+	case "opened":
+		// OK
+	case "error":
+		var se pb.SessionError
+		proto.Unmarshal(respFrame.Data, &se)
+		ctrlStream.Close()
+		return nil, fmt.Errorf("session open rejected: %s: %s", se.Code, se.Message)
+	default:
+		ctrlStream.Close()
+		return nil, fmt.Errorf("unexpected response kind: %s", respFrame.Kind)
+	}
+
+	// 4. Open data stream (first frame = "data")
+	dataData, err := proto.Marshal(&pb.SessionData{SessionId: req.SessionID})
+	if err != nil {
+		ctrlStream.Close()
+		return nil, fmt.Errorf("marshal SessionData: %w", err)
+	}
+	dataStream, err := s.tr.OpenLightStream(ctx, req.NodeID, &pb.Payload{
+		Namespace: NamespaceSession,
+		Kind:      "data",
+		Data:      dataData,
+	})
+	if err != nil {
+		ctrlStream.Close()
+		return nil, fmt.Errorf("open data stream: %w", err)
+	}
+
+	// 5. Create session with dual streams
+	sess := session.New(req.SessionID, req.NodeID, ctrlStream, dataStream, codec)
+	return sess, nil
 }
 
 func (s *server) RegisterTool(tool *ToolDefinition) error { return ErrNotImplemented }
@@ -405,4 +480,48 @@ func (s *server) Close() error {
 		s.closeErr = err
 	})
 	return s.closeErr
+}
+
+// sessionRequestToProto converts types.SessionRequest → pb.SessionRequest.
+func sessionRequestToProto(req *types.SessionRequest) *pb.SessionRequest {
+	if req == nil {
+		return &pb.SessionRequest{}
+	}
+	var metaBytes []byte
+	if req.Meta != nil {
+		metaBytes, _ = json.Marshal(req.Meta)
+	}
+	pr := &pb.SessionRequest{
+		Runtime:               req.Runtime,
+		Isolation:             req.Isolation,
+		IdleTimeoutSec:        req.IdleTimeout,
+		MaxDurationSec:        req.MaxDuration,
+		Cwd:                   req.Cwd,
+		AdditionalDirectories: req.AdditionalDirectories,
+		AssistantId:           req.AssistantID,
+		WorkspaceId:           req.WorkspaceID,
+		Llm:                   []byte(req.LLM),
+		Env:                   req.Env,
+		Config:                []byte(req.Config),
+		Metadata:              req.Metadata,
+		Meta:                  metaBytes,
+	}
+	for _, ms := range req.McpServers {
+		pbMs := &pb.McpServer{
+			Type:    ms.Type,
+			Name:    ms.Name,
+			Command: ms.Command,
+			Args:    ms.Args,
+			Url:     ms.URL,
+			Headers: ms.Headers,
+		}
+		for _, ev := range ms.Env {
+			pbMs.Env = append(pbMs.Env, &pb.EnvVariable{
+				Name:  ev.Name,
+				Value: ev.Value,
+			})
+		}
+		pr.McpServers = append(pr.McpServers, pbMs)
+	}
+	return pr
 }

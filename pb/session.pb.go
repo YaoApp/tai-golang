@@ -35,8 +35,8 @@ const (
 type SessionMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`  // Monotonic sequence number (per-stream)
-	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // Message kind (e.g. "prompt", "text_delta", "tool_start")
-	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"` // Kind-specific JSON or protobuf payload
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // Message kind (e.g. "prompt", "agent_message_chunk", "state_update")
+	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"` // Kind-specific JSON payload
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -145,7 +145,7 @@ type SessionOpen struct {
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"` // OperationToken (JWT)
-	Options       *SessionOptions        `protobuf:"bytes,4,opt,name=options,proto3" json:"options,omitempty"`
+	Request       *SessionRequest        `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,9 +201,9 @@ func (x *SessionOpen) GetToken() string {
 	return ""
 }
 
-func (x *SessionOpen) GetOptions() *SessionOptions {
+func (x *SessionOpen) GetRequest() *SessionRequest {
 	if x != nil {
-		return x.Options
+		return x.Request
 	}
 	return nil
 }
@@ -334,7 +334,7 @@ func (x *SessionResume) GetLastDataSeq() uint64 {
 type SessionOpened struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`     // Actual runtime used (e.g. "agent", "dsh")
+	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`     // Actual runtime used (e.g. "agent")
 	Isolation     string                 `protobuf:"bytes,3,opt,name=isolation,proto3" json:"isolation,omitempty"` // Actual isolation (e.g. "host", "container")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -513,31 +513,40 @@ func (x *SessionError) GetMessage() string {
 	return ""
 }
 
-type SessionOptions struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Runtime        string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`                                        // "agent" | "dsh" | "claude" | "codex"
-	Isolation      string                 `protobuf:"bytes,2,opt,name=isolation,proto3" json:"isolation,omitempty"`                                    // "auto" | "host" | "container"
-	IdleTimeoutSec uint32                 `protobuf:"varint,3,opt,name=idle_timeout_sec,json=idleTimeoutSec,proto3" json:"idle_timeout_sec,omitempty"` // Session idle timeout (default 1800)
-	MaxDurationSec uint32                 `protobuf:"varint,4,opt,name=max_duration_sec,json=maxDurationSec,proto3" json:"max_duration_sec,omitempty"` // Max session duration, 0 = unlimited
-	RuntimeOptions *RuntimeOptions        `protobuf:"bytes,5,opt,name=runtime_options,json=runtimeOptions,proto3" json:"runtime_options,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+type SessionRequest struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Runtime               string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`                                                                              // "agent"
+	Isolation             string                 `protobuf:"bytes,2,opt,name=isolation,proto3" json:"isolation,omitempty"`                                                                          // "auto" | "host" | "container"
+	IdleTimeoutSec        uint32                 `protobuf:"varint,3,opt,name=idle_timeout_sec,json=idleTimeoutSec,proto3" json:"idle_timeout_sec,omitempty"`                                       // Session idle timeout (seconds, default 1800)
+	MaxDurationSec        uint32                 `protobuf:"varint,4,opt,name=max_duration_sec,json=maxDurationSec,proto3" json:"max_duration_sec,omitempty"`                                       // Max session duration (seconds, 0 = unlimited)
+	Cwd                   string                 `protobuf:"bytes,5,opt,name=cwd,proto3" json:"cwd,omitempty"`                                                                                      // Working directory
+	AdditionalDirectories []string               `protobuf:"bytes,6,rep,name=additional_directories,json=additionalDirectories,proto3" json:"additional_directories,omitempty"`                     // Shared directories
+	McpServers            []*McpServer           `protobuf:"bytes,7,rep,name=mcp_servers,json=mcpServers,proto3" json:"mcp_servers,omitempty"`                                                      // MCP servers to attach
+	AssistantId           string                 `protobuf:"bytes,8,opt,name=assistant_id,json=assistantId,proto3" json:"assistant_id,omitempty"`                                                   // Optional assistant identifier
+	WorkspaceId           string                 `protobuf:"bytes,9,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`                                                   // Optional workspace identifier
+	Llm                   []byte                 `protobuf:"bytes,10,opt,name=llm,proto3" json:"llm,omitempty"`                                                                                     // Providers JSON (transport passthrough)
+	Env                   map[string]string      `protobuf:"bytes,11,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`           // Environment variables
+	Config                []byte                 `protobuf:"bytes,12,opt,name=config,proto3" json:"config,omitempty"`                                                                               // Runtime-specific JSON config
+	Metadata              map[string]string      `protobuf:"bytes,13,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // User-defined metadata
+	Meta                  []byte                 `protobuf:"bytes,14,opt,name=meta,proto3" json:"meta,omitempty"`                                                                                   // ACP extension metadata (JSON passthrough)
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
-func (x *SessionOptions) Reset() {
-	*x = SessionOptions{}
+func (x *SessionRequest) Reset() {
+	*x = SessionRequest{}
 	mi := &file_session_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionOptions) String() string {
+func (x *SessionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionOptions) ProtoMessage() {}
+func (*SessionRequest) ProtoMessage() {}
 
-func (x *SessionOptions) ProtoReflect() protoreflect.Message {
+func (x *SessionRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_session_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -549,129 +558,233 @@ func (x *SessionOptions) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionOptions.ProtoReflect.Descriptor instead.
-func (*SessionOptions) Descriptor() ([]byte, []int) {
+// Deprecated: Use SessionRequest.ProtoReflect.Descriptor instead.
+func (*SessionRequest) Descriptor() ([]byte, []int) {
 	return file_session_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *SessionOptions) GetRuntime() string {
+func (x *SessionRequest) GetRuntime() string {
 	if x != nil {
 		return x.Runtime
 	}
 	return ""
 }
 
-func (x *SessionOptions) GetIsolation() string {
+func (x *SessionRequest) GetIsolation() string {
 	if x != nil {
 		return x.Isolation
 	}
 	return ""
 }
 
-func (x *SessionOptions) GetIdleTimeoutSec() uint32 {
+func (x *SessionRequest) GetIdleTimeoutSec() uint32 {
 	if x != nil {
 		return x.IdleTimeoutSec
 	}
 	return 0
 }
 
-func (x *SessionOptions) GetMaxDurationSec() uint32 {
+func (x *SessionRequest) GetMaxDurationSec() uint32 {
 	if x != nil {
 		return x.MaxDurationSec
 	}
 	return 0
 }
 
-func (x *SessionOptions) GetRuntimeOptions() *RuntimeOptions {
+func (x *SessionRequest) GetCwd() string {
 	if x != nil {
-		return x.RuntimeOptions
+		return x.Cwd
+	}
+	return ""
+}
+
+func (x *SessionRequest) GetAdditionalDirectories() []string {
+	if x != nil {
+		return x.AdditionalDirectories
 	}
 	return nil
 }
 
-type RuntimeOptions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Llm           *LLMConfig             `protobuf:"bytes,1,opt,name=llm,proto3" json:"llm,omitempty"`
-	Env           map[string]string      `protobuf:"bytes,2,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Environment variables for the runtime
-	Config        []byte                 `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"`                                                                     // Runtime-specific JSON config
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RuntimeOptions) Reset() {
-	*x = RuntimeOptions{}
-	mi := &file_session_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RuntimeOptions) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RuntimeOptions) ProtoMessage() {}
-
-func (x *RuntimeOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_session_proto_msgTypes[9]
+func (x *SessionRequest) GetMcpServers() []*McpServer {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
+		return x.McpServers
 	}
-	return mi.MessageOf(x)
+	return nil
 }
 
-// Deprecated: Use RuntimeOptions.ProtoReflect.Descriptor instead.
-func (*RuntimeOptions) Descriptor() ([]byte, []int) {
-	return file_session_proto_rawDescGZIP(), []int{9}
+func (x *SessionRequest) GetAssistantId() string {
+	if x != nil {
+		return x.AssistantId
+	}
+	return ""
 }
 
-func (x *RuntimeOptions) GetLlm() *LLMConfig {
+func (x *SessionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SessionRequest) GetLlm() []byte {
 	if x != nil {
 		return x.Llm
 	}
 	return nil
 }
 
-func (x *RuntimeOptions) GetEnv() map[string]string {
+func (x *SessionRequest) GetEnv() map[string]string {
 	if x != nil {
 		return x.Env
 	}
 	return nil
 }
 
-func (x *RuntimeOptions) GetConfig() []byte {
+func (x *SessionRequest) GetConfig() []byte {
 	if x != nil {
 		return x.Config
 	}
 	return nil
 }
 
-type LLMConfig struct {
+func (x *SessionRequest) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *SessionRequest) GetMeta() []byte {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+// McpServer describes an MCP server to attach to the session.
+type McpServer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`              // e.g. "deepseek"
-	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`                    // e.g. "deepseek-r1"
-	BaseUrl       string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"` // Optional API base URL override
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`                                                                                 // "stdio" | "http"
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                                                                 // Server name
+	Command       string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`                                                                           // stdio only: executable
+	Args          []string               `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`                                                                                 // stdio only: arguments
+	Url           string                 `protobuf:"bytes,5,opt,name=url,proto3" json:"url,omitempty"`                                                                                   // http: endpoint URL
+	Headers       map[string]string      `protobuf:"bytes,6,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Optional HTTP headers
+	Env           []*EnvVariable         `protobuf:"bytes,7,rep,name=env,proto3" json:"env,omitempty"`                                                                                   // stdio only: environment variables
+	Meta          []byte                 `protobuf:"bytes,8,opt,name=meta,proto3" json:"meta,omitempty"`                                                                                 // ACP extension metadata (JSON passthrough)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LLMConfig) Reset() {
-	*x = LLMConfig{}
+func (x *McpServer) Reset() {
+	*x = McpServer{}
+	mi := &file_session_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *McpServer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*McpServer) ProtoMessage() {}
+
+func (x *McpServer) ProtoReflect() protoreflect.Message {
+	mi := &file_session_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use McpServer.ProtoReflect.Descriptor instead.
+func (*McpServer) Descriptor() ([]byte, []int) {
+	return file_session_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *McpServer) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *McpServer) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *McpServer) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *McpServer) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+func (x *McpServer) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *McpServer) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *McpServer) GetEnv() []*EnvVariable {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *McpServer) GetMeta() []byte {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+// EnvVariable is an ACP v2 environment variable key-value pair.
+type EnvVariable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnvVariable) Reset() {
+	*x = EnvVariable{}
 	mi := &file_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LLMConfig) String() string {
+func (x *EnvVariable) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LLMConfig) ProtoMessage() {}
+func (*EnvVariable) ProtoMessage() {}
 
-func (x *LLMConfig) ProtoReflect() protoreflect.Message {
+func (x *EnvVariable) ProtoReflect() protoreflect.Message {
 	mi := &file_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -683,28 +796,21 @@ func (x *LLMConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LLMConfig.ProtoReflect.Descriptor instead.
-func (*LLMConfig) Descriptor() ([]byte, []int) {
+// Deprecated: Use EnvVariable.ProtoReflect.Descriptor instead.
+func (*EnvVariable) Descriptor() ([]byte, []int) {
 	return file_session_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *LLMConfig) GetProvider() string {
+func (x *EnvVariable) GetName() string {
 	if x != nil {
-		return x.Provider
+		return x.Name
 	}
 	return ""
 }
 
-func (x *LLMConfig) GetModel() string {
+func (x *EnvVariable) GetValue() string {
 	if x != nil {
-		return x.Model
-	}
-	return ""
-}
-
-func (x *LLMConfig) GetBaseUrl() string {
-	if x != nil {
-		return x.BaseUrl
+		return x.Value
 	}
 	return ""
 }
@@ -726,7 +832,7 @@ const file_session_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12-\n" +
-	"\aoptions\x18\x04 \x01(\v2\x13.tai.SessionOptionsR\aoptions\"E\n" +
+	"\arequest\x18\x04 \x01(\v2\x13.tai.SessionRequestR\arequest\"E\n" +
 	"\fSessionClose\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -751,24 +857,45 @@ const file_session_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\xda\x01\n" +
-	"\x0eSessionOptions\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xfe\x04\n" +
+	"\x0eSessionRequest\x12\x18\n" +
 	"\aruntime\x18\x01 \x01(\tR\aruntime\x12\x1c\n" +
 	"\tisolation\x18\x02 \x01(\tR\tisolation\x12(\n" +
 	"\x10idle_timeout_sec\x18\x03 \x01(\rR\x0eidleTimeoutSec\x12(\n" +
-	"\x10max_duration_sec\x18\x04 \x01(\rR\x0emaxDurationSec\x12<\n" +
-	"\x0fruntime_options\x18\x05 \x01(\v2\x13.tai.RuntimeOptionsR\x0eruntimeOptions\"\xb2\x01\n" +
-	"\x0eRuntimeOptions\x12 \n" +
-	"\x03llm\x18\x01 \x01(\v2\x0e.tai.LLMConfigR\x03llm\x12.\n" +
-	"\x03env\x18\x02 \x03(\v2\x1c.tai.RuntimeOptions.EnvEntryR\x03env\x12\x16\n" +
-	"\x06config\x18\x03 \x01(\fR\x06config\x1a6\n" +
+	"\x10max_duration_sec\x18\x04 \x01(\rR\x0emaxDurationSec\x12\x10\n" +
+	"\x03cwd\x18\x05 \x01(\tR\x03cwd\x125\n" +
+	"\x16additional_directories\x18\x06 \x03(\tR\x15additionalDirectories\x12/\n" +
+	"\vmcp_servers\x18\a \x03(\v2\x0e.tai.McpServerR\n" +
+	"mcpServers\x12!\n" +
+	"\fassistant_id\x18\b \x01(\tR\vassistantId\x12!\n" +
+	"\fworkspace_id\x18\t \x01(\tR\vworkspaceId\x12\x10\n" +
+	"\x03llm\x18\n" +
+	" \x01(\fR\x03llm\x12.\n" +
+	"\x03env\x18\v \x03(\v2\x1c.tai.SessionRequest.EnvEntryR\x03env\x12\x16\n" +
+	"\x06config\x18\f \x01(\fR\x06config\x12=\n" +
+	"\bmetadata\x18\r \x03(\v2!.tai.SessionRequest.MetadataEntryR\bmetadata\x12\x12\n" +
+	"\x04meta\x18\x0e \x01(\fR\x04meta\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"X\n" +
-	"\tLLMConfig\x12\x1a\n" +
-	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\x12\x19\n" +
-	"\bbase_url\x18\x03 \x01(\tR\abaseUrlB!Z\x1fgithub.com/yaoapp/tai-golang/pbb\x06proto3"
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9e\x02\n" +
+	"\tMcpServer\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\acommand\x18\x03 \x01(\tR\acommand\x12\x12\n" +
+	"\x04args\x18\x04 \x03(\tR\x04args\x12\x10\n" +
+	"\x03url\x18\x05 \x01(\tR\x03url\x125\n" +
+	"\aheaders\x18\x06 \x03(\v2\x1b.tai.McpServer.HeadersEntryR\aheaders\x12\"\n" +
+	"\x03env\x18\a \x03(\v2\x10.tai.EnvVariableR\x03env\x12\x12\n" +
+	"\x04meta\x18\b \x01(\fR\x04meta\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"7\n" +
+	"\vEnvVariable\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05valueB!Z\x1fgithub.com/yaoapp/tai-golang/pbb\x06proto3"
 
 var (
 	file_session_proto_rawDescOnce sync.Once
@@ -782,7 +909,7 @@ func file_session_proto_rawDescGZIP() []byte {
 	return file_session_proto_rawDescData
 }
 
-var file_session_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_session_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_session_proto_goTypes = []any{
 	(*SessionMessage)(nil), // 0: tai.SessionMessage
 	(*SessionData)(nil),    // 1: tai.SessionData
@@ -792,21 +919,25 @@ var file_session_proto_goTypes = []any{
 	(*SessionOpened)(nil),  // 5: tai.SessionOpened
 	(*SessionClosed)(nil),  // 6: tai.SessionClosed
 	(*SessionError)(nil),   // 7: tai.SessionError
-	(*SessionOptions)(nil), // 8: tai.SessionOptions
-	(*RuntimeOptions)(nil), // 9: tai.RuntimeOptions
-	(*LLMConfig)(nil),      // 10: tai.LLMConfig
-	nil,                    // 11: tai.RuntimeOptions.EnvEntry
+	(*SessionRequest)(nil), // 8: tai.SessionRequest
+	(*McpServer)(nil),      // 9: tai.McpServer
+	(*EnvVariable)(nil),    // 10: tai.EnvVariable
+	nil,                    // 11: tai.SessionRequest.EnvEntry
+	nil,                    // 12: tai.SessionRequest.MetadataEntry
+	nil,                    // 13: tai.McpServer.HeadersEntry
 }
 var file_session_proto_depIdxs = []int32{
-	8,  // 0: tai.SessionOpen.options:type_name -> tai.SessionOptions
-	9,  // 1: tai.SessionOptions.runtime_options:type_name -> tai.RuntimeOptions
-	10, // 2: tai.RuntimeOptions.llm:type_name -> tai.LLMConfig
-	11, // 3: tai.RuntimeOptions.env:type_name -> tai.RuntimeOptions.EnvEntry
-	4,  // [4:4] is the sub-list for method output_type
-	4,  // [4:4] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	8,  // 0: tai.SessionOpen.request:type_name -> tai.SessionRequest
+	9,  // 1: tai.SessionRequest.mcp_servers:type_name -> tai.McpServer
+	11, // 2: tai.SessionRequest.env:type_name -> tai.SessionRequest.EnvEntry
+	12, // 3: tai.SessionRequest.metadata:type_name -> tai.SessionRequest.MetadataEntry
+	13, // 4: tai.McpServer.headers:type_name -> tai.McpServer.HeadersEntry
+	10, // 5: tai.McpServer.env:type_name -> tai.EnvVariable
+	6,  // [6:6] is the sub-list for method output_type
+	6,  // [6:6] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_session_proto_init() }
@@ -820,7 +951,7 @@ func file_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_session_proto_rawDesc), len(file_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

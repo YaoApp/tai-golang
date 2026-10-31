@@ -16,8 +16,8 @@ option go_package = "github.com/yaoapp/tai-golang/pb";
 // SessionMessage is the unified frame for both Session Control and Data streams.
 message SessionMessage {
   uint64 seq  = 1; // Monotonic sequence number (per-stream)
-  string kind = 2; // Message kind (e.g. "prompt", "text_delta", "tool_start")
-  bytes  data = 3; // Kind-specific JSON or protobuf payload
+  string kind = 2; // Message kind (e.g. "prompt", "agent_message_chunk", "state_update")
+  bytes  data = 3; // Kind-specific JSON payload
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ message SessionOpen {
   string         session_id = 1;
   string         node_id    = 2;
   string         token      = 3; // OperationToken (JWT)
-  SessionOptions options    = 4;
+  SessionRequest request    = 4;
 }
 
 // SessionClose is sent by either side to close a session.
@@ -58,7 +58,7 @@ message SessionResume {
 // SessionOpened is Tai's acknowledgment that a session is ready.
 message SessionOpened {
   string session_id = 1;
-  string runtime    = 2; // Actual runtime used (e.g. "agent", "dsh")
+  string runtime    = 2; // Actual runtime used (e.g. "agent")
   string isolation  = 3; // Actual isolation (e.g. "host", "container")
 }
 
@@ -77,25 +77,41 @@ message SessionError {
 }
 
 // ---------------------------------------------------------------------------
-// Session options
+// SessionRequest — mirrors types.SessionRequest, transport-opaque fields
+// use bytes (JSON passthrough).
 // ---------------------------------------------------------------------------
 
-message SessionOptions {
-  string         runtime             = 1; // "agent" | "dsh" | "claude" | "codex"
-  string         isolation           = 2; // "auto" | "host" | "container"
-  uint32         idle_timeout_sec    = 3; // Session idle timeout (default 1800)
-  uint32         max_duration_sec    = 4; // Max session duration, 0 = unlimited
-  RuntimeOptions runtime_options     = 5;
+message SessionRequest {
+  string runtime                         = 1;  // "agent"
+  string isolation                       = 2;  // "auto" | "host" | "container"
+  uint32 idle_timeout_sec                = 3;  // Session idle timeout (seconds, default 1800)
+  uint32 max_duration_sec                = 4;  // Max session duration (seconds, 0 = unlimited)
+  string cwd                             = 5;  // Working directory
+  repeated string additional_directories = 6;  // Shared directories
+  repeated McpServer mcp_servers         = 7;  // MCP servers to attach
+  string assistant_id                    = 8;  // Optional assistant identifier
+  string workspace_id                    = 9;  // Optional workspace identifier
+  bytes  llm                             = 10; // Providers JSON (transport passthrough)
+  map<string,string> env                 = 11; // Environment variables
+  bytes  config                          = 12; // Runtime-specific JSON config
+  map<string,string> metadata            = 13; // User-defined metadata
+  bytes  meta                            = 14; // ACP extension metadata (JSON passthrough)
 }
 
-message RuntimeOptions {
-  LLMConfig         llm    = 1;
-  map<string,string> env   = 2; // Environment variables for the runtime
-  bytes             config = 3; // Runtime-specific JSON config
+// McpServer describes an MCP server to attach to the session.
+message McpServer {
+  string type                  = 1; // "stdio" | "http"
+  string name                  = 2; // Server name
+  string command               = 3; // stdio only: executable
+  repeated string args         = 4; // stdio only: arguments
+  string url                   = 5; // http: endpoint URL
+  map<string,string> headers   = 6; // Optional HTTP headers
+  repeated EnvVariable env     = 7; // stdio only: environment variables
+  bytes  meta                  = 8; // ACP extension metadata (JSON passthrough)
 }
 
-message LLMConfig {
-  string provider = 1; // e.g. "deepseek"
-  string model    = 2; // e.g. "deepseek-r1"
-  string base_url = 3; // Optional API base URL override
+// EnvVariable is an ACP v2 environment variable key-value pair.
+message EnvVariable {
+  string name  = 1;
+  string value = 2;
 }

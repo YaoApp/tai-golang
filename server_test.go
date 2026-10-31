@@ -282,8 +282,9 @@ func TestServerNodesAndControl(t *testing.T) {
 
 func TestServerNotImplementedMethods(t *testing.T) {
 	s, _ := NewServer(&ServerConfig{Auth: testAuth(t)})
-	if _, err := s.OpenSession(context.Background(), &OpenSessionRequest{}); err != ErrNotImplemented {
-		t.Errorf("OpenSession: %v", err)
+	// OpenSession requires Light pool; it returns a stream error, not ErrNotImplemented.
+	if _, err := s.OpenSession(context.Background(), &OpenSessionRequest{}); err == nil {
+		t.Error("OpenSession: expected error without Light pool, got nil")
 	}
 	if err := s.RegisterTool(&ToolDefinition{}); err != ErrNotImplemented {
 		t.Errorf("RegisterTool: %v", err)
