@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
 // NamespaceWorkspace is the Payload namespace for workspace commands.
@@ -170,14 +172,14 @@ type BranchRequest struct {
 
 // WSCreateRequest is the request for ws.create.
 type WSCreateRequest struct {
-	Path string `json:"path"`
-	Meta Meta   `json:"meta"`
+	Path string     `json:"path"`
+	Meta types.Meta `json:"meta"`
 }
 
 // WSRequest is the request for ws.open / ws.delete / ws.update_meta.
 type WSRequest struct {
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Meta        *Meta  `json:"meta,omitempty"`
+	WorkspaceID string      `json:"workspace_id,omitempty"`
+	Meta        *types.Meta `json:"meta,omitempty"`
 }
 
 // WSCommitRequest is the request for ws.get_commit.
@@ -196,23 +198,23 @@ type WSHistoryRequest struct {
 
 // WSListRequest is the request for ws.list.
 type WSListRequest struct {
-	Opts ListOptions `json:"opts"`
+	Opts types.ListOptions `json:"opts"`
 }
 
 // WSGCRequest is the request for ws.gc.
 type WSGCRequest struct {
-	WorkspaceID string    `json:"workspace_id"`
-	Opts        GCOptions `json:"opts"`
+	WorkspaceID string          `json:"workspace_id"`
+	Opts        types.GCOptions `json:"opts"`
 }
 
 // BranchMgmtRequest is used for branch management commands.
 type BranchMgmtRequest struct {
-	WorkspaceID string         `json:"workspace_id"`
-	Name        string         `json:"name,omitempty"`
-	From        string         `json:"from,omitempty"`
-	Into        string         `json:"into,omitempty"`
-	Meta        map[string]any `json:"meta,omitempty"`
-	Opts        *MergeOptions  `json:"opts,omitempty"`
+	WorkspaceID string              `json:"workspace_id"`
+	Name        string              `json:"name,omitempty"`
+	From        string              `json:"from,omitempty"`
+	Into        string              `json:"into,omitempty"`
+	Meta        map[string]any      `json:"meta,omitempty"`
+	Opts        *types.MergeOptions `json:"opts,omitempty"`
 }
 
 // WatchRequest is the request for watch.

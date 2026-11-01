@@ -13,13 +13,18 @@ import (
 	"github.com/yaoapp/tai-golang/pb"
 )
 
+// testRegistry returns a minimal types.NodeRegistry for server tests.
+func testRegistry() *testNodeRegistry {
+	return &testNodeRegistry{pool: &pb.PoolConfig{LightMinConns: 2, LightMaxConns: 8, LightMaxStreams: 256}}
+}
+
 func TestNewServerAndAddr(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	mgr := NewNodeManager(&pb.PoolConfig{LightMinConns: 2, LightMaxConns: 8, LightMaxStreams: 256})
+	reg := testRegistry()
 	codec := DefaultCodec()
 
-	ts := NewServer(a, mgr, codec)
+	ts := NewServer(a, reg, codec)
 	if ts.TCPAddr() != "" {
 		t.Errorf("tcpAddr should be empty before start, got %q", ts.TCPAddr())
 	}
@@ -37,8 +42,7 @@ func TestNewServerAndAddr(t *testing.T) {
 func TestCloseNilServers(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	mgr := NewNodeManager(&pb.PoolConfig{})
-	ts := NewServer(a, mgr, DefaultCodec())
+	ts := NewServer(a, testRegistry(), DefaultCodec())
 	if err := ts.Close(context.Background()); err != nil {
 		t.Errorf("close nil servers: %v", err)
 	}
@@ -47,7 +51,7 @@ func TestCloseNilServers(t *testing.T) {
 func TestStartH3RequiresTLS(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	ts := NewServer(a, NewNodeManager(&pb.PoolConfig{}), DefaultCodec())
+	ts := NewServer(a, testRegistry(), DefaultCodec())
 	if err := ts.StartH3("127.0.0.1:0", nil); err == nil {
 		t.Error("startH3 without TLS must fail")
 	}
@@ -56,7 +60,7 @@ func TestStartH3RequiresTLS(t *testing.T) {
 func TestH3AddrBeforeStart(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	ts := NewServer(a, NewNodeManager(&pb.PoolConfig{}), DefaultCodec())
+	ts := NewServer(a, testRegistry(), DefaultCodec())
 	if ts.H3Addr() != "" {
 		t.Errorf("H3Addr should be empty before start, got %q", ts.H3Addr())
 	}
@@ -65,13 +69,9 @@ func TestH3AddrBeforeStart(t *testing.T) {
 func TestServerGetters(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	mgr := NewNodeManager(&pb.PoolConfig{})
 	c := DefaultCodec()
-	ts := NewServer(a, mgr, c)
+	ts := NewServer(a, testRegistry(), c)
 
-	if ts.NodeManager() != mgr {
-		t.Error("NodeManager() mismatch")
-	}
 	if ts.Codec() != c {
 		t.Error("Codec() mismatch")
 	}
@@ -83,23 +83,14 @@ func TestServerGetters(t *testing.T) {
 func TestSetUnauthTimeout(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	ts := NewServer(a, NewNodeManager(&pb.PoolConfig{}), DefaultCodec())
+	ts := NewServer(a, testRegistry(), DefaultCodec())
 	ts.SetUnauthTimeout(5 * time.Second)
 }
 
 func TestSetLightAndTaiHandler(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	a := auth.DefaultAuth(priv)
-	ts := NewServer(a, NewNodeManager(&pb.PoolConfig{}), DefaultCodec())
+	ts := NewServer(a, testRegistry(), DefaultCodec())
 	ts.SetLightHandler(func(nodeID string, sess *webtransport.Session, st *ConnState) {})
 	ts.SetTaiHandler(func(conn net.Conn, st *ConnState) {})
-}
-
-func TestNodeManagerSetPoolConfig(t *testing.T) {
-	mgr := NewNodeManager(&pb.PoolConfig{LightMinConns: 1})
-	newCfg := &pb.PoolConfig{LightMinConns: 4, LightMaxConns: 16}
-	mgr.SetPoolConfig(newCfg)
-	if mgr.PoolConfig().LightMinConns != 4 {
-		t.Error("SetPoolConfig did not take effect")
-	}
 }

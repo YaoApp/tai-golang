@@ -17,13 +17,13 @@ import (
 )
 
 // Session represents an active agent session on a Tai node.
-// Implements the tai.Session interface.
+// Implements the types.Session interface.
 type Session struct {
 	id      string
 	nodeID  string
 	status  atomic.Value // types.SessionStatus
-	ctrl    *transport.LightStream
-	data    *transport.LightStream
+	ctrl    io.ReadWriteCloser
+	data    io.ReadWriteCloser
 	codec   *transport.FrameCodec
 	ctrlSeq atomic.Uint64
 
@@ -40,7 +40,7 @@ type Session struct {
 
 // New creates a Session with ctrl and data streams already established.
 // Starts the background ctrl read loop.
-func New(id, nodeID string, ctrl, data *transport.LightStream, codec *transport.FrameCodec) *Session {
+func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.FrameCodec) *Session {
 	s := &Session{
 		id:      id,
 		nodeID:  nodeID,

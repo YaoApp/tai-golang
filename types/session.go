@@ -1,6 +1,9 @@
 package types
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // SessionRequest mirrors tai/types.SessionRequest — same name, same fields.
 // It carries all parameters needed to open a session on a Tai node.
@@ -53,6 +56,53 @@ type OpenSessionRequest struct {
 	SessionID string
 	Token     string // OperationToken JWT
 	Request   *SessionRequest
+}
+
+// SessionOpenRequest is the node-level wrapper for opening a session.
+// Unlike OpenSessionRequest, it does not carry NodeID (the RemoteNode
+// already knows its own node ID).
+type SessionOpenRequest struct {
+	SessionID string
+	Token     string
+	Request   *SessionRequest
+}
+
+// ResumeSessionRequest carries the parameters for resuming a session
+// after a Light connection drops. The ctrl/data streams are reopened
+// from last_seq+1.
+type ResumeSessionRequest struct {
+	SessionID   string
+	Token       string
+	LastCtrlSeq uint64
+	LastDataSeq uint64
+}
+
+// Session represents an active agent session on a Tai node.
+type Session interface {
+	ID() string
+	NodeID() string
+	Status() SessionStatus
+
+	Prompt(msg *UserMessage) error
+	Followup(msg *UserMessage) (Disposition, error)
+	Cancel() error
+	Steer(msg *UserMessage) (Disposition, error)
+
+	UpdateQueue(action *QueueAction) error
+
+	ResolvePermission(requestID string, resp *PermissionResponse) error
+	ResolveElicitation(id string, resp *ElicitationResponse) error
+	SetConfigOption(configID string, value *ConfigOptionValue) error
+
+	UpdateSession(ctx context.Context, opts *SessionUpdateOptions) error
+
+	RecvEvent() (*SessionMsg, error)
+	RecvAction() (*SessionMsg, error)
+
+	StartRealtime(cfg *RealtimeConfig) error
+	StopRealtime() error
+
+	Close(ctx context.Context) error
 }
 
 // SessionMsg is a message received from a session stream.

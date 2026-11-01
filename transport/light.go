@@ -29,7 +29,7 @@ type lightPool struct {
 	conns   map[string][]*lightConn
 	cfg     *pb.PoolConfig
 	codec   *FrameCodec
-	mgr     *NodeManager
+	reg     types.NodeRegistry
 	auth    types.AuthProvider
 	heavy   *heavyPool
 	changed chan struct{}
@@ -37,12 +37,12 @@ type lightPool struct {
 	closed  bool
 }
 
-func newLightPool(cfg *pb.PoolConfig, codec *FrameCodec, mgr *NodeManager, auth types.AuthProvider) *lightPool {
+func newLightPool(cfg *pb.PoolConfig, codec *FrameCodec, reg types.NodeRegistry, auth types.AuthProvider) *lightPool {
 	return &lightPool{
 		conns:   make(map[string][]*lightConn),
 		cfg:     cfg,
 		codec:   codec,
-		mgr:     mgr,
+		reg:     reg,
 		auth:    auth,
 		changed: make(chan struct{}),
 		done:    make(chan struct{}),
@@ -232,7 +232,7 @@ func (p *lightPool) requestAdjust(nodeID string, targetSize int32) {
 		Pool:       "light",
 		TargetSize: uint32(targetSize),
 	})
-	if err := p.mgr.SendControl(nodeID, &pb.Payload{
+	if err := p.reg.SendControl(nodeID, &pb.Payload{
 		Namespace: types.NamespaceControl,
 		Kind:      "pool.adjust",
 		Data:      data,

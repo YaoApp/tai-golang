@@ -33,7 +33,7 @@ func TestMockNodeFullFlow(t *testing.T) {
 		t.Error("TaiID empty after registration")
 	}
 
-	node := ts.Nodes.NodeByID("node-full")
+	node := ts.Registry.NodeByID("node-full")
 	if node == nil {
 		t.Fatal("node not found in server after registration")
 	}
@@ -77,7 +77,7 @@ func TestMockNodeGoAway(t *testing.T) {
 		t.Fatalf("WaitRegistered: %v", err)
 	}
 
-	ts.Nodes.GoAway("node-goaway", "server-shutdown", 5)
+	ts.Registry.GoAway("node-goaway", "server-shutdown", 5)
 
 	done := make(chan struct{})
 	go func() {
@@ -204,7 +204,7 @@ func TestReconnectKeepsNewRegistration(t *testing.T) {
 	first.Stop()
 	time.Sleep(300 * time.Millisecond)
 
-	if ts.Nodes.NodeByID("re-node") == nil {
+	if ts.Registry.NodeByID("re-node") == nil {
 		t.Fatal("old stream teardown removed the new registration")
 	}
 }

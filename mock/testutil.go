@@ -12,15 +12,18 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/yaoapp/tai-golang/auth"
+	"github.com/yaoapp/tai-golang/node"
 	"github.com/yaoapp/tai-golang/pb"
 	"github.com/yaoapp/tai-golang/transport"
 	"github.com/yaoapp/tai-golang/types"
+	"github.com/yaoapp/tai-golang/workspace"
 )
 
 // TestServer is a self-contained test harness that starts the HTTP API and
@@ -30,7 +33,7 @@ type TestServer struct {
 	Auth      types.AuthProvider
 	HTTP      *transport.HTTPServer
 	Transport *transport.Server
-	Nodes     *transport.NodeManager
+	Registry  *node.Registry
 	TLSConfig *tls.Config
 
 	HTTPAddr      string
@@ -69,19 +72,20 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 	}
 
 	pool, _ := DefaultPoolConfig()
-	mgr := transport.NewNodeManager(pool)
+	reg := node.NewRegistry(pool, workspace.DefaultPolicy())
 
-	tr := transport.NewServer(a, mgr, codec)
+	tr := transport.NewServer(a, reg, codec)
+	transport.SetDefault(tr)
+
 	if unauthTimeout > 0 {
 		tr.SetUnauthTimeout(unauthTimeout)
 	}
 
 	httpSrv := transport.NewHTTPServer(a)
-	light := pool // pool config for light pool init
 
 	// Initialize light and heavy pools before starting listeners.
-	tr.InitLightPool(light)
-	tr.InitHeavyPool(light)
+	tr.InitLightPool(pool)
+	tr.InitHeavyPool(pool)
 
 	// Start TCP+H3 transport.
 	if err := tr.StartTCP("127.0.0.1:0", tlsCfg); err != nil {
@@ -120,7 +124,7 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 		Auth:          a,
 		HTTP:          httpSrv,
 		Transport:     tr,
-		Nodes:         mgr,
+		Registry:      reg,
 		TLSConfig:     tlsCfg,
 		HTTPAddr:      httpSrv.Addr(),
 		TransportAddr: tcpAddr,
@@ -164,12 +168,12 @@ func (ts *TestServer) IssueTestNodeToken(nodeID string) string {
 
 // GoAwayAll sends a go_away message to all connected nodes.
 func (ts *TestServer) GoAwayAll(reason string) {
-	ts.Nodes.GoAwayAll(reason, 0)
+	ts.Registry.GoAwayAll(reason, 0)
 }
 
 // SendControl sends a control message to a specific node.
 func (ts *TestServer) SendControl(nodeID string, msg *pb.Payload) error {
-	return ts.Nodes.SendControl(nodeID, msg)
+	return ts.Registry.SendControl(nodeID, msg)
 }
 
 // LightConnCount returns the number of Light connections for a node.
@@ -178,7 +182,7 @@ func (ts *TestServer) LightConnCount(nodeID string) int {
 }
 
 // OpenLightStream opens a bidirectional stream on the Light pool.
-func (ts *TestServer) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (*transport.LightStream, error) {
+func (ts *TestServer) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error) {
 	return ts.Transport.OpenLightStream(ctx, nodeID, firstFrame)
 }
 

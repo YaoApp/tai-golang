@@ -46,16 +46,27 @@ tai start --node-id demo-node --server http://localhost:5099 --node-token <token
 import (
     tai "github.com/yaoapp/tai-golang"
     "github.com/yaoapp/tai-golang/auth"
+    "github.com/yaoapp/tai-golang/node"
+    "github.com/yaoapp/tai-golang/types"
 )
+
+// Node registration callback
+node.OnRegister(func(n types.RemoteNode) error {
+    log.Printf("node %s registered", n.Info().ID)
+    return nil
+})
 
 server, err := tai.NewServer(&tai.ServerConfig{
     Auth: auth.DefaultAuth(privateKey),
 })
 
-server.OnNodeRegister(func(node *tai.Node) error {
-    log.Printf("node %s registered", node.ID)
-    return nil
-})
-
 server.Start(ctx)
+
+// After a Tai node connects:
+n := node.Get("node-1")
+session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
+    SessionID: "sess-001",
+    Token:     operationToken,
+    Request:   &types.SessionRequest{Runtime: "agent"},
+})
 ```

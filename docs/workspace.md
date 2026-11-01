@@ -14,7 +14,8 @@ import (
     "io/fs"
 
     tai "github.com/yaoapp/tai-golang"
-    "github.com/yaoapp/tai-golang/workspace"
+    "github.com/yaoapp/tai-golang/node"
+    "github.com/yaoapp/tai-golang/types"
 )
 
 func main() {
@@ -22,16 +23,18 @@ func main() {
     server, _ := tai.NewServer(&tai.ServerConfig{ /* ... */ })
     go server.Start(context.Background())
 
+    // 2. Register a callback to know when nodes connect
+    node.OnRegister(func(n types.RemoteNode) error {
+        fmt.Println("node registered:", n.Info().ID)
+        return nil
+    })
+
     // Wait for a Tai node to connect...
-    nodeID := "node-1"
-
-    // 2. Initialize the workspace package with the transport layer
-    workspace.Init(server, nodeID, nil) // nil = default channel policy
-
     ctx := context.Background()
+    n := node.Get("node-1") // returns types.RemoteNode
 
     // 3. Create a workspace on the Tai node
-    ws, err := workspace.Create(ctx, "/home/user/project", workspace.Meta{
+    ws, err := n.CreateWorkspace(ctx, "/home/user/project", types.Meta{
         Name:  "my-project",
         Owner: "user-1",
     })
@@ -72,7 +75,7 @@ func main() {
     fmt.Println("commit:", commit.ID)
 
     // 8. Merge back to main
-    result, _ := ws.Merge(ctx, "feature-x", "main", workspace.MergeOptions{
+    result, _ := ws.Merge(ctx, "feature-x", "main", types.MergeOptions{
         DeleteSource: true,
         Message:      "merge feature-x",
     })
@@ -89,175 +92,41 @@ func main() {
 
     // 10. Query history
     history, _ := ws.LoadHistory(ctx)
-    log, _ := history.BranchLog("main", workspace.LogOptions{Limit: 10})
+    log, _ := history.BranchLog("main", types.LogOptions{Limit: 10})
     for _, entry := range log {
         fmt.Printf("%s %s\n", entry.ID[:8], entry.Message)
     }
 }
 ```
 
-## Initialization
+## Workspace Access
+
+Workspace operations are accessed through `types.RemoteNode` methods. After a Tai node registers, get a `RemoteNode` via `node.Get(nodeID)`:
 
 ```go
-func Init(tr Transport, nodeID string, policy *ChannelPolicy)
+import (
+    "github.com/yaoapp/tai-golang/node"
+    "github.com/yaoapp/tai-golang/types"
+)
+
+n := node.Get("node-1")
+
+ws, err := n.OpenWorkspace(ctx, "abc123")
+ws, err := n.OpenWorkspace(ctx, "abc123", "dev")         // open on "dev" branch
+ws, err := n.CreateWorkspace(ctx, "/path", types.Meta{Name: "proj", Owner: "user-1"})
+entries, err := n.ListWorkspaces(ctx, types.ListOptions{Owner: "user-1"})
+err := n.DeleteWorkspace(ctx, "abc123")
 ```
 
-Must be called before any workspace operation. `Open`, `Create`, `List`, and `Delete` return an error if called before `Init`.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `tr` | `Transport` | Transport layer implementation (SDK `transport.Server` implements this) |
-| `nodeID` | `string` | Target Tai node ID for all subsequent operations |
-| `policy` | `*ChannelPolicy` | Channel selection policy; `nil` uses `DefaultPolicy()` |
-
-**Example:**
+### HalfCloser
 
 ```go
-import "github.com/yaoapp/tai-golang/workspace"
-
-workspace.Init(server, "node-1", nil)
-```
-
-### Transport Interface
-
-```go
-type Transport interface {
-    OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (Stream, error)
-    HeavyPick(nodeID string) (net.Conn, error)
-    HeavyReturn(conn net.Conn)
-}
-```
-
-| Method | Description |
-|--------|-------------|
-| `OpenLightStream` | Opens a bidirectional Light stream (H2/H3) with `firstFrame` as the envelope |
-| `HeavyPick` | Takes an idle Heavy connection (raw TCP) for the given node; connection-level exclusive |
-| `HeavyReturn` | Returns a Heavy connection to the idle pool |
-
-### Stream and HalfCloser
-
-```go
-type Stream interface {
-    io.ReadWriteCloser
-}
-
 type HalfCloser interface {
     CloseWrite() error
 }
 ```
 
-`HalfCloser` is optionally implemented by `Stream` to support closing the write side while keeping the read side open. H2 streams support this natively via `END_STREAM`. When a `Create` writer's stream implements `HalfCloser`, `Close()` will half-close the write side and read the server's response to detect errors (e.g., permission denied, disk full).
-
-## Package-Level Functions
-
-### Open
-
-```go
-func Open(ctx context.Context, wsID string, branch ...string) (Workspace, error)
-```
-
-Opens an existing workspace and returns a `Workspace` bound to the given ID and branch. File operations on the returned `Workspace` operate on the bound branch.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ctx` | `context.Context` | Context for cancellation |
-| `wsID` | `string` | Workspace ID (hash) |
-| `branch` | `...string` | Optional branch name; defaults to `"main"` if omitted or empty |
-
-**Returns:** `Workspace` with metadata fetched from the Tai side via `ws.open` command.
-
-**Wire:** Sends `ws.open` with `WSRequest{WorkspaceID}`, expects `ws.open.result` containing `Meta`.
-
-```go
-ws, err := workspace.Open(ctx, "abc123")
-ws, err := workspace.Open(ctx, "abc123", "dev")
-```
-
-### Create
-
-```go
-func Create(ctx context.Context, path string, meta Meta) (Workspace, error)
-```
-
-Creates a new workspace at the given filesystem path on the Tai side.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ctx` | `context.Context` | Context for cancellation |
-| `path` | `string` | Absolute filesystem path on the Tai node |
-| `meta` | `Meta` | Workspace metadata (`Name`, `Owner`) |
-
-**Returns:** `Workspace` bound to `"main"` branch with the ID and metadata returned by the Tai side.
-
-**Wire:** Sends `ws.create` with `WSCreateRequest{Path, Meta}`, expects `ws.create.result` containing `{id, meta}`.
-
-```go
-ws, err := workspace.Create(ctx, "/home/user/project", workspace.Meta{
-    Name:  "my-project",
-    Owner: "user-1",
-})
-fmt.Println(ws.ID())     // server-assigned ID
-fmt.Println(ws.Meta())   // Meta{Name: "my-project", Owner: "user-1"}
-```
-
-### List
-
-```go
-func List(ctx context.Context, opts ListOptions) ([]RegistryEntry, error)
-```
-
-Returns all workspaces matching the filter options.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ctx` | `context.Context` | Context for cancellation |
-| `opts` | `ListOptions` | Filter options |
-
-**`ListOptions` fields:**
-
-| Field | Type | JSON | Description |
-|-------|------|------|-------------|
-| `Owner` | `string` | `"owner,omitempty"` | Filter by owner; empty means all |
-
-**Returns:** `[]RegistryEntry`, each containing `ID` and `Meta`.
-
-**Wire:** Sends `ws.list` with `WSListRequest{Opts}`, expects `ws.list.result` containing `[]RegistryEntry`.
-
-```go
-entries, err := workspace.List(ctx, workspace.ListOptions{Owner: "user-1"})
-for _, e := range entries {
-    fmt.Printf("id=%s name=%s owner=%s\n", e.ID, e.Meta.Name, e.Meta.Owner)
-}
-```
-
-### Delete
-
-```go
-func Delete(ctx context.Context, wsID string) error
-```
-
-Removes a workspace by ID.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ctx` | `context.Context` | Context for cancellation |
-| `wsID` | `string` | Workspace ID to delete |
-
-**Wire:** Sends `ws.delete` with `WSRequest{WorkspaceID}`, expects `ws.delete.result`.
-
-```go
-err := workspace.Delete(ctx, "abc123")
-```
+`HalfCloser` is optionally implemented by streams to support closing the write side while keeping the read side open. When a `Create` writer's stream implements `HalfCloser`, `Close()` will half-close the write side and read the server's response to detect errors (e.g., permission denied, disk full).
 
 ## Workspace Interface
 
@@ -925,9 +794,10 @@ func (e *ErrorResponse) Error() string  // "code: message"
 Use `errors.As` to detect remote errors:
 
 ```go
-ws, err := workspace.Open(ctx, "nonexistent")
+n := node.Get("node-1")
+ws, err := n.OpenWorkspace(ctx, "nonexistent")
 if err != nil {
-    var errResp *workspace.ErrorResponse
+    var errResp *workspace.ErrorResponse  // workspace.ErrorResponse stays in workspace/
     if errors.As(err, &errResp) {
         fmt.Printf("remote error: code=%s message=%s\n", errResp.Code, errResp.Message)
     }

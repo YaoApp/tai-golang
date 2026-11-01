@@ -26,24 +26,49 @@ func NewServer(cfg *ServerConfig) (Server, error)
 |--------|-------------|
 | `Start(ctx)` | Start and block until shutdown |
 | `Addr()` | TCP listen address |
-| `Nodes()` | All registered nodes |
-| `NodeByID(nodeID)` | Lookup node by ID |
-| `OpenSession(ctx, req)` | Open a session on a node |
-| `OnNodeRegister(fn)` | Register node callback |
-| `OnSessionEvent(fn)` | Register session event callback |
 | `RegisterTool(tool)` | Register a server-side tool (not implemented) |
 | `UnregisterTool(name)` | Unregister a server-side tool (not implemented) |
-| `SendControl(nodeID, msg)` | Send a control message to a node |
 | `Close()` | Shutdown (idempotent) |
+
+## RemoteNode
+
+Node management uses the `node` package-level functions. After a Tai node connects and registers, it becomes a `RemoteNode` with workspace, session, and control operations.
+
+```go
+import "github.com/yaoapp/tai-golang/node"
+
+// Callbacks
+node.OnRegister(func(n types.RemoteNode) error { ... })
+node.OnDisconnect(func(nodeID string) { ... })
+
+// Lookup
+n := node.Get("node-1")   // returns types.RemoteNode or nil
+all := node.List()         // returns []types.RemoteNode
+```
+
+### RemoteNode Interface
+
+| Method | Description |
+|--------|-------------|
+| `Info()` | Returns the `*Node` data struct |
+| `Online()` | Whether the node is connected |
+| `OpenWorkspace(ctx, wsID, branch...)` | Open an existing workspace |
+| `CreateWorkspace(ctx, path, meta)` | Create a new workspace |
+| `ListWorkspaces(ctx, opts)` | List workspaces |
+| `DeleteWorkspace(ctx, wsID)` | Delete a workspace |
+| `OpenSession(ctx, req)` | Open a session |
+| `ResumeSession(ctx, req)` | Resume a session (not implemented) |
+| `SendControl(msg)` | Send a control message |
+| `GoAway(reason, reconnectAfter)` | Ask the node to disconnect and reconnect |
 
 ## Session (17 methods)
 
 ```go
-session, err := server.OpenSession(ctx, &OpenSessionRequest{
-    NodeID:    "node-1",
+n := node.Get("node-1")
+session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     operationToken,
-    Request:   &SessionRequest{Runtime: "agent"},
+    Request:   &types.SessionRequest{Runtime: "agent"},
 })
 ```
 
@@ -123,17 +148,16 @@ opToken, _ := provider.IssueOperationToken("node-1", "sess-1", []string{"session
 
 ## Workspace
 
-See [Workspace API](workspace.md) for full documentation.
+See [Workspace API](workspace.md) for full documentation. Workspace operations are accessed through `RemoteNode` methods:
 
 ```go
-import "github.com/yaoapp/tai-golang/workspace"
+import "github.com/yaoapp/tai-golang/node"
 
-workspace.Init(server, nodeID, nil)
-
-ws, err := workspace.Open(ctx, "workspace-id")
-ws, err := workspace.Create(ctx, "/path", workspace.Meta{Name: "proj"})
-entries, err := workspace.List(ctx, workspace.ListOptions{})
-err := workspace.Delete(ctx, "workspace-id")
+n := node.Get("node-1")
+ws, err := n.OpenWorkspace(ctx, "workspace-id")
+ws, err := n.CreateWorkspace(ctx, "/path", types.Meta{Name: "proj"})
+entries, err := n.ListWorkspaces(ctx, types.ListOptions{})
+err := n.DeleteWorkspace(ctx, "workspace-id")
 ```
 
 ### Key Interfaces
@@ -145,9 +169,8 @@ err := workspace.Delete(ctx, "workspace-id")
 | `Branch` | Branch-scoped file operations (`FS()`) + version control (`Commit` / `Diff` / `Rollback`) |
 | `History` | Commit queries: `Query` / `FileHistory` / `BranchLog` |
 | `Watcher` | Real-time file change events via `Events()` channel |
-| `Transport` | Injected transport layer: `OpenLightStream` / `HeavyPick` / `HeavyReturn` |
 
-### Key Types
+### Key Types (in `types/`)
 
 - `Meta` — Workspace metadata (`Name`, `Owner`)
 - `BranchInfo` — Branch summary (`Name`, `Head`, `Meta`)
@@ -156,5 +179,5 @@ err := workspace.Delete(ctx, "workspace-id")
 - `MergeOptions` / `MergeResult` — Merge configuration and outcome
 - `GCOptions` / `GCResult` — Garbage collection configuration and outcome
 - `WatchEvent` — File change notification (`Type`, `Path`)
-- `ChannelPolicy` — Transport channel selection (`SizeThreshold`, `TextExts`, `BinaryExts`)
-- `ErrorResponse` — Structured remote error (`Code`, `Message`)
+- `ChannelPolicy` — Transport channel selection (in `workspace/`)
+- `ErrorResponse` — Structured remote error (in `workspace/`)

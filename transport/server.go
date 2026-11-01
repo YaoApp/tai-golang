@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,14 +19,13 @@ import (
 	"github.com/quic-go/webtransport-go"
 	"github.com/yaoapp/tai-golang/pb"
 	"github.com/yaoapp/tai-golang/types"
-	"sync"
 )
 
 // Server handles Tai connections over HTTP/3 (QUIC) and TCP (HTTP/2 fallback
 // plus the Tai frame protocol).
 type Server struct {
 	auth    types.AuthProvider
-	mgr     *NodeManager
+	reg     types.NodeRegistry
 	codec   *FrameCodec
 	mux     *http.ServeMux
 	handler http.Handler
@@ -54,10 +55,10 @@ type Server struct {
 }
 
 // NewServer creates a transport server.
-func NewServer(auth types.AuthProvider, mgr *NodeManager, codec *FrameCodec) *Server {
+func NewServer(auth types.AuthProvider, reg types.NodeRegistry, codec *FrameCodec) *Server {
 	t := &Server{
 		auth:  auth,
-		mgr:   mgr,
+		reg:   reg,
 		codec: codec,
 		mux:   http.NewServeMux(),
 	}
@@ -76,8 +77,8 @@ func (t *Server) SetUnauthTimeout(d time.Duration) { t.unauthTimeout = d }
 // SetQUICConfig sets the QUIC configuration.
 func (t *Server) SetQUICConfig(cfg *quic.Config) { t.quicConfig = cfg }
 
-// NodeManager returns the node manager.
-func (t *Server) NodeManager() *NodeManager { return t.mgr }
+// Registry returns the node registry.
+func (t *Server) Registry() types.NodeRegistry { return t.reg }
 
 // Codec returns the frame codec.
 func (t *Server) Codec() *FrameCodec { return t.codec }
@@ -305,7 +306,7 @@ func (t *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 
-	cs := newControlStream(nodeID, r.Body, w, t.mgr, t.auth, t.codec)
+	cs := newControlStream(nodeID, r.Body, w, t.reg, t.auth, t.codec)
 	cs.run(r.Context())
 	log.Printf("tai-sdk: Control stream closed for node %s", nodeID)
 }
@@ -372,7 +373,7 @@ func (t *Server) LightConnCount(nodeID string) int {
 }
 
 // OpenLightStream opens a bidirectional stream on the Light pool.
-func (t *Server) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (*LightStream, error) {
+func (t *Server) OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error) {
 	if t.light == nil {
 		return nil, errors.New("light pool not initialized")
 	}
@@ -381,7 +382,7 @@ func (t *Server) OpenLightStream(ctx context.Context, nodeID string, firstFrame 
 
 // InitLightPool creates and initializes the Light pool.
 func (t *Server) InitLightPool(cfg *pb.PoolConfig) {
-	pool := newLightPool(cfg, t.codec, t.mgr, t.auth)
+	pool := newLightPool(cfg, t.codec, t.reg, t.auth)
 	t.light = pool
 	pool.initLightHandlers(t)
 }
@@ -397,7 +398,7 @@ func (t *Server) CloseLightPool() {
 // Must be called after InitLightPool so the light pool can route
 // Heavy connections to it.
 func (t *Server) InitHeavyPool(cfg *pb.PoolConfig) {
-	pool := newHeavyPool(cfg, t.mgr, t.auth)
+	pool := newHeavyPool(cfg, t.reg, t.auth)
 	t.heavy = pool
 	if t.light != nil {
 		t.light.setHeavyPool(pool)
@@ -449,5 +450,36 @@ func (t *Server) HeavyIdleCount(nodeID string) int {
 	return t.heavy.IdleCount(nodeID)
 }
 
-// light is the Light connection pool.
-var _ = (*Server)(nil) // compile-time reference
+// ---------- Package-level global instance ----------
+
+// Backend is the interface for package-level convenience functions.
+// *Server satisfies this interface naturally.
+type Backend interface {
+	OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error)
+	HeavyPick(nodeID string) (net.Conn, error)
+	HeavyReturn(conn net.Conn)
+}
+
+var defaultBackend Backend
+
+// SetDefault registers the global transport server instance.
+// Called once by the root package's newServer after creating the Server.
+func SetDefault(s *Server) { defaultBackend = s }
+
+// SetTestBackend replaces the global backend with a test double.
+func SetTestBackend(b Backend) { defaultBackend = b }
+
+// PkgOpenLightStream opens a Light stream via the global transport server.
+func PkgOpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error) {
+	return defaultBackend.OpenLightStream(ctx, nodeID, firstFrame)
+}
+
+// PkgHeavyPick returns an idle Heavy connection via the global transport server.
+func PkgHeavyPick(nodeID string) (net.Conn, error) {
+	return defaultBackend.HeavyPick(nodeID)
+}
+
+// PkgHeavyReturn marks a Heavy connection as idle via the global transport server.
+func PkgHeavyReturn(conn net.Conn) {
+	defaultBackend.HeavyReturn(conn)
+}

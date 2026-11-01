@@ -18,7 +18,7 @@ type heavyPool struct {
 	mu     sync.Mutex
 	conns  map[string][]*heavyConn // nodeID → connections
 	cfg    *pb.PoolConfig
-	mgr    *NodeManager
+	reg    types.NodeRegistry
 	auth   types.AuthProvider
 	done   chan struct{}
 	closed bool
@@ -32,11 +32,11 @@ type heavyConn struct {
 	done   chan struct{} // closed when this conn is removed from the pool
 }
 
-func newHeavyPool(cfg *pb.PoolConfig, mgr *NodeManager, auth types.AuthProvider) *heavyPool {
+func newHeavyPool(cfg *pb.PoolConfig, reg types.NodeRegistry, auth types.AuthProvider) *heavyPool {
 	return &heavyPool{
 		conns: make(map[string][]*heavyConn),
 		cfg:   cfg,
-		mgr:   mgr,
+		reg:   reg,
 		auth:  auth,
 		done:  make(chan struct{}),
 	}
@@ -189,7 +189,7 @@ func (p *heavyPool) requestAdjust(nodeID string, targetSize int32) {
 		Pool:       "heavy",
 		TargetSize: uint32(targetSize),
 	})
-	if err := p.mgr.SendControl(nodeID, &pb.Payload{
+	if err := p.reg.SendControl(nodeID, &pb.Payload{
 		Namespace: types.NamespaceControl,
 		Kind:      "pool.adjust",
 		Data:      data,

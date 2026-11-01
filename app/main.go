@@ -18,6 +18,8 @@ import (
 
 	tai "github.com/yaoapp/tai-golang"
 	"github.com/yaoapp/tai-golang/auth"
+	"github.com/yaoapp/tai-golang/node"
+	"github.com/yaoapp/tai-golang/types"
 )
 
 func main() {
@@ -58,9 +60,10 @@ func main() {
 	store := NewStore()
 
 	// Register node callback.
-	sdkServer.OnNodeRegister(func(node *tai.Node) error {
-		store.AddNode(node)
-		log.Printf("node registered: %s (tai_id=%s)", node.ID, node.TaiID)
+	node.OnRegister(func(n types.RemoteNode) error {
+		store.AddNode(n)
+		info := n.Info()
+		log.Printf("node registered: %s (tai_id=%s)", info.ID, info.TaiID)
 		return nil
 	})
 
@@ -77,7 +80,7 @@ func main() {
 	time.Sleep(200 * time.Millisecond)
 
 	// Build API router.
-	mux := NewAPI(sdkServer, authProvider, store)
+	mux := NewAPI(authProvider, store)
 
 	apiServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", apiPort),

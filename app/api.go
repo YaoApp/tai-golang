@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"net/http"
 
-	tai "github.com/yaoapp/tai-golang"
 	"github.com/yaoapp/tai-golang/types"
 )
 
@@ -13,12 +12,12 @@ import (
 var staticFS embed.FS
 
 // NewAPI creates the HTTP mux with all API routes and static frontend.
-func NewAPI(sdkServer tai.Server, authProvider types.AuthProvider, store *Store) http.Handler {
+func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	mux := http.NewServeMux()
 
 	authH := &AuthHandler{auth: authProvider}
 	nodeH := &NodeHandler{store: store}
-	sessionH := &SessionHandler{server: sdkServer, store: store, auth: authProvider}
+	sessionH := &SessionHandler{store: store, auth: authProvider}
 	docsH := &DocsHandler{}
 
 	// Auth endpoints

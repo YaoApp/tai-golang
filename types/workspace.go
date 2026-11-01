@@ -1,7 +1,4 @@
-// Package workspace provides remote workspace access via the Tai transport layer.
-// All file operations use standard Go fs.FS interfaces; the transport channel
-// (Light pool / Heavy pool) is chosen automatically and transparently.
-package workspace
+package types
 
 import (
 	"context"
@@ -10,7 +7,6 @@ import (
 )
 
 // WorkspaceFS extends fs.FS with write operations and Watch.
-// Mirrors the Tai-side workspace/types/branch.go definition.
 type WorkspaceFS interface {
 	fs.FS                                         // Open / Stat / ReadDir
 	Create(name string) (io.WriteCloser, error)   // create or overwrite a file
@@ -23,7 +19,6 @@ type WorkspaceFS interface {
 }
 
 // Watcher delivers file change events from the Tai side.
-// Events are received via a long-lived Light stream (kind:"watch" → "watch.event").
 type Watcher interface {
 	Events() <-chan WatchEvent
 	Close() error
@@ -45,8 +40,8 @@ type WatchEvent struct {
 	Path string
 }
 
-// Workspace is the top-level object returned by Open. It embeds WorkspaceFS
-// for default-branch file operations and exposes branch management, history,
+// Workspace is the top-level workspace object. It embeds WorkspaceFS for
+// default-branch file operations and exposes branch management, history,
 // and maintenance methods.
 type Workspace interface {
 	WorkspaceFS // embedded — fs.ReadFile(ws, path) operates on the bound branch
@@ -74,24 +69,19 @@ type Workspace interface {
 	Close() error
 }
 
-// Branch represents a named branch within a workspace. It provides file
-// operations (via FS()) and version control methods.
+// Branch represents a named branch within a workspace.
 type Branch interface {
-	// File operations (including Watch, inherited from WorkspaceFS)
 	FS() WorkspaceFS
 
-	// Branch info
 	Name() string
 	Head(ctx context.Context) (*CommitInfo, error)
 	Meta() map[string]any
 	UpdateMeta(ctx context.Context, meta map[string]any) error
 
-	// Version control
 	Commit(ctx context.Context, message string) (*CommitInfo, error)
 	Diff(ctx context.Context, from, to string) ([]FileDiff, error)
 	Rollback(ctx context.Context, commitID string) error
 
-	// Write lock
 	AcquireWrite(ctx context.Context, holder string) error
 	ReleaseWrite(ctx context.Context) error
 }

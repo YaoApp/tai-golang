@@ -3,6 +3,8 @@ package workspace
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
 func TestDefaultPolicy(t *testing.T) {
@@ -192,7 +194,7 @@ func TestBranchMgmtRequestJSON(t *testing.T) {
 }
 
 func TestWSCreateRequestJSON(t *testing.T) {
-	req := WSCreateRequest{Path: "/data/project", Meta: Meta{Name: "proj", Owner: "u1"}}
+	req := WSCreateRequest{Path: "/data/project", Meta: types.Meta{Name: "proj", Owner: "u1"}}
 	data, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)

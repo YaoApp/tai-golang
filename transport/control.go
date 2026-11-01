@@ -14,24 +14,25 @@ import (
 )
 
 // controlStream manages one bidirectional Control stream for a Tai node.
+// It implements types.ControlWriter.
 type controlStream struct {
 	nodeID string
 	r      io.Reader
 	w      io.Writer
 	f      http.Flusher
 	codec  *FrameCodec
-	mgr    *NodeManager
+	reg    types.NodeRegistry
 	auth   types.AuthProvider
 
 	mu     sync.Mutex
 	closed bool
 }
 
-// errControlClosed is returned by writeMsg after the Control stream's
+// errControlClosed is returned by WriteControl after the Control stream's
 // handler has returned.
 var errControlClosed = errors.New("tai: control stream closed")
 
-func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *NodeManager, auth types.AuthProvider, codec *FrameCodec) *controlStream {
+func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, reg types.NodeRegistry, auth types.AuthProvider, codec *FrameCodec) *controlStream {
 	f, _ := w.(http.Flusher)
 	return &controlStream{
 		nodeID: nodeID,
@@ -39,7 +40,7 @@ func newControlStream(nodeID string, r io.Reader, w http.ResponseWriter, mgr *No
 		w:      w,
 		f:      f,
 		codec:  codec,
-		mgr:    mgr,
+		reg:    reg,
 		auth:   auth,
 	}
 }
@@ -68,7 +69,7 @@ func (cs *controlStream) run(ctx context.Context) {
 }
 
 func (cs *controlStream) close() {
-	cs.mgr.UnregisterStream(cs.nodeID, cs)
+	cs.reg.UnbindStream(cs.nodeID, cs)
 	cs.mu.Lock()
 	cs.closed = true
 	cs.mu.Unlock()
@@ -96,13 +97,13 @@ func (cs *controlStream) handleRegister(data []byte) {
 		return
 	}
 
-	ack, err := cs.mgr.Register(cs.nodeID, reg, cs.auth)
+	ack, err := cs.reg.Register(cs.nodeID, reg, cs.auth)
 	if err != nil {
 		log.Printf("tai-sdk: register node=%s failed: %v", cs.nodeID, err)
 		return
 	}
 
-	cs.mgr.SetStream(cs.nodeID, cs)
+	cs.reg.BindStream(cs.nodeID, cs)
 
 	ackData, err := proto.Marshal(ack)
 	if err != nil {
@@ -110,7 +111,7 @@ func (cs *controlStream) handleRegister(data []byte) {
 		return
 	}
 
-	cs.writeMsg(&pb.Payload{Namespace: types.NamespaceControl, Kind: "register_ack", Data: ackData})
+	cs.WriteControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "register_ack", Data: ackData})
 	log.Printf("tai-sdk: node registered: id=%s tai_id=%s", cs.nodeID, ack.TaiId)
 }
 
@@ -121,7 +122,7 @@ func (cs *controlStream) handlePing(data []byte) {
 		return
 	}
 
-	cs.mgr.UpdatePing(cs.nodeID, ping)
+	cs.reg.UpdatePing(cs.nodeID, ping)
 
 	pong := &pb.Pong{Timestamp: ping.Timestamp}
 	pongData, err := proto.Marshal(pong)
@@ -130,10 +131,11 @@ func (cs *controlStream) handlePing(data []byte) {
 		return
 	}
 
-	cs.writeMsg(&pb.Payload{Namespace: types.NamespaceControl, Kind: "pong", Data: pongData})
+	cs.WriteControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "pong", Data: pongData})
 }
 
-func (cs *controlStream) writeMsg(msg *pb.Payload) error {
+// WriteControl implements types.ControlWriter.
+func (cs *controlStream) WriteControl(msg *pb.Payload) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	if cs.closed {

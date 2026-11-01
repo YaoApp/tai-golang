@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	tai "github.com/yaoapp/tai-golang"
+	"github.com/yaoapp/tai-golang/types"
 )
 
 // NodeInfo is a snapshot of a registered node for the API.
@@ -19,11 +19,11 @@ type NodeInfo struct {
 
 // SessionInfo tracks an active session for the API.
 type SessionInfo struct {
-	ID        string      `json:"id"`
-	NodeID    string      `json:"nodeId"`
-	CreatedAt time.Time   `json:"createdAt"`
-	Status    string      `json:"status"`
-	Session   tai.Session `json:"-"`
+	ID        string        `json:"id"`
+	NodeID    string        `json:"nodeId"`
+	CreatedAt time.Time     `json:"createdAt"`
+	Status    string        `json:"status"`
+	Session   types.Session `json:"-"`
 }
 
 // Store holds in-memory state for the demo app.
@@ -47,15 +47,16 @@ func NewStore() *Store {
 }
 
 // AddNode registers a node and broadcasts to SSE subscribers.
-func (s *Store) AddNode(node *tai.Node) {
+func (s *Store) AddNode(n types.RemoteNode) {
+	info := n.Info()
 	s.mu.Lock()
-	s.nodes[node.ID] = &NodeInfo{
-		ID:           node.ID,
-		TaiID:        node.TaiID,
+	s.nodes[info.ID] = &NodeInfo{
+		ID:           info.ID,
+		TaiID:        info.TaiID,
 		RegisteredAt: time.Now(),
 	}
 	s.mu.Unlock()
-	s.broadcast(`{"event":"node_registered","nodeId":"` + node.ID + `"}`)
+	s.broadcast(`{"event":"node_registered","nodeId":"` + info.ID + `"}`)
 }
 
 // Nodes returns all registered nodes.

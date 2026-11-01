@@ -117,7 +117,7 @@ func TestServerPoolConfigInRegisterAck(t *testing.T) {
 		if err != nil {
 			t.Fatalf("newServer: %v", err)
 		}
-		ack, err := s.mgr.Register("n1", &pb.Register{}, a)
+		ack, err := s.reg.Register("n1", &pb.Register{}, a)
 		if err != nil {
 			t.Fatalf("register: %v", err)
 		}
@@ -226,8 +226,8 @@ func TestServerNodesAndControl(t *testing.T) {
 	ts := mock.NewTestServer(t)
 
 	registered := make(chan string, 1)
-	ts.Nodes.SetOnRegister(func(n *types.Node) error {
-		registered <- n.ID
+	ts.Registry.SetOnRegister(func(n types.RemoteNode) error {
+		registered <- n.Info().ID
 		return nil
 	})
 
@@ -251,19 +251,19 @@ func TestServerNodesAndControl(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("OnNodeRegister not called")
 	}
-	if n := ts.Nodes.NodeByID("srv-node"); n == nil {
+	if n := ts.Registry.NodeByID("srv-node"); n == nil {
 		t.Error("NodeByID returned nil")
 	}
-	if len(ts.Nodes.AllNodes()) != 1 {
-		t.Errorf("Nodes=%d, want 1", len(ts.Nodes.AllNodes()))
+	if len(ts.Registry.AllNodes()) != 1 {
+		t.Errorf("Nodes=%d, want 1", len(ts.Registry.AllNodes()))
 	}
-	if ts.Nodes.NodeByID("missing") != nil {
+	if ts.Registry.NodeByID("missing") != nil {
 		t.Error("unknown node must be nil")
 	}
 
 	got := make(chan string, 1)
 	mn.OnControl(func(msg *pb.Payload) { got <- msg.Namespace + "/" + msg.Kind })
-	if err := ts.Nodes.SendControl("srv-node", &pb.Payload{Namespace: types.NamespaceControl, Kind: "custom", Data: []byte("x")}); err != nil {
+	if err := ts.Registry.SendControl("srv-node", &pb.Payload{Namespace: types.NamespaceControl, Kind: "custom", Data: []byte("x")}); err != nil {
 		t.Fatalf("SendControl: %v", err)
 	}
 	select {
@@ -275,24 +275,19 @@ func TestServerNodesAndControl(t *testing.T) {
 		t.Fatal("control message not received")
 	}
 
-	if err := ts.Nodes.SendControl("missing", &pb.Payload{Namespace: types.NamespaceControl, Kind: "x"}); err != types.ErrNodeNotFound {
+	if err := ts.Registry.SendControl("missing", &pb.Payload{Namespace: types.NamespaceControl, Kind: "x"}); err != types.ErrNodeNotFound {
 		t.Errorf("SendControl to unknown node: %v", err)
 	}
 }
 
 func TestServerNotImplementedMethods(t *testing.T) {
 	s, _ := NewServer(&ServerConfig{Auth: testAuth(t)})
-	// OpenSession requires Light pool; it returns a stream error, not ErrNotImplemented.
-	if _, err := s.OpenSession(context.Background(), &OpenSessionRequest{}); err == nil {
-		t.Error("OpenSession: expected error without Light pool, got nil")
-	}
 	if err := s.RegisterTool(&ToolDefinition{}); err != ErrNotImplemented {
 		t.Errorf("RegisterTool: %v", err)
 	}
 	if err := s.UnregisterTool("x"); err != ErrNotImplemented {
 		t.Errorf("UnregisterTool: %v", err)
 	}
-	s.OnSessionEvent(func(string, *SessionMsg) {})
 }
 
 func TestServerPassesQUICConfig(t *testing.T) {

@@ -7,31 +7,26 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/transport"
+	"github.com/yaoapp/tai-golang/types"
 	"google.golang.org/protobuf/proto"
 )
 
 // ---------- remoteWorkspace ----------
 
-// remoteWorkspace implements Workspace by forwarding all operations to the
-// Tai side via the Light/Heavy transport.
+// remoteWorkspace implements types.Workspace by forwarding all operations to
+// the Tai side via the Light/Heavy transport.
 type remoteWorkspace struct {
+	nodeID string
 	wsID   string
 	branch string // bound branch (default "main")
-	meta   Meta
+	meta   types.Meta
+	policy *ChannelPolicy
 	fsImpl *remoteBranchFS
-}
-
-func newRemoteWorkspace(wsID, branch string, meta Meta) *remoteWorkspace {
-	rw := &remoteWorkspace{
-		wsID:   wsID,
-		branch: branch,
-		meta:   meta,
-	}
-	rw.fsImpl = &remoteBranchFS{wsID: wsID, branch: branch}
-	return rw
 }
 
 // --- WorkspaceFS (embedded, delegates to fsImpl) ---
@@ -49,22 +44,22 @@ func (rw *remoteWorkspace) MkdirAll(name string, perm fs.FileMode) error {
 	return rw.fsImpl.MkdirAll(name, perm)
 }
 func (rw *remoteWorkspace) Symlink(old, new string) error { return rw.fsImpl.Symlink(old, new) }
-func (rw *remoteWorkspace) Watch(patterns []string) (Watcher, error) {
+func (rw *remoteWorkspace) Watch(patterns []string) (types.Watcher, error) {
 	return rw.fsImpl.Watch(patterns)
 }
 
 // --- Workspace metadata ---
 
-func (rw *remoteWorkspace) ID() string { return rw.wsID }
-func (rw *remoteWorkspace) Meta() Meta { return rw.meta }
+func (rw *remoteWorkspace) ID() string       { return rw.wsID }
+func (rw *remoteWorkspace) Meta() types.Meta { return rw.meta }
 
-func (rw *remoteWorkspace) UpdateMeta(ctx context.Context, meta Meta) error {
+func (rw *remoteWorkspace) UpdateMeta(ctx context.Context, meta types.Meta) error {
 	req := WSRequest{WorkspaceID: rw.wsID, Meta: &meta}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindWSUpdateMeta, data)
+	_, err = roundTrip(ctx, rw.nodeID, KindWSUpdateMeta, data)
 	if err != nil {
 		return fmt.Errorf("update meta: %w", err)
 	}
@@ -74,77 +69,77 @@ func (rw *remoteWorkspace) UpdateMeta(ctx context.Context, meta Meta) error {
 
 // --- Branch management ---
 
-func (rw *remoteWorkspace) Main(ctx context.Context) (Branch, error) {
+func (rw *remoteWorkspace) Main(ctx context.Context) (types.Branch, error) {
 	return rw.GetBranch(ctx, "main")
 }
 
-func (rw *remoteWorkspace) ListBranches(ctx context.Context) ([]BranchInfo, error) {
+func (rw *remoteWorkspace) ListBranches(ctx context.Context) ([]types.BranchInfo, error) {
 	req := BranchMgmtRequest{WorkspaceID: rw.wsID}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindListBranches, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindListBranches, data)
 	if err != nil {
 		return nil, err
 	}
-	var branches []BranchInfo
+	var branches []types.BranchInfo
 	if err := json.Unmarshal(resp, &branches); err != nil {
 		return nil, err
 	}
 	return branches, nil
 }
 
-func (rw *remoteWorkspace) CreateBranch(ctx context.Context, name, from string, meta map[string]any) (Branch, error) {
+func (rw *remoteWorkspace) CreateBranch(ctx context.Context, name, from string, meta map[string]any) (types.Branch, error) {
 	req := BranchMgmtRequest{WorkspaceID: rw.wsID, Name: name, From: from, Meta: meta}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindCreateBranch, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindCreateBranch, data)
 	if err != nil {
 		return nil, err
 	}
-	var info BranchInfo
+	var info types.BranchInfo
 	if err := json.Unmarshal(resp, &info); err != nil {
 		return nil, err
 	}
-	return newRemoteBranch(rw.wsID, info), nil
+	return newRemoteBranch(rw.nodeID, rw.wsID, info, rw.policy), nil
 }
 
-func (rw *remoteWorkspace) GetBranch(ctx context.Context, name string) (Branch, error) {
+func (rw *remoteWorkspace) GetBranch(ctx context.Context, name string) (types.Branch, error) {
 	req := BranchRequest{WorkspaceID: rw.wsID, Branch: name}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindBranchHead, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindBranchHead, data)
 	if err != nil {
 		return nil, err
 	}
-	var info CommitInfo
+	var info types.CommitInfo
 	if err := json.Unmarshal(resp, &info); err != nil {
 		return nil, err
 	}
-	bi := BranchInfo{Name: name, Head: info.ID}
-	return newRemoteBranch(rw.wsID, bi), nil
+	bi := types.BranchInfo{Name: name, Head: info.ID}
+	return newRemoteBranch(rw.nodeID, rw.wsID, bi, rw.policy), nil
 }
 
-func (rw *remoteWorkspace) GetOrCreateBranch(ctx context.Context, name, from string, meta map[string]any) (Branch, error) {
+func (rw *remoteWorkspace) GetOrCreateBranch(ctx context.Context, name, from string, meta map[string]any) (types.Branch, error) {
 	req := BranchMgmtRequest{WorkspaceID: rw.wsID, Name: name, From: from, Meta: meta}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindGetOrCreateBranch, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindGetOrCreateBranch, data)
 	if err != nil {
 		return nil, err
 	}
-	var info BranchInfo
+	var info types.BranchInfo
 	if err := json.Unmarshal(resp, &info); err != nil {
 		return nil, err
 	}
-	return newRemoteBranch(rw.wsID, info), nil
+	return newRemoteBranch(rw.nodeID, rw.wsID, info, rw.policy), nil
 }
 
 func (rw *remoteWorkspace) DeleteBranch(ctx context.Context, name string) error {
@@ -153,21 +148,21 @@ func (rw *remoteWorkspace) DeleteBranch(ctx context.Context, name string) error 
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindDeleteBranch, data)
+	_, err = roundTrip(ctx, rw.nodeID, KindDeleteBranch, data)
 	return err
 }
 
-func (rw *remoteWorkspace) Merge(ctx context.Context, from, into string, opts MergeOptions) (*MergeResult, error) {
+func (rw *remoteWorkspace) Merge(ctx context.Context, from, into string, opts types.MergeOptions) (*types.MergeResult, error) {
 	req := BranchMgmtRequest{WorkspaceID: rw.wsID, From: from, Into: into, Opts: &opts}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindMerge, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindMerge, data)
 	if err != nil {
 		return nil, err
 	}
-	var result MergeResult
+	var result types.MergeResult
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, err
 	}
@@ -176,40 +171,40 @@ func (rw *remoteWorkspace) Merge(ctx context.Context, from, into string, opts Me
 
 // --- History ---
 
-func (rw *remoteWorkspace) GetCommit(ctx context.Context, id string) (*CommitInfo, error) {
+func (rw *remoteWorkspace) GetCommit(ctx context.Context, id string) (*types.CommitInfo, error) {
 	req := WSCommitRequest{WorkspaceID: rw.wsID, CommitID: id}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindWSGetCommit, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindWSGetCommit, data)
 	if err != nil {
 		return nil, err
 	}
-	var ci CommitInfo
+	var ci types.CommitInfo
 	if err := json.Unmarshal(resp, &ci); err != nil {
 		return nil, err
 	}
 	return &ci, nil
 }
 
-func (rw *remoteWorkspace) LoadHistory(ctx context.Context) (History, error) {
-	return &remoteHistory{wsID: rw.wsID}, nil
+func (rw *remoteWorkspace) LoadHistory(ctx context.Context) (types.History, error) {
+	return &remoteHistory{nodeID: rw.nodeID, wsID: rw.wsID}, nil
 }
 
 // --- Maintenance ---
 
-func (rw *remoteWorkspace) GC(ctx context.Context, opts GCOptions) (*GCResult, error) {
+func (rw *remoteWorkspace) GC(ctx context.Context, opts types.GCOptions) (*types.GCResult, error) {
 	req := WSGCRequest{WorkspaceID: rw.wsID, Opts: opts}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindWSGC, data)
+	resp, err := roundTrip(ctx, rw.nodeID, KindWSGC, data)
 	if err != nil {
 		return nil, err
 	}
-	var result GCResult
+	var result types.GCResult
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, err
 	}
@@ -222,36 +217,38 @@ func (rw *remoteWorkspace) Close() error {
 
 // ---------- remoteBranch ----------
 
-// remoteBranch implements Branch by forwarding to the Tai side.
+// remoteBranch implements types.Branch by forwarding to the Tai side.
 type remoteBranch struct {
+	nodeID string
 	wsID   string
-	info   BranchInfo
+	info   types.BranchInfo
 	fsImpl *remoteBranchFS
 }
 
-func newRemoteBranch(wsID string, info BranchInfo) *remoteBranch {
+func newRemoteBranch(nodeID, wsID string, info types.BranchInfo, policy *ChannelPolicy) *remoteBranch {
 	return &remoteBranch{
+		nodeID: nodeID,
 		wsID:   wsID,
 		info:   info,
-		fsImpl: &remoteBranchFS{wsID: wsID, branch: info.Name},
+		fsImpl: &remoteBranchFS{nodeID: nodeID, wsID: wsID, branch: info.Name, policy: policy},
 	}
 }
 
-func (rb *remoteBranch) FS() WorkspaceFS      { return rb.fsImpl }
-func (rb *remoteBranch) Name() string         { return rb.info.Name }
-func (rb *remoteBranch) Meta() map[string]any { return rb.info.Meta }
+func (rb *remoteBranch) FS() types.WorkspaceFS { return rb.fsImpl }
+func (rb *remoteBranch) Name() string          { return rb.info.Name }
+func (rb *remoteBranch) Meta() map[string]any  { return rb.info.Meta }
 
-func (rb *remoteBranch) Head(ctx context.Context) (*CommitInfo, error) {
+func (rb *remoteBranch) Head(ctx context.Context) (*types.CommitInfo, error) {
 	req := BranchRequest{WorkspaceID: rb.wsID, Branch: rb.info.Name}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindBranchHead, data)
+	resp, err := roundTrip(ctx, rb.nodeID, KindBranchHead, data)
 	if err != nil {
 		return nil, err
 	}
-	var ci CommitInfo
+	var ci types.CommitInfo
 	if err := json.Unmarshal(resp, &ci); err != nil {
 		return nil, err
 	}
@@ -272,7 +269,7 @@ func (rb *remoteBranch) UpdateMeta(ctx context.Context, meta map[string]any) err
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindBranchUpdateMeta, data)
+	_, err = roundTrip(ctx, rb.nodeID, KindBranchUpdateMeta, data)
 	if err != nil {
 		return err
 	}
@@ -280,34 +277,34 @@ func (rb *remoteBranch) UpdateMeta(ctx context.Context, meta map[string]any) err
 	return nil
 }
 
-func (rb *remoteBranch) Commit(ctx context.Context, message string) (*CommitInfo, error) {
+func (rb *remoteBranch) Commit(ctx context.Context, message string) (*types.CommitInfo, error) {
 	req := BranchRequest{WorkspaceID: rb.wsID, Branch: rb.info.Name, Message: message}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindCommit, data)
+	resp, err := roundTrip(ctx, rb.nodeID, KindCommit, data)
 	if err != nil {
 		return nil, err
 	}
-	var ci CommitInfo
+	var ci types.CommitInfo
 	if err := json.Unmarshal(resp, &ci); err != nil {
 		return nil, err
 	}
 	return &ci, nil
 }
 
-func (rb *remoteBranch) Diff(ctx context.Context, from, to string) ([]FileDiff, error) {
+func (rb *remoteBranch) Diff(ctx context.Context, from, to string) ([]types.FileDiff, error) {
 	req := BranchRequest{WorkspaceID: rb.wsID, Branch: rb.info.Name, From: from, To: to}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(ctx, KindDiff, data)
+	resp, err := roundTrip(ctx, rb.nodeID, KindDiff, data)
 	if err != nil {
 		return nil, err
 	}
-	var diffs []FileDiff
+	var diffs []types.FileDiff
 	if err := json.Unmarshal(resp, &diffs); err != nil {
 		return nil, err
 	}
@@ -320,7 +317,7 @@ func (rb *remoteBranch) Rollback(ctx context.Context, commitID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindRollback, data)
+	_, err = roundTrip(ctx, rb.nodeID, KindRollback, data)
 	return err
 }
 
@@ -330,7 +327,7 @@ func (rb *remoteBranch) AcquireWrite(ctx context.Context, holder string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindBranchAcquireW, data)
+	_, err = roundTrip(ctx, rb.nodeID, KindBranchAcquireW, data)
 	return err
 }
 
@@ -340,16 +337,18 @@ func (rb *remoteBranch) ReleaseWrite(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(ctx, KindBranchReleaseW, data)
+	_, err = roundTrip(ctx, rb.nodeID, KindBranchReleaseW, data)
 	return err
 }
 
 // ---------- remoteBranchFS ----------
 
-// remoteBranchFS implements WorkspaceFS for a specific workspace + branch.
+// remoteBranchFS implements types.WorkspaceFS for a specific workspace + branch.
 type remoteBranchFS struct {
+	nodeID string
 	wsID   string
 	branch string
+	policy *ChannelPolicy
 }
 
 // Stat implements fs.StatFS, sending a dedicated "stat" command.
@@ -359,7 +358,7 @@ func (f *remoteBranchFS) Stat(name string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(context.Background(), KindStat, data)
+	resp, err := roundTrip(context.Background(), f.nodeID, KindStat, data)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +388,7 @@ func (f *remoteBranchFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(context.Background(), KindReadDir, data)
+	resp, err := roundTrip(context.Background(), f.nodeID, KindReadDir, data)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +412,11 @@ func (f *remoteBranchFS) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 func (f *remoteBranchFS) Open(name string) (fs.File, error) {
-	ch := defaultPolicy.channelForPath(name, -1)
+	policy := f.policy
+	if policy == nil {
+		policy = DefaultPolicy()
+	}
+	ch := policy.channelForPath(name, -1)
 	ctx := context.Background()
 
 	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name}
@@ -434,7 +437,7 @@ func (f *remoteBranchFS) openLight(ctx context.Context, reqData []byte, name str
 		Kind:      KindOpen,
 		Data:      reqData,
 	}
-	stream, err := defaultTransport.OpenLightStream(ctx, defaultNodeID, firstFrame)
+	stream, err := transport.PkgOpenLightStream(ctx, f.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
@@ -442,26 +445,28 @@ func (f *remoteBranchFS) openLight(ctx context.Context, reqData []byte, name str
 }
 
 func (f *remoteBranchFS) openHeavy(ctx context.Context, reqData []byte, name string) (fs.File, error) {
-	conn, err := defaultTransport.HeavyPick(defaultNodeID)
+	conn, err := transport.PkgHeavyPick(f.nodeID)
 	if err != nil {
-		// Fall back to Light if no Heavy connection available
 		return f.openLight(ctx, reqData, name)
 	}
-	// Write the command frame on the Heavy connection
 	firstFrame := &pb.Payload{
 		Namespace: NamespaceWorkspace,
 		Kind:      KindOpen,
 		Data:      reqData,
 	}
 	if err := writePayload(conn, firstFrame); err != nil {
-		defaultTransport.HeavyReturn(conn)
+		transport.PkgHeavyReturn(conn)
 		return f.openLight(ctx, reqData, name)
 	}
 	return &remoteFile{name: name, heavyConn: conn}, nil
 }
 
 func (f *remoteBranchFS) Create(name string) (io.WriteCloser, error) {
-	ch := defaultPolicy.channelForPath(name, -1)
+	policy := f.policy
+	if policy == nil {
+		policy = DefaultPolicy()
+	}
+	ch := policy.channelForPath(name, -1)
 	ctx := context.Background()
 
 	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name}
@@ -477,17 +482,16 @@ func (f *remoteBranchFS) Create(name string) (io.WriteCloser, error) {
 	}
 
 	if ch == ChannelHeavy {
-		conn, err := defaultTransport.HeavyPick(defaultNodeID)
+		conn, err := transport.PkgHeavyPick(f.nodeID)
 		if err == nil {
 			if err := writePayload(conn, firstFrame); err == nil {
-				return &remoteWriter{heavyConn: conn}, nil
+				return &remoteWriter{heavyConn: conn, nodeID: f.nodeID}, nil
 			}
-			defaultTransport.HeavyReturn(conn)
+			transport.PkgHeavyReturn(conn)
 		}
-		// Fall through to Light
 	}
 
-	stream, err := defaultTransport.OpenLightStream(ctx, defaultNodeID, firstFrame)
+	stream, err := transport.PkgOpenLightStream(ctx, f.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
@@ -500,7 +504,7 @@ func (f *remoteBranchFS) Remove(name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(context.Background(), KindRemove, data)
+	_, err = roundTrip(context.Background(), f.nodeID, KindRemove, data)
 	return err
 }
 
@@ -510,7 +514,7 @@ func (f *remoteBranchFS) RemoveAll(name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(context.Background(), KindRemoveAll, data)
+	_, err = roundTrip(context.Background(), f.nodeID, KindRemoveAll, data)
 	return err
 }
 
@@ -520,7 +524,7 @@ func (f *remoteBranchFS) Rename(oldname, newname string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(context.Background(), KindRename, data)
+	_, err = roundTrip(context.Background(), f.nodeID, KindRename, data)
 	return err
 }
 
@@ -530,7 +534,7 @@ func (f *remoteBranchFS) MkdirAll(name string, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(context.Background(), KindMkdirAll, data)
+	_, err = roundTrip(context.Background(), f.nodeID, KindMkdirAll, data)
 	return err
 }
 
@@ -540,11 +544,11 @@ func (f *remoteBranchFS) Symlink(oldname, newname string) error {
 	if err != nil {
 		return err
 	}
-	_, err = roundTrip(context.Background(), KindSymlink, data)
+	_, err = roundTrip(context.Background(), f.nodeID, KindSymlink, data)
 	return err
 }
 
-func (f *remoteBranchFS) Watch(patterns []string) (Watcher, error) {
+func (f *remoteBranchFS) Watch(patterns []string) (types.Watcher, error) {
 	req := WatchRequest{WorkspaceID: f.wsID, Branch: f.branch, Patterns: patterns}
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -555,7 +559,7 @@ func (f *remoteBranchFS) Watch(patterns []string) (Watcher, error) {
 		Kind:      KindWatch,
 		Data:      data,
 	}
-	stream, err := defaultTransport.OpenLightStream(context.Background(), defaultNodeID, firstFrame)
+	stream, err := transport.PkgOpenLightStream(context.Background(), f.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("open watch stream: %w", err)
 	}
@@ -567,7 +571,7 @@ func (f *remoteBranchFS) Watch(patterns []string) (Watcher, error) {
 // remoteFile implements fs.File for streaming file reads.
 type remoteFile struct {
 	name      string
-	stream    Stream
+	stream    io.ReadWriteCloser
 	heavyConn net.Conn // Heavy pool connection (must be returned, not closed)
 }
 
@@ -584,7 +588,7 @@ func (f *remoteFile) Read(p []byte) (int, error) {
 
 func (f *remoteFile) Close() error {
 	if f.heavyConn != nil {
-		defaultTransport.HeavyReturn(f.heavyConn)
+		transport.PkgHeavyReturn(f.heavyConn)
 		return nil
 	}
 	return f.stream.Close()
@@ -626,8 +630,9 @@ func (fi *remoteFileInfo) Sys() any           { return nil }
 
 // remoteWriter wraps a stream or heavy connection for file writes.
 type remoteWriter struct {
-	stream    Stream
+	stream    io.ReadWriteCloser
 	heavyConn net.Conn // Heavy pool connection (must be returned, not closed)
+	nodeID    string   // only needed for Heavy return
 }
 
 func (w *remoteWriter) Write(p []byte) (int, error) {
@@ -639,7 +644,7 @@ func (w *remoteWriter) Write(p []byte) (int, error) {
 
 func (w *remoteWriter) Close() error {
 	if w.heavyConn != nil {
-		defaultTransport.HeavyReturn(w.heavyConn)
+		transport.PkgHeavyReturn(w.heavyConn)
 		return nil
 	}
 	// If the stream supports half-close, signal end-of-write and read the
@@ -649,43 +654,39 @@ func (w *remoteWriter) Close() error {
 			w.stream.Close()
 			return err
 		}
-		_, err := readResponse(w.stream, KindCreate)
+		_, err := ReadResponse(w.stream, KindCreate)
 		w.stream.Close()
 		return err
 	}
-	// Fallback: stream doesn't support half-close, response is lost.
 	return w.stream.Close()
 }
 
 // ---------- remoteWatcher ----------
 
-// remoteWatcher implements Watcher over a long-lived Light stream.
+// remoteWatcher implements types.Watcher over a long-lived Light stream.
 type remoteWatcher struct {
-	stream Stream
-	events chan WatchEvent
-	done   chan struct{}
+	stream    io.ReadWriteCloser
+	events    chan types.WatchEvent
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
-func newRemoteWatcher(stream Stream) *remoteWatcher {
+func newRemoteWatcher(stream io.ReadWriteCloser) *remoteWatcher {
 	w := &remoteWatcher{
 		stream: stream,
-		events: make(chan WatchEvent, 64),
+		events: make(chan types.WatchEvent, 64),
 		done:   make(chan struct{}),
 	}
 	go w.recvLoop()
 	return w
 }
 
-func (w *remoteWatcher) Events() <-chan WatchEvent {
+func (w *remoteWatcher) Events() <-chan types.WatchEvent {
 	return w.events
 }
 
 func (w *remoteWatcher) Close() error {
-	select {
-	case <-w.done:
-	default:
-		close(w.done)
-	}
+	w.closeOnce.Do(func() { close(w.done) })
 	return w.stream.Close()
 }
 
@@ -699,7 +700,7 @@ func (w *remoteWatcher) recvLoop() {
 		if msg.Kind != "watch.event" {
 			continue
 		}
-		var ev WatchEvent
+		var ev types.WatchEvent
 		if err := json.Unmarshal(msg.Data, &ev); err != nil {
 			continue
 		}
@@ -713,12 +714,13 @@ func (w *remoteWatcher) recvLoop() {
 
 // ---------- remoteHistory ----------
 
-// remoteHistory implements History by forwarding queries to the Tai side.
+// remoteHistory implements types.History by forwarding queries to the Tai side.
 type remoteHistory struct {
-	wsID string
+	nodeID string
+	wsID   string
 }
 
-func (h *remoteHistory) Query(opts HistoryOptions) ([]CommitEntry, error) {
+func (h *remoteHistory) Query(opts types.HistoryOptions) ([]types.CommitEntry, error) {
 	optsData, err := json.Marshal(opts)
 	if err != nil {
 		return nil, err
@@ -728,18 +730,18 @@ func (h *remoteHistory) Query(opts HistoryOptions) ([]CommitEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(context.Background(), KindWSHistory, data)
+	resp, err := roundTrip(context.Background(), h.nodeID, KindWSHistory, data)
 	if err != nil {
 		return nil, err
 	}
-	var entries []CommitEntry
+	var entries []types.CommitEntry
 	if err := json.Unmarshal(resp, &entries); err != nil {
 		return nil, err
 	}
 	return entries, nil
 }
 
-func (h *remoteHistory) FileHistory(path string, opts FileHistoryOptions) ([]FileChange, error) {
+func (h *remoteHistory) FileHistory(path string, opts types.FileHistoryOptions) ([]types.FileChange, error) {
 	optsData, err := json.Marshal(opts)
 	if err != nil {
 		return nil, err
@@ -749,18 +751,18 @@ func (h *remoteHistory) FileHistory(path string, opts FileHistoryOptions) ([]Fil
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(context.Background(), KindWSFileHistory, data)
+	resp, err := roundTrip(context.Background(), h.nodeID, KindWSFileHistory, data)
 	if err != nil {
 		return nil, err
 	}
-	var changes []FileChange
+	var changes []types.FileChange
 	if err := json.Unmarshal(resp, &changes); err != nil {
 		return nil, err
 	}
 	return changes, nil
 }
 
-func (h *remoteHistory) BranchLog(branch string, opts LogOptions) ([]CommitEntry, error) {
+func (h *remoteHistory) BranchLog(branch string, opts types.LogOptions) ([]types.CommitEntry, error) {
 	optsData, err := json.Marshal(opts)
 	if err != nil {
 		return nil, err
@@ -770,11 +772,11 @@ func (h *remoteHistory) BranchLog(branch string, opts LogOptions) ([]CommitEntry
 	if err != nil {
 		return nil, err
 	}
-	resp, err := roundTrip(context.Background(), KindWSBranchLog, data)
+	resp, err := roundTrip(context.Background(), h.nodeID, KindWSBranchLog, data)
 	if err != nil {
 		return nil, err
 	}
-	var entries []CommitEntry
+	var entries []types.CommitEntry
 	if err := json.Unmarshal(resp, &entries); err != nil {
 		return nil, err
 	}

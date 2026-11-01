@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	tai "github.com/yaoapp/tai-golang"
 	"github.com/yaoapp/tai-golang/auth"
+	"github.com/yaoapp/tai-golang/node"
 	"github.com/yaoapp/tai-golang/types"
 )
 
@@ -22,9 +22,8 @@ var upgrader = websocket.Upgrader{
 
 // SessionHandler serves session endpoints and WebSocket relay.
 type SessionHandler struct {
-	server tai.Server
-	store  *Store
-	auth   types.AuthProvider
+	store *Store
+	auth  types.AuthProvider
 }
 
 // List returns all active sessions.
@@ -95,8 +94,12 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.server.OpenSession(context.Background(), &types.OpenSessionRequest{
-		NodeID:    req.NodeID,
+	rn := node.Get(req.NodeID)
+	if rn == nil {
+		writeError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	session, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: sessionID,
 		Token:     opToken,
 		Request:   req.Request,
