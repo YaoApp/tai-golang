@@ -1,14 +1,14 @@
 # tai-golang
 
-Go SDK for the Tai Transport Protocol v2. This package implements the **server side** of the protocol, enabling any Go application to accept connections from [Tai](https://github.com/yaoapp/tai) nodes, manage sessions, and run agent workloads.
+Go SDK for the Tai Transport Protocol v2. This package implements the **server side** of the protocol, enabling any Go application to accept connections from Tai nodes, manage workspaces, run sessions, and execute agent workloads.
 
 Tai is a computer agent installed on every machine. This SDK handles the transport layer so your application doesn't need to implement the protocol details.
 
 ## Status
 
-**Session full chain implemented** — Transport (L0–L2), Light pool, Session 17-method interface, ACP event stream, dual-stream (ctrl + data) architecture, and the QA demo app are all working end-to-end.
+**Full chain working end-to-end** — Transport (L0–L2), Light/Heavy pool, Workspace CRUD + branch + file operations, Session 17-method interface, ACP event stream, dual-stream architecture, and the Demo App with React frontend are all working.
 
-Not yet implemented: OperationToken signing/validation in session handshake, Server Tools, Tunnel, Reconnection, Realtime.
+Not yet implemented: OperationToken validation in session handshake, Server Tools, Tunnel, Reconnection, Realtime.
 
 ## Install
 
@@ -17,6 +17,30 @@ go get github.com/yaoapp/tai-golang
 ```
 
 Requires Go 1.26+.
+
+## Download Tai
+
+The SDK requires a Tai node to connect. Download the nightly build (v2.x):
+
+```bash
+# macOS (Apple Silicon)
+curl -sL https://get.yaoapps.com/tai/nightly/latest.json | jq -r '.assets["darwin-arm64"]' | xargs curl -L -o tai && chmod +x tai
+
+# macOS (Intel)
+curl -sL https://get.yaoapps.com/tai/nightly/latest.json | jq -r '.assets["darwin-amd64"]' | xargs curl -L -o tai && chmod +x tai
+
+# Linux (x86_64)
+curl -sL https://get.yaoapps.com/tai/nightly/latest.json | jq -r '.assets["linux-amd64"]' | xargs curl -L -o tai && chmod +x tai
+
+# Linux (ARM64)
+curl -sL https://get.yaoapps.com/tai/nightly/latest.json | jq -r '.assets["linux-arm64"]' | xargs curl -L -o tai && chmod +x tai
+
+# Windows (PowerShell)
+$url = (Invoke-RestMethod https://get.yaoapps.com/tai/nightly/latest.json).assets.'windows-amd64'
+Invoke-WebRequest $url -OutFile tai.exe
+```
+
+All platforms: query [latest.json](https://get.yaoapps.com/tai/nightly/latest.json) for version info and download URLs. SHA256 checksums available at `<binary-url>.sha256`.
 
 ## Quick Start
 
@@ -84,6 +108,37 @@ for {
 }
 ```
 
+## Working with Workspaces
+
+```go
+// List workspaces on a node
+entries, _ := node.ListWorkspaces(ctx, types.ListOptions{})
+
+// Create a new workspace (path auto-generated on the Tai node)
+ws, _ := node.CreateWorkspace(ctx, types.Meta{Name: "my-project", Owner: "user-1"})
+
+// Open an existing workspace
+ws, _ := node.OpenWorkspace(ctx, "workspace-id")
+
+// Branch operations
+branches, _ := ws.ListBranches(ctx)
+branch, _ := ws.CreateBranch(ctx, "feature-1", "main", nil)
+ws.Merge(ctx, "feature-1", "main", types.MergeOptions{})
+
+// File operations via fs.FS interface
+bfs := branch.FS()
+data, _ := fs.ReadFile(bfs, "README.md")
+entries, _ := fs.ReadDir(bfs, ".")
+
+// Write files
+w, _ := bfs.Create("hello.txt")
+w.Write([]byte("Hello, World!"))
+w.Close()
+
+// Commit changes
+branch.Commit(ctx, "initial commit")
+```
+
 ## Architecture
 
 ```text
@@ -104,13 +159,15 @@ The SDK embeds into your application as a library — no separate process. Tai n
 ```
 server.go             Server + Session interfaces, NewServer, OpenSession
 session/              Session implementation (17 methods, dual-stream)
-workspace/            Remote workspace API (fs.FS + write extensions, branch, history, watch)
-types/                Shared types (SessionRequest, Event, Message, Permission, etc.)
+workspace/            Remote workspace API (fs.FS + write, branch, history, watch)
+node/                 Node registry and RemoteNode implementation
+types/                Shared types (Session, Workspace, Event, Permission, etc.)
 auth/                 AuthProvider interface + DefaultAuth (Ed25519 JWT)
-transport/            Transport server (TCP/UDP, H2/H3, Light pool, Heavy pool, frame codec)
+transport/            Transport server (H2/H3, Light pool, Heavy pool, frame codec)
+mock/                 Test doubles (MockNode, MockLLM, MockSession, MockLightConn)
 proto/                Protobuf source files (control, session, computer, servertool)
 pb/                   Generated Go code from protobuf
-app/                  QA demo application (API server + React frontend)
+app/                  Demo application (Go API server + React frontend)
 docs/                 SDK documentation (rendered in demo app)
 ```
 
@@ -130,24 +187,24 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 Run the demo app to browse documentation with syntax highlighting:
 
 ```bash
-cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo --port 3000
+cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 ```
 
 ## Implemented
 
-- **Transport (L0–L2)**: HTTP API (5099), TCP/UDP transport (6099), H3 (QUIC) + H2 fallback, Light connection pool
+- **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
+- **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
 - **Session (17 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime (stub), StopRealtime (stub), Close, ID, NodeID, Status
-- **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken
+- **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions), commit/rollback, history query, GC, watch — 34 transport command kinds
+- **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken (issue/sign)
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
 - **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
-- **Demo App**: React frontend + Go API server for manual E2E testing
-- **Heavy Pool**: Connection-level exclusive TCP pool with Pick/Return lifecycle
-- **Workspace**: Remote file operations (fs.FS + write extensions), 33 command kinds, branch management, history, watch
-- **Test Infrastructure**: MockNode, MockLLM, TestServer, 90%+ coverage
+- **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
+- **Test Infrastructure**: MockNode, MockLLM, MockSession, MockLightConn/Stream, 216 test functions
 
 ## Not Yet Implemented
 
-- OperationToken signing/validation in session handshake
+- OperationToken validation in session handshake
 - Server Tools (RegisterTool / tai call)
 - Reconnection (recovery buffer + seq replay)
 - Tunnel

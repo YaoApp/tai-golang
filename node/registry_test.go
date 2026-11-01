@@ -437,7 +437,7 @@ func TestRemoteNodeListWorkspaces(t *testing.T) {
 	reg := testRegistry()
 	registerNode(t, reg, "n-lw")
 
-	entries := []types.RegistryEntry{{ID: "ws_1", Meta: types.Meta{Name: "p1"}}}
+	entries := []types.RegistryEntry{{ID: "ws_1", Name: "p1"}}
 	entriesJSON, _ := json.Marshal(entries)
 	respBody := buildFramedResponse(workspace.KindWSList+".result", entriesJSON)
 
