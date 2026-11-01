@@ -53,7 +53,7 @@ all := node.List()         // returns []types.RemoteNode
 | `Info()` | Returns the `*Node` data struct |
 | `Online()` | Whether the node is connected |
 | `OpenWorkspace(ctx, wsID, branch...)` | Open an existing workspace |
-| `CreateWorkspace(ctx, path, meta)` | Create a new workspace |
+| `CreateWorkspace(ctx, meta)` | Create a new workspace |
 | `ListWorkspaces(ctx, opts)` | List workspaces |
 | `DeleteWorkspace(ctx, wsID)` | Delete a workspace |
 | `OpenSession(ctx, req)` | Open a session |
@@ -155,7 +155,7 @@ import "github.com/yaoapp/tai-golang/node"
 
 n := node.Get("node-1")
 ws, err := n.OpenWorkspace(ctx, "workspace-id")
-ws, err := n.CreateWorkspace(ctx, "/path", types.Meta{Name: "proj"})
+ws, err := n.CreateWorkspace(ctx, types.Meta{Name: "proj"})
 entries, err := n.ListWorkspaces(ctx, types.ListOptions{})
 err := n.DeleteWorkspace(ctx, "workspace-id")
 ```

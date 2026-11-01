@@ -41,7 +41,7 @@ type RemoteNode interface {
 
 	// Workspace CRUD
 	OpenWorkspace(ctx context.Context, wsID string, branch ...string) (Workspace, error)
-	CreateWorkspace(ctx context.Context, path string, meta Meta) (Workspace, error)
+	CreateWorkspace(ctx context.Context, meta Meta) (Workspace, error)
 	ListWorkspaces(ctx context.Context, opts ListOptions) ([]RegistryEntry, error)
 	DeleteWorkspace(ctx context.Context, wsID string) error
 

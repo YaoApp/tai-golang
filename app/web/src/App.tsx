@@ -5,6 +5,8 @@ import NodesPage from './pages/nodes/NodesPage';
 import SessionsPage from './pages/sessions/SessionsPage';
 import SessionDetailPage from './pages/sessions/SessionDetailPage';
 import DocsPage from './pages/docs/DocsPage';
+import WorkspacesPage from './pages/workspaces/WorkspacesPage';
+import WorkspaceDetailPage from './pages/workspaces/WorkspaceDetailPage';
 
 export default function App() {
   return (
@@ -15,6 +17,8 @@ export default function App() {
           <Route path="/nodes" element={<NodesPage />} />
           <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/sessions/:id" element={<SessionDetailPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/docs" element={<DocsPage />} />
         </Route>
       </Routes>

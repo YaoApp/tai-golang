@@ -184,7 +184,11 @@ type ListOptions struct {
 }
 
 // RegistryEntry is one entry in the workspace listing.
+// Fields are flat to match the Tai node's registry JSON layout.
 type RegistryEntry struct {
-	ID   string `json:"id"`
-	Meta Meta   `json:"meta"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Owner     string `json:"owner"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }

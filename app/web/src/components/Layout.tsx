@@ -4,6 +4,7 @@ const navItems = [
   { to: '/', label: 'Auth' },
   { to: '/nodes', label: 'Nodes' },
   { to: '/sessions', label: 'Sessions' },
+  { to: '/workspaces', label: 'Workspaces' },
   { to: '/docs', label: 'Docs' },
 ];
 

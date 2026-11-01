@@ -424,7 +424,7 @@ func TestRemoteNodeCreateWorkspace(t *testing.T) {
 	})
 
 	rn := reg.RemoteNodeByID("n-cw")
-	ws, err := rn.CreateWorkspace(context.Background(), "/tmp/ws", types.Meta{Name: "new-proj"})
+	ws, err := rn.CreateWorkspace(context.Background(), types.Meta{Name: "new-proj"})
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestRemoteNodeCreateWorkspaceTransportError(t *testing.T) {
 	})
 
 	rn := reg.RemoteNodeByID("n-cw-err")
-	_, err := rn.CreateWorkspace(context.Background(), "/tmp", types.Meta{})
+	_, err := rn.CreateWorkspace(context.Background(), types.Meta{})
 	if err == nil {
 		t.Fatal("expected error")
 	}

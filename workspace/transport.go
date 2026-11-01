@@ -172,7 +172,6 @@ type BranchRequest struct {
 
 // WSCreateRequest is the request for ws.create.
 type WSCreateRequest struct {
-	Path string     `json:"path"`
 	Meta types.Meta `json:"meta"`
 }
 

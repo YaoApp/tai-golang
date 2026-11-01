@@ -393,9 +393,11 @@ func (f *remoteBranchFS) ReadDir(name string) ([]fs.DirEntry, error) {
 		return nil, err
 	}
 	var entries []struct {
-		Name  string `json:"name"`
-		IsDir bool   `json:"is_dir"`
-		Type  string `json:"type"`
+		Name    string `json:"name"`
+		IsDir   bool   `json:"is_dir"`
+		Type    string `json:"type"`
+		Size    int64  `json:"size"`
+		ModTime int64  `json:"mod_time"`
 	}
 	if err := json.Unmarshal(resp, &entries); err != nil {
 		return nil, err
@@ -406,7 +408,13 @@ func (f *remoteBranchFS) ReadDir(name string) ([]fs.DirEntry, error) {
 		if e.IsDir {
 			mode = fs.ModeDir
 		}
-		result[i] = &remoteDirEntry{name: e.Name, isDir: e.IsDir, mode: mode}
+		result[i] = &remoteDirEntry{
+			name:    e.Name,
+			isDir:   e.IsDir,
+			mode:    mode,
+			size:    e.Size,
+			modTime: time.Unix(e.ModTime, 0),
+		}
 	}
 	return result, nil
 }
@@ -607,16 +615,18 @@ type remoteFileInfo struct {
 // ---------- remoteDirEntry ----------
 
 type remoteDirEntry struct {
-	name  string
-	isDir bool
-	mode  fs.FileMode
+	name    string
+	isDir   bool
+	mode    fs.FileMode
+	size    int64
+	modTime time.Time
 }
 
 func (de *remoteDirEntry) Name() string      { return de.name }
 func (de *remoteDirEntry) IsDir() bool       { return de.isDir }
 func (de *remoteDirEntry) Type() fs.FileMode { return de.mode }
 func (de *remoteDirEntry) Info() (fs.FileInfo, error) {
-	return &remoteFileInfo{name: de.name, isDir: de.isDir, mode: de.mode}, nil
+	return &remoteFileInfo{name: de.name, isDir: de.isDir, mode: de.mode, size: de.size, modTime: de.modTime}, nil
 }
 
 func (fi *remoteFileInfo) Name() string       { return fi.name }

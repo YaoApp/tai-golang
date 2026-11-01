@@ -194,7 +194,7 @@ func TestBranchMgmtRequestJSON(t *testing.T) {
 }
 
 func TestWSCreateRequestJSON(t *testing.T) {
-	req := WSCreateRequest{Path: "/data/project", Meta: types.Meta{Name: "proj", Owner: "u1"}}
+	req := WSCreateRequest{Meta: types.Meta{Name: "proj", Owner: "u1"}}
 	data, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestWSCreateRequestJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &dec); err != nil {
 		t.Fatal(err)
 	}
-	if dec.Path != "/data/project" || dec.Meta.Name != "proj" {
+	if dec.Meta.Name != "proj" || dec.Meta.Owner != "u1" {
 		t.Errorf("round-trip mismatch: %+v", dec)
 	}
 }

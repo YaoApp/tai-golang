@@ -68,8 +68,8 @@ func (n *remoteNode) OpenWorkspace(ctx context.Context, wsID string, branch ...s
 	return workspace.NewRemoteWorkspace(n.nodeID, wsID, br, meta, n.policy), nil
 }
 
-func (n *remoteNode) CreateWorkspace(ctx context.Context, path string, meta types.Meta) (types.Workspace, error) {
-	req := workspace.WSCreateRequest{Path: path, Meta: meta}
+func (n *remoteNode) CreateWorkspace(ctx context.Context, meta types.Meta) (types.Workspace, error) {
+	req := workspace.WSCreateRequest{Meta: meta}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: marshal create: %w", err)

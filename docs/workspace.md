@@ -34,7 +34,7 @@ func main() {
     n := node.Get("node-1") // returns types.RemoteNode
 
     // 3. Create a workspace on the Tai node
-    ws, err := n.CreateWorkspace(ctx, "/home/user/project", types.Meta{
+    ws, err := n.CreateWorkspace(ctx, types.Meta{
         Name:  "my-project",
         Owner: "user-1",
     })
@@ -113,7 +113,7 @@ n := node.Get("node-1")
 
 ws, err := n.OpenWorkspace(ctx, "abc123")
 ws, err := n.OpenWorkspace(ctx, "abc123", "dev")         // open on "dev" branch
-ws, err := n.CreateWorkspace(ctx, "/path", types.Meta{Name: "proj", Owner: "user-1"})
+ws, err := n.CreateWorkspace(ctx, types.Meta{Name: "proj", Owner: "user-1"})
 entries, err := n.ListWorkspaces(ctx, types.ListOptions{Owner: "user-1"})
 err := n.DeleteWorkspace(ctx, "abc123")
 ```

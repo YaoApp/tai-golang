@@ -101,7 +101,7 @@ export default function MarkdownRenderer({ content }: Props) {
           li: ({ children }) => <li style={styles.li}>{children}</li>,
           hr: () => <hr style={styles.hr} />,
           blockquote: ({ children }) => <blockquote style={styles.blockquote}>{children}</blockquote>,
-          code: ({ className, children, ...rest }) => {
+          code: ({ className, children }) => {
             const match = className?.match(/language-(\w+)/);
             const code = String(children).replace(/\n$/, '');
             const isMultiline = code.includes('\n');

@@ -18,6 +18,7 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	authH := &AuthHandler{auth: authProvider}
 	nodeH := &NodeHandler{store: store}
 	sessionH := &SessionHandler{store: store, auth: authProvider}
+	wsH := NewWorkspaceHandler(store)
 	docsH := &DocsHandler{}
 
 	// Auth endpoints
@@ -37,6 +38,39 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	// Session WebSocket relay
 	mux.HandleFunc("GET /ws/sessions/{id}/ctrl", sessionH.WSCtrl)
 	mux.HandleFunc("GET /ws/sessions/{id}/data", sessionH.WSData)
+
+	// Workspace endpoints
+	mux.HandleFunc("GET /api/workspaces", wsH.ListWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", wsH.CreateWorkspace)
+	mux.HandleFunc("DELETE /api/workspaces/{id}", wsH.DeleteWorkspace)
+	mux.HandleFunc("PUT /api/workspaces/{id}/meta", wsH.UpdateMeta)
+
+	// Branch endpoints
+	mux.HandleFunc("GET /api/workspaces/{id}/branches", wsH.ListBranches)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches", wsH.CreateBranch)
+	mux.HandleFunc("DELETE /api/workspaces/{id}/branches/{name}", wsH.DeleteBranch)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{name}/commit", wsH.CommitBranch)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{name}/rollback", wsH.RollbackBranch)
+	mux.HandleFunc("POST /api/workspaces/{id}/merge", wsH.MergeWorkspace)
+
+	// History endpoints
+	mux.HandleFunc("GET /api/workspaces/{id}/branches/{branch}/log", wsH.BranchLog)
+	mux.HandleFunc("GET /api/workspaces/{id}/history", wsH.HistoryQuery)
+	mux.HandleFunc("GET /api/workspaces/{id}/commits/{commitId}", wsH.GetCommit)
+
+	// File endpoints
+	mux.HandleFunc("GET /api/workspaces/{id}/branches/{branch}/files", wsH.FileStat)
+	mux.HandleFunc("GET /api/workspaces/{id}/branches/{branch}/files/content", wsH.FileContent)
+	mux.HandleFunc("PUT /api/workspaces/{id}/branches/{branch}/files/content", wsH.FileUpload)
+	mux.HandleFunc("DELETE /api/workspaces/{id}/branches/{branch}/files", wsH.FileDelete)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{branch}/files/mkdir", wsH.FileMkdir)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{branch}/files/rename", wsH.FileRename)
+	mux.HandleFunc("GET /api/workspaces/{id}/branches/{branch}/files/preview", wsH.FilePreview)
+
+	// Chunked upload endpoints
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{branch}/files/upload-init", wsH.ChunkedUploadInit)
+	mux.HandleFunc("PUT /api/workspaces/{id}/branches/{branch}/files/upload-chunk", wsH.ChunkedUploadChunk)
+	mux.HandleFunc("POST /api/workspaces/{id}/branches/{branch}/files/upload-complete", wsH.ChunkedUploadComplete)
 
 	// Docs endpoints
 	mux.HandleFunc("GET /api/docs", docsH.List)
