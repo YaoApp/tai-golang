@@ -23,9 +23,20 @@ The SDK embeds into your application as a library — no separate process.
 | Port | Protocol | Purpose |
 |------|----------|---------|
 | `:5099` | HTTP | Well-known discovery (`/.well-known/yao-transport`), token refresh, heartbeat |
-| `:6099` | H3 (QUIC) / H2 (TCP) | Control stream, Light pool (sessions) |
+| `:6099` | H3 (QUIC) / H2 (TCP) | Control stream, Light pool (sessions), Heavy pool (large files) |
 
 Both ports are configurable via `ServerConfig.HTTPPort` and `ServerConfig.TransportPort`.
+
+### Light vs Heavy
+
+| | Light | Heavy |
+|---|---|---|
+| Protocol | H3 (QUIC) / H2 (TCP) streams | Raw TCP connections |
+| Multiplexing | Multiple streams per connection | One transfer at a time |
+| Use case | Text files, metadata, sessions | Binary files, video, large assets |
+| Direction | Bidirectional per stream | SDK writes command → Tai responds |
+
+**Heavy read loop:** Each Heavy connection runs a `serveHeavy` goroutine on the Tai side. It blocks on `ReadFrame`, dispatches incoming command frames via the `OnHeavyFrame` callback, and includes panic recovery. When the connection errors or closes, the goroutine cleans up and the pool auto-replenishes.
 
 ## Connection Flow
 

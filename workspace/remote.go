@@ -420,6 +420,19 @@ func (f *remoteBranchFS) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 func (f *remoteBranchFS) Open(name string) (fs.File, error) {
+	inner, err := f.openInternal(name, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &seekableRemoteFile{
+		bfs: f, name: name, size: -1,
+		offset: 0, streamOffset: 0, r: inner,
+	}, nil
+}
+
+// openInternal opens a file stream at the given offset. Used by Open() and
+// seekableRemoteFile.Read() for re-opening at a different offset.
+func (f *remoteBranchFS) openInternal(name string, offset int64) (fs.File, error) {
 	policy := f.policy
 	if policy == nil {
 		policy = DefaultPolicy()
@@ -427,7 +440,7 @@ func (f *remoteBranchFS) Open(name string) (fs.File, error) {
 	ch := policy.channelForPath(name, -1)
 	ctx := context.Background()
 
-	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name}
+	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name, Offset: offset}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -463,20 +476,43 @@ func (f *remoteBranchFS) openHeavy(ctx context.Context, reqData []byte, name str
 		Data:      reqData,
 	}
 	if err := writePayload(conn, firstFrame); err != nil {
-		transport.PkgHeavyReturn(conn)
+		transport.PkgHeavyRemove(conn)
 		return f.openLight(ctx, reqData, name)
 	}
-	return &remoteFile{name: name, heavyConn: conn}, nil
+
+	resultFrame, err := readPayload(conn)
+	if err != nil {
+		transport.PkgHeavyRemove(conn)
+		return f.openLight(ctx, reqData, name)
+	}
+	if resultFrame.Kind == KindError {
+		transport.PkgHeavyReturn(conn)
+		var errResp ErrorResponse
+		json.Unmarshal(resultFrame.Data, &errResp)
+		return nil, &errResp
+	}
+	if resultFrame.Kind != KindOpen+SuffixResult {
+		transport.PkgHeavyReturn(conn)
+		return nil, fmt.Errorf("unexpected heavy response kind: %s", resultFrame.Kind)
+	}
+
+	var result struct {
+		Size int64 `json:"size"`
+	}
+	if err := json.Unmarshal(resultFrame.Data, &result); err != nil {
+		transport.PkgHeavyRemove(conn)
+		return nil, fmt.Errorf("unmarshal heavy result: %w", err)
+	}
+
+	return &heavyFile{
+		name: name,
+		size: result.Size,
+		r:    io.LimitReader(conn, result.Size),
+		conn: conn,
+	}, nil
 }
 
 func (f *remoteBranchFS) Create(name string) (io.WriteCloser, error) {
-	policy := f.policy
-	if policy == nil {
-		policy = DefaultPolicy()
-	}
-	ch := policy.channelForPath(name, -1)
-	ctx := context.Background()
-
 	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name}
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -489,17 +525,7 @@ func (f *remoteBranchFS) Create(name string) (io.WriteCloser, error) {
 		Data:      data,
 	}
 
-	if ch == ChannelHeavy {
-		conn, err := transport.PkgHeavyPick(f.nodeID)
-		if err == nil {
-			if err := writePayload(conn, firstFrame); err == nil {
-				return &remoteWriter{heavyConn: conn, nodeID: f.nodeID}, nil
-			}
-			transport.PkgHeavyReturn(conn)
-		}
-	}
-
-	stream, err := transport.PkgOpenLightStream(ctx, f.nodeID, firstFrame)
+	stream, err := transport.PkgOpenLightStream(context.Background(), f.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
@@ -574,13 +600,127 @@ func (f *remoteBranchFS) Watch(patterns []string) (types.Watcher, error) {
 	return newRemoteWatcher(stream), nil
 }
 
+// ---------- seekableRemoteFile ----------
+
+// seekableRemoteFile implements fs.File + io.ReadSeeker. Returned by
+// remoteBranchFS.Open(). Consumer code is identical to operating on a
+// local *os.File: Open → Stat → Seek → Read → Close.
+type seekableRemoteFile struct {
+	bfs          *remoteBranchFS
+	name         string
+	size         int64       // -1 = unknown; populated lazily by Stat or Seek(End)
+	offset       int64       // logical position (updated by Seek/Read)
+	streamOffset int64       // actual stream position (updated by Read only)
+	r            fs.File     // current underlying stream (from openInternal)
+	cachedFI     fs.FileInfo // full Stat cache
+}
+
+func (f *seekableRemoteFile) Read(p []byte) (int, error) {
+	if f.r != nil && f.streamOffset != f.offset {
+		f.r.Close()
+		f.r = nil
+	}
+	if f.r == nil {
+		inner, err := f.bfs.openInternal(f.name, f.offset)
+		if err != nil {
+			return 0, err
+		}
+		f.r = inner
+		f.streamOffset = f.offset
+	}
+	n, err := f.r.Read(p)
+	f.offset += int64(n)
+	f.streamOffset += int64(n)
+	return n, err
+}
+
+func (f *seekableRemoteFile) Seek(offset int64, whence int) (int64, error) {
+	if whence == io.SeekEnd && f.size < 0 {
+		if _, err := f.Stat(); err != nil {
+			return 0, err
+		}
+	}
+	switch whence {
+	case io.SeekStart:
+		f.offset = offset
+	case io.SeekCurrent:
+		f.offset += offset
+	case io.SeekEnd:
+		f.offset = f.size + offset
+	}
+	if f.offset < 0 {
+		f.offset = 0
+	}
+	if f.size >= 0 && f.offset > f.size {
+		f.offset = f.size
+	}
+	return f.offset, nil
+}
+
+func (f *seekableRemoteFile) Stat() (fs.FileInfo, error) {
+	if f.cachedFI == nil {
+		fi, err := f.bfs.Stat(f.name)
+		if err != nil {
+			return nil, err
+		}
+		f.size = fi.Size()
+		f.cachedFI = fi
+		return fi, nil
+	}
+	return f.cachedFI, nil
+}
+
+func (f *seekableRemoteFile) Close() error {
+	if f.r != nil {
+		err := f.r.Close()
+		f.r = nil
+		return err
+	}
+	return nil
+}
+
+// ---------- heavyFile ----------
+
+// heavyFile implements fs.File for a Heavy open result. Reads from a
+// LimitReader(conn, size). Close probes for EOF to decide whether the
+// connection can be reused.
+type heavyFile struct {
+	name   string
+	size   int64
+	r      io.Reader // LimitReader(conn, size)
+	conn   net.Conn
+	closed bool
+}
+
+func (f *heavyFile) Stat() (fs.FileInfo, error) {
+	return &remoteFileInfo{name: f.name, size: f.size}, nil
+}
+
+func (f *heavyFile) Read(p []byte) (int, error) {
+	return f.r.Read(p)
+}
+
+func (f *heavyFile) Close() error {
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	_, err := f.r.Read(make([]byte, 1))
+	if err == io.EOF {
+		transport.PkgHeavyReturn(f.conn)
+	} else {
+		f.conn.Close()
+		transport.PkgHeavyRemove(f.conn)
+	}
+	return nil
+}
+
 // ---------- remoteFile ----------
 
-// remoteFile implements fs.File for streaming file reads.
+// remoteFile implements fs.File for Light streaming file reads.
 type remoteFile struct {
-	name      string
-	stream    io.ReadWriteCloser
-	heavyConn net.Conn // Heavy pool connection (must be returned, not closed)
+	name   string
+	stream io.ReadWriteCloser
 }
 
 func (f *remoteFile) Stat() (fs.FileInfo, error) {
@@ -588,17 +728,10 @@ func (f *remoteFile) Stat() (fs.FileInfo, error) {
 }
 
 func (f *remoteFile) Read(p []byte) (int, error) {
-	if f.heavyConn != nil {
-		return f.heavyConn.Read(p)
-	}
 	return f.stream.Read(p)
 }
 
 func (f *remoteFile) Close() error {
-	if f.heavyConn != nil {
-		transport.PkgHeavyReturn(f.heavyConn)
-		return nil
-	}
 	return f.stream.Close()
 }
 
@@ -638,25 +771,16 @@ func (fi *remoteFileInfo) Sys() any           { return nil }
 
 // ---------- remoteWriter ----------
 
-// remoteWriter wraps a stream or heavy connection for file writes.
+// remoteWriter wraps a Light stream for file writes.
 type remoteWriter struct {
-	stream    io.ReadWriteCloser
-	heavyConn net.Conn // Heavy pool connection (must be returned, not closed)
-	nodeID    string   // only needed for Heavy return
+	stream io.ReadWriteCloser
 }
 
 func (w *remoteWriter) Write(p []byte) (int, error) {
-	if w.heavyConn != nil {
-		return w.heavyConn.Write(p)
-	}
 	return w.stream.Write(p)
 }
 
 func (w *remoteWriter) Close() error {
-	if w.heavyConn != nil {
-		transport.PkgHeavyReturn(w.heavyConn)
-		return nil
-	}
 	// If the stream supports half-close, signal end-of-write and read the
 	// response to detect Tai-side errors (e.g. permission denied, disk full).
 	if hc, ok := w.stream.(HalfCloser); ok {

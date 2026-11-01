@@ -149,6 +149,7 @@ type FileRequest struct {
 	Branch      string `json:"branch"`
 	Path        string `json:"path,omitempty"`
 	Perm        uint32 `json:"perm,omitempty"`
+	Offset      int64  `json:"offset,omitempty"`
 }
 
 // RenameRequest is used for rename and symlink.

@@ -170,6 +170,8 @@ err := n.DeleteWorkspace(ctx, "workspace-id")
 | `History` | Commit queries: `Query` / `FileHistory` / `BranchLog` |
 | `Watcher` | Real-time file change events via `Events()` channel |
 
+`Open()` returns a file implementing `fs.File` + `io.ReadSeeker`. Consumer code is identical to a local `*os.File` — `Seek` records the offset without network calls; `Read` reopens the stream at the new offset only when needed. This enables `http.ServeContent` for Range requests out of the box. See [Workspace API — Open](workspace.md#open) for details.
+
 ### Key Types (in `types/`)
 
 - `Meta` — Workspace metadata (`Name`, `Owner`)

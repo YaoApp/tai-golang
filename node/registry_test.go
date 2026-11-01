@@ -332,6 +332,7 @@ func (m *mockTransportBackend) HeavyPick(_ string) (net.Conn, error) {
 }
 
 func (m *mockTransportBackend) HeavyReturn(_ net.Conn) {}
+func (m *mockTransportBackend) HeavyRemove(_ net.Conn) {}
 
 // buildFramedResponse creates a length-prefixed protobuf Payload that ReadResponse can parse.
 func buildFramedResponse(kind string, data []byte) []byte {

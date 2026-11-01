@@ -458,6 +458,7 @@ type Backend interface {
 	OpenLightStream(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error)
 	HeavyPick(nodeID string) (net.Conn, error)
 	HeavyReturn(conn net.Conn)
+	HeavyRemove(conn net.Conn)
 }
 
 var defaultBackend Backend
@@ -482,4 +483,9 @@ func PkgHeavyPick(nodeID string) (net.Conn, error) {
 // PkgHeavyReturn marks a Heavy connection as idle via the global transport server.
 func PkgHeavyReturn(conn net.Conn) {
 	defaultBackend.HeavyReturn(conn)
+}
+
+// PkgHeavyRemove removes a Heavy connection from the pool via the global transport server.
+func PkgHeavyRemove(conn net.Conn) {
+	defaultBackend.HeavyRemove(conn)
 }

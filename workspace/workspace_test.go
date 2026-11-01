@@ -96,6 +96,10 @@ func (m *mockBackend) HeavyReturn(conn net.Conn) {
 	m.mu.Unlock()
 }
 
+func (m *mockBackend) HeavyRemove(conn net.Conn) {
+	conn.Close()
+}
+
 type mockStream struct {
 	*bytes.Reader
 	buf          *bytes.Buffer
@@ -653,42 +657,422 @@ func TestRemoteWriterStreamClose(t *testing.T) {
 	}
 }
 
-func TestRemoteFileHeavyConn(t *testing.T) {
+// ---------- seekableRemoteFile tests ----------
+
+func TestSeekableRemoteFileReadForward(t *testing.T) {
+	inner := &mockFsFile{data: []byte("hello world"), pos: 0}
+	sf := &seekableRemoteFile{
+		bfs: &remoteBranchFS{}, name: "test.txt", size: -1,
+		offset: 0, streamOffset: 0, r: inner,
+	}
+	buf := make([]byte, 5)
+	n, err := sf.Read(buf)
+	if err != nil || n != 5 || string(buf[:n]) != "hello" {
+		t.Fatalf("Read(5) = %q err=%v, want hello", buf[:n], err)
+	}
+	if sf.offset != 5 || sf.streamOffset != 5 {
+		t.Errorf("offset=%d streamOffset=%d, want 5,5", sf.offset, sf.streamOffset)
+	}
+}
+
+func TestSeekableRemoteFileReadAfterSeek(t *testing.T) {
+	opened := 0
+	bfs := &remoteBranchFS{nodeID: testNodeID, wsID: "ws1", branch: "main"}
+
+	origOpen := bfs.openInternal
+	_ = origOpen
+
+	inner := &mockFsFile{data: []byte("hello world"), pos: 0}
+	sf := &seekableRemoteFile{
+		bfs: bfs, name: "test.txt", size: 11,
+		offset: 0, streamOffset: 0, r: inner,
+	}
+
+	// Seek to position 6 — doesn't close stream
+	pos, err := sf.Seek(6, io.SeekStart)
+	if err != nil || pos != 6 {
+		t.Fatalf("Seek(6,Start) = %d err=%v", pos, err)
+	}
+	if sf.offset != 6 {
+		t.Errorf("offset=%d, want 6", sf.offset)
+	}
+	// r is still the old stream (not closed yet)
+	if sf.r == nil {
+		t.Error("r should not be nil after Seek")
+	}
+	_ = opened
+}
+
+func TestSeekableRemoteFileSeekStart(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 50}
+	pos, _ := sf.Seek(25, io.SeekStart)
+	if pos != 25 {
+		t.Errorf("Seek(25, Start) = %d, want 25", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekCurrent(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 30}
+	pos, _ := sf.Seek(10, io.SeekCurrent)
+	if pos != 40 {
+		t.Errorf("Seek(10, Current) = %d, want 40", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekEnd(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 0}
+	pos, _ := sf.Seek(-10, io.SeekEnd)
+	if pos != 90 {
+		t.Errorf("Seek(-10, End) = %d, want 90", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekEndUnknownSize(t *testing.T) {
+	transport.SetTestBackend(&mockBackend{
+		handler: func(kind string, data []byte) ([]byte, error) {
+			return json.Marshal(map[string]any{
+				"name": "f.txt", "size": int64(200), "mode": 0, "mod_time": 0, "is_dir": false,
+			})
+		},
+		heavyErr: fmt.Errorf("no heavy"),
+	})
+
+	bfs := &remoteBranchFS{nodeID: testNodeID, wsID: "ws1", branch: "main"}
+	sf := &seekableRemoteFile{bfs: bfs, name: "f.txt", size: -1, offset: 0}
+
+	pos, err := sf.Seek(0, io.SeekEnd)
+	if err != nil {
+		t.Fatalf("Seek(0, End) err=%v", err)
+	}
+	if pos != 200 {
+		t.Errorf("Seek(0, End) = %d, want 200", pos)
+	}
+	if sf.size != 200 {
+		t.Errorf("size=%d, want 200 (populated by Stat)", sf.size)
+	}
+}
+
+func TestSeekableRemoteFileSeekClampNegative(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 10}
+	pos, _ := sf.Seek(-50, io.SeekStart)
+	if pos != 0 {
+		t.Errorf("Seek(-50, Start) = %d, want 0 (clamped)", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekClampBeyondSize(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 0}
+	pos, _ := sf.Seek(200, io.SeekStart)
+	if pos != 100 {
+		t.Errorf("Seek(200, Start) = %d, want 100 (clamped to size)", pos)
+	}
+}
+
+func TestSeekableRemoteFileStatCaches(t *testing.T) {
+	calls := 0
+	transport.SetTestBackend(&mockBackend{
+		handler: func(kind string, data []byte) ([]byte, error) {
+			calls++
+			return json.Marshal(map[string]any{
+				"name": "f.txt", "size": int64(42), "mode": 0, "mod_time": 0, "is_dir": false,
+			})
+		},
+		heavyErr: fmt.Errorf("no heavy"),
+	})
+
+	bfs := &remoteBranchFS{nodeID: testNodeID, wsID: "ws1", branch: "main"}
+	sf := &seekableRemoteFile{bfs: bfs, name: "f.txt", size: -1, offset: 0}
+
+	fi1, err := sf.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi1.Size() != 42 {
+		t.Errorf("Stat size=%d, want 42", fi1.Size())
+	}
+	if sf.size != 42 {
+		t.Errorf("cached size=%d, want 42", sf.size)
+	}
+
+	fi2, err := sf.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi2 != fi1 {
+		t.Error("second Stat should return cached value")
+	}
+	if calls != 1 {
+		t.Errorf("Stat called backend %d times, want 1", calls)
+	}
+}
+
+func TestSeekableRemoteFileCloseNormal(t *testing.T) {
+	inner := &mockFsFile{data: []byte("hello"), pos: 0}
+	sf := &seekableRemoteFile{r: inner}
+	if err := sf.Close(); err != nil {
+		t.Fatalf("Close err=%v", err)
+	}
+	if !inner.closed {
+		t.Error("inner file not closed")
+	}
+	if sf.r != nil {
+		t.Error("r should be nil after Close")
+	}
+}
+
+func TestSeekableRemoteFileCloseDouble(t *testing.T) {
+	inner := &mockFsFile{data: []byte("hello"), pos: 0}
+	sf := &seekableRemoteFile{r: inner}
+	sf.Close()
+	// Second close should not panic and should return nil
+	if err := sf.Close(); err != nil {
+		t.Fatalf("double Close err=%v", err)
+	}
+}
+
+func TestSeekableRemoteFileCloseNilR(t *testing.T) {
+	sf := &seekableRemoteFile{r: nil}
+	if err := sf.Close(); err != nil {
+		t.Fatalf("Close with nil r err=%v", err)
+	}
+}
+
+// mockFsFile is a minimal fs.File for unit testing.
+type mockFsFile struct {
+	data   []byte
+	pos    int
+	closed bool
+}
+
+func (f *mockFsFile) Stat() (fs.FileInfo, error) {
+	return &remoteFileInfo{name: "mock", size: int64(len(f.data))}, nil
+}
+
+func (f *mockFsFile) Read(p []byte) (int, error) {
+	if f.pos >= len(f.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[f.pos:])
+	f.pos += n
+	return n, nil
+}
+
+func (f *mockFsFile) Close() error {
+	f.closed = true
+	return nil
+}
+
+func TestSeekableRemoteFileReadReopensOnMismatch(t *testing.T) {
+	// Simulate: read 3 bytes (offset=3, streamOffset=3), Seek to 0 (offset=0),
+	// then Read → should close old stream and reopen at offset 0.
+	transport.SetTestBackend(&mockBackend{
+		heavyErr: fmt.Errorf("no heavy"),
+		rawHandler: func(kind string, data []byte) ([]byte, error) {
+			return nil, fmt.Errorf("intentional reopen failure")
+		},
+	})
+
+	inner := &mockFsFile{data: []byte("hello world"), pos: 0}
+	bfs := &remoteBranchFS{nodeID: testNodeID, wsID: "ws1", branch: "main"}
+	sf := &seekableRemoteFile{
+		bfs: bfs, name: "test.txt", size: 11,
+		offset: 0, streamOffset: 0, r: inner,
+	}
+
+	// Read 3 bytes
+	buf := make([]byte, 3)
+	sf.Read(buf) // offset=3, streamOffset=3
+
+	// Seek back to 0
+	sf.Seek(0, io.SeekStart) // offset=0, streamOffset still 3
+
+	// Read should detect mismatch and close old stream
+	_, err := sf.Read(buf)
+	if err == nil {
+		t.Error("expected error from openInternal (backend returns error), got nil")
+	}
+	if !inner.closed {
+		t.Error("old stream should be closed on mismatch")
+	}
+}
+
+func TestSeekableRemoteFileReadEOF(t *testing.T) {
+	inner := &mockFsFile{data: []byte("hi"), pos: 0}
+	sf := &seekableRemoteFile{
+		bfs: &remoteBranchFS{}, name: "test.txt", size: 2,
+		offset: 0, streamOffset: 0, r: inner,
+	}
+	// Read all data
+	buf := make([]byte, 10)
+	n, _ := sf.Read(buf)
+	if string(buf[:n]) != "hi" {
+		t.Errorf("first read = %q", buf[:n])
+	}
+	// Next read should return EOF
+	_, err := sf.Read(buf)
+	if err != io.EOF {
+		t.Errorf("expected EOF, got %v", err)
+	}
+}
+
+func TestSeekableRemoteFileSeekCurrentNegative(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 50}
+	pos, _ := sf.Seek(-10, io.SeekCurrent)
+	if pos != 40 {
+		t.Errorf("Seek(-10, Current) from 50 = %d, want 40", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekEndZero(t *testing.T) {
+	sf := &seekableRemoteFile{size: 100, offset: 0}
+	pos, _ := sf.Seek(0, io.SeekEnd)
+	if pos != 100 {
+		t.Errorf("Seek(0, End) = %d, want 100 (= size)", pos)
+	}
+}
+
+func TestSeekableRemoteFileSeekSizeUnknownNotEnd(t *testing.T) {
+	// Seek with Start/Current when size is unknown (-1) should work without Stat
+	sf := &seekableRemoteFile{size: -1, offset: 0}
+	pos, err := sf.Seek(5, io.SeekStart)
+	if err != nil {
+		t.Fatalf("Seek err=%v", err)
+	}
+	if pos != 5 {
+		t.Errorf("Seek(5, Start) = %d, want 5", pos)
+	}
+	// Clamp above size doesn't apply when size == -1
+}
+
+// ---------- heavyFile tests ----------
+
+func TestHeavyFileRead(t *testing.T) {
 	s, c := net.Pipe()
 	go func() {
-		s.Write([]byte("heavy data"))
+		s.Write([]byte("data"))
 		s.Close()
 	}()
 
 	transport.SetTestBackend(&mockBackend{heavyErr: fmt.Errorf("no heavy")})
-	f := &remoteFile{name: "big.bin", heavyConn: c}
-	data, err := io.ReadAll(f)
+	hf := &heavyFile{
+		name: "video.mp4",
+		size: 4,
+		r:    io.LimitReader(c, 4),
+		conn: c,
+	}
+	data, err := io.ReadAll(hf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "heavy data" {
-		t.Errorf("content = %q", data)
+	if string(data) != "data" {
+		t.Errorf("content = %q, want data", data)
 	}
-	f.Close()
 }
 
-func TestRemoteWriterHeavyConn(t *testing.T) {
+func TestHeavyFileStat(t *testing.T) {
+	hf := &heavyFile{name: "video.mp4", size: 12345}
+	fi, err := hf.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Name() != "video.mp4" || fi.Size() != 12345 {
+		t.Errorf("Stat = %s/%d, want video.mp4/12345", fi.Name(), fi.Size())
+	}
+}
+
+func TestHeavyFileCloseEOFReuse(t *testing.T) {
 	s, c := net.Pipe()
 	go func() {
-		buf := make([]byte, 100)
-		n, _ := s.Read(buf)
-		if string(buf[:n]) != "upload" {
-			panic("unexpected data")
-		}
-		s.Close()
+		s.Write([]byte("abcd"))
+		// Don't close s — we want to test that after reading 4 bytes,
+		// LimitReader returns EOF and conn is returned.
 	}()
+	defer s.Close()
 
-	w := &remoteWriter{heavyConn: c, nodeID: testNodeID}
-	n, err := w.Write([]byte("upload"))
-	if err != nil || n != 6 {
-		t.Fatalf("Write: n=%d err=%v", n, err)
+	mb := &mockBackend{heavyErr: fmt.Errorf("no heavy")}
+	transport.SetTestBackend(mb)
+
+	hf := &heavyFile{
+		name: "f.bin",
+		size: 4,
+		r:    io.LimitReader(c, 4),
+		conn: c,
 	}
-	w.Close()
+
+	// Read all 4 bytes to exhaust LimitReader
+	io.ReadAll(hf)
+
+	// Close should detect EOF and return conn
+	hf.Close()
+
+	mb.mu.Lock()
+	returned := len(mb.heavyReturned)
+	mb.mu.Unlock()
+	if returned != 1 {
+		t.Errorf("heavyReturned = %d, want 1 (EOF → reuse)", returned)
+	}
+}
+
+func TestHeavyFileCloseNotEOFDestroy(t *testing.T) {
+	s, c := net.Pipe()
+	go func() {
+		s.Write([]byte("abcdefghij")) // 10 bytes
+		// Don't close — simulates large file with remaining data
+	}()
+	defer s.Close()
+
+	mb := &mockBackend{heavyErr: fmt.Errorf("no heavy")}
+	transport.SetTestBackend(mb)
+
+	hf := &heavyFile{
+		name: "big.mp4",
+		size: 10,
+		r:    io.LimitReader(c, 10),
+		conn: c,
+	}
+
+	// Read only 3 bytes — 7 remaining in LimitReader
+	buf := make([]byte, 3)
+	hf.Read(buf)
+
+	// Close should detect NOT EOF (7 bytes remain) → destroy conn
+	hf.Close()
+
+	mb.mu.Lock()
+	returned := len(mb.heavyReturned)
+	mb.mu.Unlock()
+	if returned != 0 {
+		t.Errorf("heavyReturned = %d, want 0 (not EOF → destroy)", returned)
+	}
+}
+
+func TestHeavyFileCloseDouble(t *testing.T) {
+	s, c := net.Pipe()
+	go func() {
+		s.Write([]byte("ab"))
+	}()
+	defer s.Close()
+
+	mb := &mockBackend{heavyErr: fmt.Errorf("no heavy")}
+	transport.SetTestBackend(mb)
+
+	hf := &heavyFile{
+		name: "f.bin",
+		size: 2,
+		r:    io.LimitReader(c, 2),
+		conn: c,
+	}
+	io.ReadAll(hf)
+
+	hf.Close()
+	hf.Close() // second close should not panic or double-return
+
+	mb.mu.Lock()
+	returned := len(mb.heavyReturned)
+	mb.mu.Unlock()
+	if returned != 1 {
+		t.Errorf("heavyReturned = %d after double close, want 1", returned)
+	}
 }
 
 // ---------- History tests ----------

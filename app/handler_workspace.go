@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -439,8 +437,7 @@ func (h *WorkspaceHandler) FileStat(w http.ResponseWriter, r *http.Request) {
 }
 
 // FileContent reads file content with inferred Content-Type.
-// Uses fs.Stat to get the exact size, then reads exactly that many bytes
-// to avoid hanging on remote streams that don't properly signal EOF.
+// Streams the file via io.Copy — O(1) memory regardless of file size.
 func (h *WorkspaceHandler) FileContent(w http.ResponseWriter, r *http.Request) {
 	n := getNode(w, r)
 	if n == nil {
@@ -460,16 +457,6 @@ func (h *WorkspaceHandler) FileContent(w http.ResponseWriter, r *http.Request) {
 	}
 	bfs := branchObj.FS()
 
-	fi, err := fs.Stat(bfs, path)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if fi.IsDir() {
-		writeError(w, http.StatusBadRequest, "path is a directory")
-		return
-	}
-
 	f, err := bfs.Open(path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -477,20 +464,25 @@ func (h *WorkspaceHandler) FileContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
+	fi, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if fi.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is a directory")
+		return
+	}
+
 	ct := mime.TypeByExtension(filepath.Ext(path))
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", ct)
-
-	size := fi.Size()
-	if size > 0 {
-		buf := make([]byte, size)
-		nr, _ := io.ReadFull(f, buf)
-		w.Write(buf[:nr])
-	} else {
-		readWithTimeout(w, f)
+	if fi.Size() > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	}
+	io.Copy(w, f)
 }
 
 // FileUpload writes file content from request body.
@@ -623,7 +615,9 @@ func (h *WorkspaceHandler) FileRename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "renamed"})
 }
 
-// FilePreview serves file content with Content-Disposition: inline for browser preview.
+// FilePreview serves file content with Content-Disposition: inline for browser
+// preview. For video/audio, uses http.ServeContent with the seekable remote
+// file — Range requests only transfer the requested interval.
 func (h *WorkspaceHandler) FilePreview(w http.ResponseWriter, r *http.Request) {
 	n := getNode(w, r)
 	if n == nil {
@@ -643,12 +637,6 @@ func (h *WorkspaceHandler) FilePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	bfs := branchObj.FS()
 
-	fi, err := fs.Stat(bfs, path)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
 	f, err := bfs.Open(path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -656,29 +644,26 @@ func (h *WorkspaceHandler) FilePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
+	fi, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	ct := mime.TypeByExtension(filepath.Ext(path))
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
 
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filepath.Base(path)))
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("inline; filename=%q", filepath.Base(path)))
 
-	var data []byte
-	size := fi.Size()
-	if size > 0 {
-		data = make([]byte, size)
-		nr, _ := io.ReadFull(f, data)
-		data = data[:nr]
+	if rs, ok := f.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, filepath.Base(path), fi.ModTime(), rs)
 	} else {
-		data = readFileWithTimeout(f)
+		io.Copy(w, f)
 	}
-
-	if strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "audio/") {
-		http.ServeContent(w, r, filepath.Base(path), time.Time{}, bytes.NewReader(data))
-		return
-	}
-	w.Write(data)
 }
 
 // ---------- Chunked Upload ----------
@@ -811,27 +796,5 @@ func (m *uploadManager) cleanupLoop() {
 			u.mu.Unlock()
 		}
 		m.mu.Unlock()
-	}
-}
-
-// readWithTimeout reads from r with a 5-second timeout, writes to w.
-// Used when the file size is unknown and the remote stream may not EOF.
-func readWithTimeout(w http.ResponseWriter, r io.Reader) {
-	data := readFileWithTimeout(r)
-	w.Write(data)
-}
-
-// readFileWithTimeout reads up to 10 MB from r with a 5-second idle timeout.
-func readFileWithTimeout(r io.Reader) []byte {
-	ch := make(chan []byte, 1)
-	go func() {
-		data, _ := io.ReadAll(io.LimitReader(r, 10*1024*1024))
-		ch <- data
-	}()
-	select {
-	case data := <-ch:
-		return data
-	case <-time.After(5 * time.Second):
-		return nil
 	}
 }

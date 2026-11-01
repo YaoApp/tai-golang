@@ -63,6 +63,22 @@ func main() {
         fmt.Println(e.Name(), e.IsDir())
     }
 
+    // 6b. Seek — remote file behaves like local *os.File
+    f2, _ := ws.Open("hello.txt")
+    seeker := f2.(io.ReadSeeker)
+    seeker.Seek(6, io.SeekStart)        // skip to offset 6 (no network)
+    tail, _ := io.ReadAll(f2)
+    fmt.Println(string(tail))           // "world"
+    f2.Close()
+
+    // 6c. Serve video with Range support — identical to local file
+    // http.HandleFunc("/preview", func(w http.ResponseWriter, r *http.Request) {
+    //     f, _ := ws.Open("video.mp4")
+    //     defer f.Close()
+    //     fi, _ := f.Stat()
+    //     http.ServeContent(w, r, fi.Name(), fi.ModTime(), f.(io.ReadSeeker))
+    // })
+
     // 7. Branch management
     branch, _ := ws.CreateBranch(ctx, "feature-x", "main", nil)
     bfs := branch.FS()
@@ -375,11 +391,41 @@ func (wfs) Open(name string) (fs.File, error)
 Opens a file for reading. The transport channel is selected by `ChannelPolicy`:
 
 - **Light:** Opens a Light stream with the `open` command; file content is streamed directly.
-- **Heavy:** Picks a Heavy connection, writes the command frame; falls back to Light on failure.
+- **Heavy:** Picks a Heavy connection, writes the command frame, reads a result frame with the file size, then reads exactly that many bytes via `LimitReader`. Falls back to Light on failure.
 
-The returned `fs.File` supports `Read`, `Stat` (name only on the streaming file), and `Close`. When a Heavy connection is used, `Close()` returns the connection to the pool via `HeavyReturn`.
+The returned file implements **`fs.File` + `io.ReadSeeker`**. Consumer code is identical to operating on a local `*os.File`:
 
-**Wire:** `open` with `FileRequest{WorkspaceID, Branch, Path}`.
+```go
+f, _ := bfs.Open("video.mp4")
+fi, _ := f.Stat()               // lazy roundtrip, result cached
+rs := f.(io.ReadSeeker)          // always succeeds
+http.ServeContent(w, r, fi.Name(), fi.ModTime(), rs)
+f.Close()
+```
+
+**Seek behavior:**
+
+- `Seek` only records the logical offset — no network call, no stream close.
+- `Read` checks whether the underlying stream position matches the logical offset. If they match, the existing stream is reused. If not, the old stream is closed and a new one is opened at the requested offset (via the `Offset` field in `FileRequest`).
+- `Stat` performs a single network roundtrip on first call and caches the full `fs.FileInfo`.
+
+This design avoids wasting the initial stream. For example, `http.ServeContent` calls `Seek(0, End)` → `Seek(0, Start)` → `Read` — the stream position is still 0 on `Read`, so the initial stream is reused with zero overhead.
+
+For Range requests (e.g., video seek to 5 MB), `http.ServeContent` calls `Seek(5000000, Start)` → `Read` — the stream position (0) does not match the offset (5000000), so a new stream is opened at offset 5000000. Only the requested interval is transmitted.
+
+**Wire:** `open` with `FileRequest{WorkspaceID, Branch, Path, Offset}`.
+
+**Heavy open protocol:**
+
+```text
+SDK → Tai:  WriteFrame({namespace:"workspace", kind:"open", data: FileRequest})
+Tai → SDK:  WriteFrame({namespace:"workspace", kind:"open.result", data: {"size": N}})
+Tai → SDK:  N bytes of file data (io.CopyN)
+```
+
+On `Close()`, the Heavy file probes for EOF (reads 1 byte from the `LimitReader`):
+- EOF → connection returned to pool (`HeavyReturn`)
+- Not EOF → connection destroyed (`HeavyRemove`), pool auto-replenishes
 
 ### Create
 
@@ -387,9 +433,9 @@ The returned `fs.File` supports `Read`, `Stat` (name only on the streaming file)
 func (wfs) Create(name string) (io.WriteCloser, error)
 ```
 
-Creates or overwrites a file. Returns a writer; call `Write` to send content, then `Close` to finalize.
+Creates or overwrites a file. Returns a writer; call `Write` to send content, then `Close` to finalize. **Create always uses the Light channel** — the data flows from SDK to Tai, so the SDK sends `END_STREAM` via `CloseWrite` and there is no H2 deadlock risk.
 
-The channel selection and fallback logic is the same as `Open`. On `Close()`, if the underlying stream implements `HalfCloser`, the writer half-closes the write side and reads the `create.result` response to detect server-side errors.
+On `Close()`, if the underlying stream implements `HalfCloser`, the writer half-closes the write side and reads the `create.result` response to detect server-side errors.
 
 **Wire:** `create` with `FileRequest{WorkspaceID, Branch, Path}`.
 
@@ -776,7 +822,22 @@ Metadata-only operations (branch management, history queries, etc.) always use L
 
 ### Heavy Fallback
 
-When a Heavy connection is selected but `HeavyPick` fails or `writePayload` fails, the operation automatically falls back to Light. Callers do not need to handle this.
+When a Heavy connection is selected but `HeavyPick` fails, `writePayload` fails, or `readPayload` fails, the operation automatically falls back to Light. Callers do not need to handle this.
+
+### Heavy Open Protocol
+
+Heavy open uses a structured two-phase protocol (command frame → result frame + data):
+
+1. SDK picks an idle Heavy connection and sends a command frame (`open` kind)
+2. Tai reads the frame via `serveHeavy`, dispatches to `handleHeavyOpen`
+3. Tai opens the file, stats it, optionally seeks to `Offset`, then sends a result frame with `{"size": N}`
+4. Tai streams exactly `N` bytes of file data via `io.CopyN`
+5. SDK reads the result frame, creates a `LimitReader(conn, N)` to bound the read
+6. On `Close()`, the EOF probe determines connection reuse (see [Open](#open))
+
+Error responses use the `"error"` kind with `{"code": "...", "message": "..."}`. After an error frame, the connection is returned to the pool (no data follows).
+
+Supported error codes: `BAD_REQUEST`, `NOT_FOUND`, `OPEN_FAILED`, `STAT_FAILED`, `OFFSET_OUT_OF_RANGE`, `SEEK_UNSUPPORTED`, `SEEK_FAILED`, `UNKNOWN_KIND`.
 
 ## Error Handling
 
@@ -917,6 +978,7 @@ type FileRequest struct {
     Branch      string `json:"branch"`
     Path        string `json:"path,omitempty"`
     Perm        uint32 `json:"perm,omitempty"`
+    Offset      int64  `json:"offset,omitempty"` // byte offset for open (Seek support)
 }
 
 type RenameRequest struct {
