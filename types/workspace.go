@@ -180,7 +180,8 @@ type LogOptions struct {
 
 // ListOptions configures workspace listing.
 type ListOptions struct {
-	Owner string `json:"owner,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+	Owner  string `json:"owner,omitempty"`
 }
 
 // RegistryEntry is one entry in the workspace listing.
@@ -188,6 +189,7 @@ type ListOptions struct {
 type RegistryEntry struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	NodeID    string `json:"node_id,omitempty"`
 	Owner     string `json:"owner"`
 	CreatedAt string `json:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`

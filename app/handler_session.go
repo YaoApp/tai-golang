@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -31,12 +30,17 @@ func (h *SessionHandler) List(w http.ResponseWriter, _ *http.Request) {
 	sessions := h.store.Sessions()
 	out := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"id":        s.ID,
 			"nodeId":    s.NodeID,
 			"createdAt": s.CreatedAt,
 			"status":    s.Status,
-		})
+		}
+		if s.WorkspaceID != "" {
+			entry["workspaceId"] = s.WorkspaceID
+			entry["workspaceName"] = s.WorkspaceName
+		}
+		out = append(out, entry)
 	}
 	writeJSON(w, out)
 }
@@ -56,10 +60,13 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Request == nil {
-		req.Request = &types.SessionRequest{
-			Runtime:   "agent",
-			Isolation: "none",
-		}
+		req.Request = &types.SessionRequest{}
+	}
+	if req.Request.Runtime == "" {
+		req.Request.Runtime = "agent"
+	}
+	if req.Request.Isolation == "" {
+		req.Request.Isolation = "host"
 	}
 
 	// Pass DeepSeek credentials to the agent subprocess via session env.
@@ -79,15 +86,6 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := auth.GenerateID("sess")
 
-	// Auto-create workspace for the session if cwd is not specified.
-	if req.Request.Cwd == "" {
-		wsDir := filepath.Join(os.TempDir(), "tai-demo-ws", sessionID)
-		if err := EnsureWorkspace(wsDir); err != nil {
-			writeError(w, http.StatusInternalServerError, "create workspace: "+err.Error())
-			return
-		}
-		req.Request.Cwd = wsDir
-	}
 	opToken, err := h.auth.IssueOperationToken(req.NodeID, sessionID, []string{"session"}, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "issue operation token: "+err.Error())
@@ -99,6 +97,17 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "node not found")
 		return
 	}
+
+	// Auto-create workspace when neither cwd nor workspaceId is specified.
+	if req.Request.Cwd == "" && req.Request.WorkspaceID == "" {
+		ws, err := rn.CreateWorkspace(r.Context(), types.Meta{Name: "session-" + sessionID[:12]})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "auto-create workspace: "+err.Error())
+			return
+		}
+		req.Request.WorkspaceID = ws.ID()
+	}
+
 	session, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: sessionID,
 		Token:     opToken,
@@ -109,19 +118,38 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve workspace name for display.
+	wsID := req.Request.WorkspaceID
+	wsName := ""
+	if wsID != "" && rn != nil {
+		entries, err := rn.ListWorkspaces(r.Context(), types.ListOptions{})
+		if err == nil {
+			for _, e := range entries {
+				if e.ID == wsID {
+					wsName = e.Name
+					break
+				}
+			}
+		}
+	}
+
 	info := &SessionInfo{
-		ID:        sessionID,
-		NodeID:    req.NodeID,
-		CreatedAt: time.Now(),
-		Status:    "running",
-		Session:   session,
+		ID:            sessionID,
+		NodeID:        req.NodeID,
+		CreatedAt:     time.Now(),
+		Status:        "running",
+		WorkspaceID:   wsID,
+		WorkspaceName: wsName,
+		Session:       session,
 	}
 	h.store.AddSession(info)
 
 	writeJSON(w, map[string]any{
-		"id":     sessionID,
-		"nodeId": req.NodeID,
-		"status": "running",
+		"id":            sessionID,
+		"nodeId":        req.NodeID,
+		"status":        "running",
+		"workspaceId":   wsID,
+		"workspaceName": wsName,
 	})
 }
 

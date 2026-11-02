@@ -1,32 +1,43 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import type { SessionInfo, NodeInfo } from '../../api';
+import type { SessionInfo, WorkspaceEntry } from '../../api';
+import { useCurrentNode } from '../../hooks/useCurrentNode';
 import SessionList from './components/SessionList';
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [nodes, setNodes] = useState<NodeInfo[]>([]);
-  const [selectedNode, setSelectedNode] = useState('');
+  const [currentNode, setCurrentNode, nodes] = useCurrentNode();
+  const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
+  const [selectedWs, setSelectedWs] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const refresh = () => {
     api.sessions.list().then(setSessions).catch(() => {});
-    api.nodes.list().then(setNodes).catch(() => {});
   };
 
   useEffect(() => { refresh(); }, []);
 
+  // Load workspaces when node changes
+  useEffect(() => {
+    if (!currentNode) { setWorkspaces([]); return; }
+    api.workspaces.list(currentNode).then(setWorkspaces).catch(() => setWorkspaces([]));
+  }, [currentNode]);
+
   const handleCreate = async () => {
-    const nodeId = selectedNode || nodes[0]?.id;
+    const nodeId = currentNode || nodes[0]?.id;
     if (!nodeId) {
       setError('No nodes available. Register a node first.');
       return;
     }
     try {
       setError('');
-      const s = await api.sessions.create(nodeId);
+      const req: Record<string, unknown> = {};
+      if (selectedWs) {
+        req.workspaceId = selectedWs;
+      }
+      const s = await api.sessions.create(nodeId, Object.keys(req).length > 0 ? req : undefined);
       setSessions((prev) => [...prev, s]);
       navigate(`/sessions/${s.id}`);
     } catch (e: unknown) {
@@ -52,15 +63,28 @@ export default function SessionsPage() {
         <h1>Sessions</h1>
 
         {/* Create */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <select
-            value={selectedNode}
-            onChange={(e) => setSelectedNode(e.target.value)}
+            value={currentNode}
+            onChange={(e) => setCurrentNode(e.target.value)}
             style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc' }}
           >
             <option value="">Select node...</option>
             {nodes.map((n) => (
               <option key={n.id} value={n.id}>{n.id}</option>
+            ))}
+          </select>
+          <select
+            value={selectedWs}
+            onChange={(e) => setSelectedWs(e.target.value)}
+            style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc', minWidth: 160 }}
+            disabled={!currentNode}
+          >
+            <option value="">Auto-create workspace</option>
+            {workspaces.map((ws) => (
+              <option key={ws.id} value={ws.id}>
+                {ws.name || ws.id.slice(0, 12)}
+              </option>
             ))}
           </select>
           <button
@@ -98,6 +122,7 @@ export default function SessionsPage() {
             <tr style={{ borderBottom: '2px solid #ddd' }}>
               <th style={th}>ID</th>
               <th style={th}>Node</th>
+              <th style={th}>Workspace</th>
               <th style={th}>Status</th>
               <th style={th}>Created</th>
               <th style={th}>Actions</th>
@@ -116,6 +141,20 @@ export default function SessionsPage() {
                   </a>
                 </td>
                 <td style={td}>{s.nodeId}</td>
+                <td style={td}>
+                  {s.workspaceId ? (
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); navigate(`/workspaces/${s.workspaceId}?nodeId=${s.nodeId}`); }}
+                      style={{ color: '#0066cc' }}
+                      title={s.workspaceId}
+                    >
+                      {s.workspaceName || s.workspaceId.slice(0, 12)}
+                    </a>
+                  ) : (
+                    <span style={{ color: '#999' }}>auto</span>
+                  )}
+                </td>
                 <td style={td}>{s.status}</td>
                 <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
                 <td style={td}>

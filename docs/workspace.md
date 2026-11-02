@@ -901,10 +901,16 @@ type CommitInfo struct {
 
 ```go
 type RegistryEntry struct {
-    ID   string `json:"id"`
-    Meta Meta   `json:"meta"`
+    ID        string `json:"id"`
+    Name      string `json:"name"`
+    NodeID    string `json:"node_id,omitempty"`
+    Owner     string `json:"owner"`
+    CreatedAt string `json:"created_at,omitempty"`
+    UpdatedAt string `json:"updated_at,omitempty"`
 }
 ```
+
+`NodeID` identifies the Tai node that created this workspace, used for node-level isolation when multiple nodes share the same machine.
 
 ## Wire Protocol
 

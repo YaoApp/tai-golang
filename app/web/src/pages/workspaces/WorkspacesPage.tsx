@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import type { NodeInfo, WorkspaceEntry } from '../../api';
+import type { WorkspaceEntry } from '../../api';
+import { useCurrentNode } from '../../hooks/useCurrentNode';
 
 export default function WorkspacesPage() {
-  const [nodes, setNodes] = useState<NodeInfo[]>([]);
-  const [selectedNode, setSelectedNode] = useState('');
+  const [currentNode, setCurrentNode, nodes] = useCurrentNode();
   const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -14,27 +14,23 @@ export default function WorkspacesPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.nodes.list().then(setNodes).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!selectedNode) return;
+    if (!currentNode) return;
     setLoading(true);
     setError('');
     api.workspaces
-      .list(selectedNode)
+      .list(currentNode)
       .then(setWorkspaces)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [selectedNode]);
+  }, [currentNode]);
 
   const handleCreate = async () => {
     if (!createName) return;
     try {
-      await api.workspaces.create(selectedNode, createName);
+      await api.workspaces.create(currentNode, createName);
       setShowCreate(false);
       setCreateName('');
-      const updated = await api.workspaces.list(selectedNode);
+      const updated = await api.workspaces.list(currentNode);
       setWorkspaces(updated);
     } catch (e: any) {
       setError(e.message);
@@ -44,7 +40,7 @@ export default function WorkspacesPage() {
   const handleDelete = async (id: string) => {
     if (!confirm(`Delete workspace ${id}?`)) return;
     try {
-      await api.workspaces.delete(selectedNode, id);
+      await api.workspaces.delete(currentNode, id);
       setWorkspaces((ws) => ws.filter((w) => w.id !== id));
     } catch (e: any) {
       setError(e.message);
@@ -58,8 +54,8 @@ export default function WorkspacesPage() {
       <div style={{ marginBottom: 16 }}>
         <label>Node: </label>
         <select
-          value={selectedNode}
-          onChange={(e) => setSelectedNode(e.target.value)}
+          value={currentNode}
+          onChange={(e) => setCurrentNode(e.target.value)}
           style={{ padding: '4px 8px', minWidth: 200 }}
         >
           <option value="">Select a node...</option>
@@ -71,7 +67,7 @@ export default function WorkspacesPage() {
 
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
-      {selectedNode && (
+      {currentNode && (
         <>
           <div style={{ marginBottom: 12 }}>
             <button onClick={() => setShowCreate(!showCreate)} style={btnStyle}>
@@ -109,7 +105,7 @@ export default function WorkspacesPage() {
                 {workspaces.map((ws) => (
                   <tr key={ws.id} style={{ borderBottom: '1px solid #eee' }}>
                     <td style={tdStyle}>
-                      <a href="#" onClick={(e) => { e.preventDefault(); navigate(`/workspaces/${ws.id}?nodeId=${selectedNode}`); }}
+                      <a href="#" onClick={(e) => { e.preventDefault(); navigate(`/workspaces/${ws.id}?nodeId=${currentNode}`); }}
                         style={{ color: '#0066cc' }}>{ws.id.slice(0, 12)}...</a>
                     </td>
                     <td style={tdStyle}>{ws.name || '—'}</td>

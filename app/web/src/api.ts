@@ -31,6 +31,8 @@ export interface SessionInfo {
   nodeId: string;
   createdAt: string;
   status: string;
+  workspaceId?: string;
+  workspaceName?: string;
 }
 
 export interface DocEntry {

@@ -74,6 +74,9 @@ func (h *WorkspaceHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if entries == nil {
+		entries = []types.RegistryEntry{}
+	}
 	writeJSON(w, entries)
 }
 

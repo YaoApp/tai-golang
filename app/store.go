@@ -19,11 +19,13 @@ type NodeInfo struct {
 
 // SessionInfo tracks an active session for the API.
 type SessionInfo struct {
-	ID        string        `json:"id"`
-	NodeID    string        `json:"nodeId"`
-	CreatedAt time.Time     `json:"createdAt"`
-	Status    string        `json:"status"`
-	Session   types.Session `json:"-"`
+	ID            string        `json:"id"`
+	NodeID        string        `json:"nodeId"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	Status        string        `json:"status"`
+	WorkspaceID   string        `json:"workspaceId,omitempty"`
+	WorkspaceName string        `json:"workspaceName,omitempty"`
+	Session       types.Session `json:"-"`
 }
 
 // Store holds in-memory state for the demo app.
@@ -57,6 +59,14 @@ func (s *Store) AddNode(n types.RemoteNode) {
 	}
 	s.mu.Unlock()
 	s.broadcast(`{"event":"node_registered","nodeId":"` + info.ID + `"}`)
+}
+
+// RemoveNode removes a node and broadcasts to SSE subscribers.
+func (s *Store) RemoveNode(nodeID string) {
+	s.mu.Lock()
+	delete(s.nodes, nodeID)
+	s.mu.Unlock()
+	s.broadcast(`{"event":"node_disconnected","nodeId":"` + nodeID + `"}`)
 }
 
 // Nodes returns all registered nodes.

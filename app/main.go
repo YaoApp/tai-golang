@@ -59,12 +59,16 @@ func main() {
 	// In-memory store for nodes/sessions.
 	store := NewStore()
 
-	// Register node callback.
+	// Register node callbacks.
 	node.OnRegister(func(n types.RemoteNode) error {
 		store.AddNode(n)
 		info := n.Info()
 		log.Printf("node registered: %s (tai_id=%s)", info.ID, info.TaiID)
 		return nil
+	})
+	node.OnDisconnect(func(nodeID string) {
+		store.RemoveNode(nodeID)
+		log.Printf("node disconnected: %s", nodeID)
 	})
 
 	// Start SDK server in background.
@@ -90,7 +94,7 @@ func main() {
 	// Graceful shutdown.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Printf("shutting down... (signal: %v)", sig)
 		sdkCancel()
