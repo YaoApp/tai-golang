@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/yaoapp/tai-golang/pb"
 	"github.com/yaoapp/tai-golang/session"
@@ -214,12 +215,116 @@ func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequ
 		return nil, fmt.Errorf("open data stream: %w", err)
 	}
 
-	sess := session.New(req.SessionID, n.nodeID, ctrlStream, dataStream, codec)
+	resumeFn := n.makeResumeFn(req.SessionID, req.Token, req.IssueToken)
+	sess := session.New(req.SessionID, n.nodeID, ctrlStream, dataStream, codec, session.Options{
+		ResumeFn: resumeFn,
+		OnEvent:  req.OnEvent,
+	})
+
+	// Start automatic OperationToken refresh for long-running sessions.
+	if req.IssueToken != nil {
+		tr := session.NewTokenRefresher(req.SessionID, req.IssueToken, n.SendControl)
+		// Stop refresher when session closes (best-effort).
+		go func() {
+			<-sess.Done()
+			tr.Stop()
+		}()
+	}
+
 	return sess, nil
 }
 
-func (n *remoteNode) ResumeSession(_ context.Context, _ *types.ResumeSessionRequest) (types.Session, error) {
-	return nil, fmt.Errorf("tai: ResumeSession not implemented")
+func (n *remoteNode) ResumeSession(ctx context.Context, req *types.ResumeSessionRequest) (types.Session, error) {
+	codec := transport.DefaultCodec()
+	newCtrl, newData, _, err := n.doResume(ctx, req.SessionID, req.Token, req.LastCtrlSeq, req.LastDataSeq, codec)
+	if err != nil {
+		return nil, err
+	}
+	resumeFn := n.makeResumeFn(req.SessionID, req.Token, nil)
+	sess := session.New(req.SessionID, n.nodeID, newCtrl, newData, codec, session.Options{
+		ResumeFn: resumeFn,
+		OnEvent:  req.OnEvent,
+	})
+	return sess, nil
+}
+
+// makeResumeFn creates a ResumeFunc closure for automatic session resume.
+// When issueToken is non-nil, a fresh OperationToken is obtained at resume time
+// to avoid sending an expired JWT. Falls back to initialToken on error.
+func (n *remoteNode) makeResumeFn(sessionID, initialToken string, issueToken func() (string, error)) types.ResumeFunc {
+	return func(ctx context.Context, lastCtrlSeq, lastDataSeq uint64) (io.ReadWriteCloser, io.ReadWriteCloser, uint64, error) {
+		token := initialToken
+		if issueToken != nil {
+			if fresh, err := issueToken(); err == nil {
+				token = fresh
+			}
+		}
+		codec := transport.DefaultCodec()
+		return n.doResume(ctx, sessionID, token, lastCtrlSeq, lastDataSeq, codec)
+	}
+}
+
+// doResume opens new ctrl (with resume first frame) and data streams.
+func (n *remoteNode) doResume(ctx context.Context, sessionID, token string, lastCtrlSeq, lastDataSeq uint64, codec *transport.FrameCodec) (io.ReadWriteCloser, io.ReadWriteCloser, uint64, error) {
+	resumeData, err := proto.Marshal(&pb.SessionResume{
+		SessionId:   sessionID,
+		Token:       token,
+		LastCtrlSeq: lastCtrlSeq,
+		LastDataSeq: lastDataSeq,
+	})
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("marshal SessionResume: %w", err)
+	}
+
+	ctrlStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "resume",
+		Data:      resumeData,
+	})
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("open resume ctrl stream: %w", err)
+	}
+
+	respFrame, err := codec.ReadFrame(ctrlStream)
+	if err != nil {
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("read resume response: %w", err)
+	}
+	switch respFrame.Kind {
+	case "opened":
+		// OK
+	case "error":
+		var se pb.SessionError
+		proto.Unmarshal(respFrame.Data, &se)
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("session resume rejected: %s: %s", se.Code, se.Message)
+	default:
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("unexpected resume response kind: %s", respFrame.Kind)
+	}
+
+	var opened pb.SessionOpened
+	if err := proto.Unmarshal(respFrame.Data, &opened); err != nil {
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("unmarshal SessionOpened: %w", err)
+	}
+
+	dataData, err := proto.Marshal(&pb.SessionData{SessionId: sessionID})
+	if err != nil {
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("marshal SessionData: %w", err)
+	}
+	dataStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "data",
+		Data:      dataData,
+	})
+	if err != nil {
+		ctrlStream.Close()
+		return nil, nil, 0, fmt.Errorf("open resume data stream: %w", err)
+	}
+
+	return ctrlStream, dataStream, opened.LastDataSeq, nil
 }
 
 // ---------- Control ----------

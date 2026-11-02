@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"io"
 )
 
 // SessionRequest mirrors tai/types.SessionRequest — same name, same fields.
@@ -62,9 +63,11 @@ type OpenSessionRequest struct {
 // Unlike OpenSessionRequest, it does not carry NodeID (the RemoteNode
 // already knows its own node ID).
 type SessionOpenRequest struct {
-	SessionID string
-	Token     string
-	Request   *SessionRequest
+	SessionID  string
+	Token      string
+	Request    *SessionRequest
+	OnEvent    OnSessionEventFunc     // lifecycle event callback (disconnect/resume/gap)
+	IssueToken func() (string, error) // issues a new OperationToken for refresh; nil disables auto-refresh
 }
 
 // ResumeSessionRequest carries the parameters for resuming a session
@@ -75,6 +78,7 @@ type ResumeSessionRequest struct {
 	Token       string
 	LastCtrlSeq uint64
 	LastDataSeq uint64
+	OnEvent     OnSessionEventFunc // lifecycle event callback (disconnect/resume/gap)
 }
 
 // Session represents an active agent session on a Tai node.
@@ -116,11 +120,32 @@ type SessionMsg struct {
 type SessionStatus string
 
 const (
-	SessionOpening SessionStatus = "opening"
-	SessionRunning SessionStatus = "running"
-	SessionClosing SessionStatus = "closing"
-	SessionClosed  SessionStatus = "closed"
+	SessionOpening      SessionStatus = "opening"
+	SessionRunning      SessionStatus = "running"
+	SessionDisconnected SessionStatus = "disconnected" // ctrl or data lost; resume in progress
+	SessionClosing      SessionStatus = "closing"
+	SessionClosed       SessionStatus = "closed"
 )
+
+// ResumeFunc opens new ctrl and data streams for session resume.
+// Called by Session when ctrl or data stream breaks. The implementation
+// (provided by node) sends a resume first frame, reads the opened response,
+// and opens a new data stream.
+// Returns the new streams and the server's last buffered data seq.
+type ResumeFunc func(ctx context.Context, lastCtrlSeq, lastDataSeq uint64) (ctrl, data io.ReadWriteCloser, serverLastDataSeq uint64, err error)
+
+// SessionEventKind identifies lifecycle events reported to OnSessionEvent.
+type SessionEventKind string
+
+const (
+	EventDisconnected SessionEventKind = "disconnected" // ctrl or data stream lost
+	EventResumed      SessionEventKind = "resumed"      // session resumed after disconnect
+	EventRecoveryGap  SessionEventKind = "recovery_gap" // server buffer overflow, needs full re-open
+	EventResumeError  SessionEventKind = "resume_error" // resume attempt failed
+)
+
+// OnSessionEventFunc is called for session lifecycle events.
+type OnSessionEventFunc func(sessionID string, event SessionEventKind)
 
 // RealtimeConfig is a placeholder for Realtime extension configuration.
 type RealtimeConfig struct{}

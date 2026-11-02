@@ -208,14 +208,23 @@ func (t *Server) closeTCP(ctx context.Context) error {
 	m.mu.Unlock()
 
 	m.ln.Close()
+	m.h2Ln.Close()
 	for _, c := range owned {
 		c.Close()
 	}
-	err := m.h2Server.Shutdown(ctx)
+	// Shutdown waits for active request handlers (e.g. long-lived H2 control
+	// streams) to return. Use a bounded context so it cannot block forever
+	// when the caller passes context.Background().
+	shutdownCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		shutdownCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+	err := m.h2Server.Shutdown(shutdownCtx)
 	if err != nil {
 		m.h2Server.Close()
 	}
-	m.h2Ln.Close()
 	m.wg.Wait()
 	<-m.h2Done
 	return err

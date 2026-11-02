@@ -57,9 +57,10 @@ message SessionResume {
 
 // SessionOpened is Tai's acknowledgment that a session is ready.
 message SessionOpened {
-  string session_id = 1;
-  string runtime    = 2; // Actual runtime used (e.g. "agent")
-  string isolation  = 3; // Actual isolation (e.g. "host", "container")
+  string session_id    = 1;
+  string runtime       = 2; // Actual runtime used (e.g. "agent")
+  string isolation     = 3; // Actual isolation (e.g. "host", "container")
+  uint64 last_data_seq = 4; // Recovery: last data stream seq buffered (0 on fresh open)
 }
 
 // SessionClosed is Tai's report that a session has ended.

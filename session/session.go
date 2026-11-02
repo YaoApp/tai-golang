@@ -26,21 +26,35 @@ type Session struct {
 	data    io.ReadWriteCloser
 	codec   *transport.FrameCodec
 	ctrlSeq atomic.Uint64
+	dataSeq atomic.Uint64 // tracks last received data stream seq
 
 	// ctrl stream reads are split: handshake frames (opened/closed/error) are
 	// consumed by Open, business frames go to the actions channel.
 	actions chan *types.SessionMsg
 
-	mu       sync.Mutex // protects closed flag
+	mu       sync.Mutex // protects closed, disconnected, ctrl, data
 	writeMu  sync.Mutex // serializes ctrl stream writes (WriteFrame is not atomic)
 	closed   bool
 	done     chan struct{} // signals remote confirmed closure
 	doneOnce sync.Once
+
+	// Resume support
+	resumeFn   types.ResumeFunc         // opens new streams (nil = resume disabled)
+	onEvent    types.OnSessionEventFunc // lifecycle event callback (may be nil)
+	buffer     *recvBuffer              // received events for seq verification
+	resuming   atomic.Bool              // true while resume is in progress
+	resumeDone chan struct{}            // closed when resume completes or fails
+}
+
+// Options configures optional Session behavior.
+type Options struct {
+	ResumeFn types.ResumeFunc         // enables automatic resume on disconnect
+	OnEvent  types.OnSessionEventFunc // lifecycle event callback
 }
 
 // New creates a Session with ctrl and data streams already established.
 // Starts the background ctrl read loop.
-func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.FrameCodec) *Session {
+func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.FrameCodec, opts ...Options) *Session {
 	s := &Session{
 		id:      id,
 		nodeID:  nodeID,
@@ -49,6 +63,11 @@ func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.Fram
 		codec:   codec,
 		actions: make(chan *types.SessionMsg, 16),
 		done:    make(chan struct{}),
+		buffer:  newRecvBuffer(defaultRecvBufferCapacity),
+	}
+	if len(opts) > 0 {
+		s.resumeFn = opts[0].ResumeFn
+		s.onEvent = opts[0].OnEvent
 	}
 	s.status.Store(types.SessionRunning)
 	go s.readCtrlLoop()
@@ -64,6 +83,11 @@ func (s *Session) NodeID() string { return s.nodeID }
 // Status returns the current lifecycle state.
 func (s *Session) Status() types.SessionStatus {
 	return s.status.Load().(types.SessionStatus)
+}
+
+// Done returns a channel that is closed when the session terminates.
+func (s *Session) Done() <-chan struct{} {
+	return s.done
 }
 
 // Prompt sends a user message to the agent.
@@ -138,20 +162,50 @@ func (s *Session) StopRealtime() error {
 
 // RecvEvent reads the next event from the data stream. Blocks.
 // Returns io.EOF when the session ends.
+// On stream error, triggers resume if configured; blocks until resume
+// completes then retries on the new data stream.
 func (s *Session) RecvEvent() (*types.SessionMsg, error) {
-	frame, err := s.codec.ReadFrame(s.data)
-	if err != nil {
-		return nil, err
+	for {
+		s.mu.Lock()
+		data := s.data
+		s.mu.Unlock()
+
+		frame, err := s.codec.ReadFrame(data)
+		if err != nil {
+			// Check if stream was replaced by a concurrent resume.
+			s.mu.Lock()
+			replaced := s.data != data
+			s.mu.Unlock()
+			if replaced {
+				continue
+			}
+			if s.tryResume() {
+				continue
+			}
+			return nil, err
+		}
+		// Handle error frames on data stream (e.g., recovery_gap).
+		if frame.Kind == "error" {
+			var se pb.SessionError
+			if proto.Unmarshal(frame.Data, &se) == nil && se.Code == "recovery_gap" {
+				s.notifyEvent(types.EventRecoveryGap)
+			}
+			s.markClosed()
+			return nil, fmt.Errorf("server error: %s", se.Code)
+		}
+
+		var msg pb.SessionMessage
+		if err := proto.Unmarshal(frame.Data, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal event: %w", err)
+		}
+		s.dataSeq.Store(msg.Seq)
+		s.buffer.Append(msg.Seq, msg.Kind, msg.Data)
+		return &types.SessionMsg{
+			Seq:  msg.Seq,
+			Kind: msg.Kind,
+			Data: msg.Data,
+		}, nil
 	}
-	var msg pb.SessionMessage
-	if err := proto.Unmarshal(frame.Data, &msg); err != nil {
-		return nil, fmt.Errorf("unmarshal event: %w", err)
-	}
-	return &types.SessionMsg{
-		Seq:  msg.Seq,
-		Kind: msg.Kind,
-		Data: msg.Data,
-	}, nil
 }
 
 // RecvAction reads the next action response from the ctrl stream. Blocks.
@@ -198,6 +252,7 @@ func (s *Session) Close(ctx context.Context) error {
 }
 
 // sendCtrl is the unified send logic for all ctrl stream commands.
+// If the session is disconnected and resuming, waits for resume to complete.
 func (s *Session) sendCtrl(kind string, payload any) error {
 	s.mu.Lock()
 	if s.closed {
@@ -205,6 +260,22 @@ func (s *Session) sendCtrl(kind string, payload any) error {
 		return types.ErrSessionClosed
 	}
 	s.mu.Unlock()
+
+	// Wait for any in-progress resume to finish before writing.
+	if s.resuming.Load() {
+		s.mu.Lock()
+		done := s.resumeDone
+		s.mu.Unlock()
+		if done != nil {
+			<-done
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return types.ErrSessionClosed
+		}
+		s.mu.Unlock()
+	}
 
 	var data []byte
 	if payload != nil {
@@ -225,11 +296,12 @@ func (s *Session) sendCtrl(kind string, payload any) error {
 		return err
 	}
 
-	// Serialize writes: WriteFrame does 4-byte header + body in two calls;
-	// concurrent writes without the lock can interleave and corrupt frames.
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	return s.codec.WriteFrame(s.ctrl, &pb.Payload{
+	s.mu.Lock()
+	ctrl := s.ctrl
+	s.mu.Unlock()
+	return s.codec.WriteFrame(ctrl, &pb.Payload{
 		Namespace: types.NamespaceSession,
 		Kind:      "message",
 		Data:      msgData,
@@ -238,11 +310,27 @@ func (s *Session) sendCtrl(kind string, payload any) error {
 
 // readCtrlLoop runs in a background goroutine. Reads ctrl stream frames,
 // dispatches handshake frames (closed/error) and business frames (actions).
+// On stream error, triggers resume; on successful resume, continues reading
+// from the new ctrl stream.
 func (s *Session) readCtrlLoop() {
 	defer close(s.actions)
 	for {
-		frame, err := s.codec.ReadFrame(s.ctrl)
+		s.mu.Lock()
+		ctrl := s.ctrl
+		s.mu.Unlock()
+
+		frame, err := s.codec.ReadFrame(ctrl)
 		if err != nil {
+			// Check if stream was replaced by a concurrent resume.
+			s.mu.Lock()
+			replaced := s.ctrl != ctrl
+			s.mu.Unlock()
+			if replaced {
+				continue
+			}
+			if s.tryResume() {
+				continue
+			}
 			s.markClosed()
 			return
 		}
@@ -252,6 +340,10 @@ func (s *Session) readCtrlLoop() {
 			s.markClosed()
 			return
 		case "error":
+			var se pb.SessionError
+			if proto.Unmarshal(frame.Data, &se) == nil && se.Code == "recovery_gap" {
+				s.notifyEvent(types.EventRecoveryGap)
+			}
 			s.markClosed()
 			return
 		}
@@ -284,6 +376,78 @@ func (s *Session) waitDisposition() (types.Disposition, error) {
 		return "", err
 	}
 	return resp.Disposition, nil
+}
+
+// tryResume attempts to resume the session after a stream breaks.
+// Returns true if resume succeeded and the caller should retry on new streams.
+// Returns false if resume is not configured, already closed, or resume failed.
+// Only one goroutine performs the actual resume; others wait.
+func (s *Session) tryResume() bool {
+	if s.resumeFn == nil {
+		return false
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	s.mu.Unlock()
+
+	// Only the first goroutine to detect disconnect performs the resume.
+	if s.resuming.CompareAndSwap(false, true) {
+		done := make(chan struct{})
+		s.mu.Lock()
+		s.resumeDone = done
+		s.mu.Unlock()
+
+		s.status.Store(types.SessionDisconnected)
+		s.notifyEvent(types.EventDisconnected)
+
+		lastCtrl := s.ctrlSeq.Load()
+		lastData := s.dataSeq.Load()
+		newCtrl, newData, _, err := s.resumeFn(context.Background(), lastCtrl, lastData)
+		if err != nil {
+			s.notifyEvent(types.EventResumeError)
+			s.resuming.Store(false)
+			close(done)
+			return false
+		}
+
+		// Replace streams — close old ones after unlocking.
+		s.mu.Lock()
+		oldCtrl := s.ctrl
+		oldData := s.data
+		s.ctrl = newCtrl
+		s.data = newData
+		s.mu.Unlock()
+		oldCtrl.Close()
+		oldData.Close()
+
+		s.status.Store(types.SessionRunning)
+		s.notifyEvent(types.EventResumed)
+		s.resuming.Store(false)
+		close(done)
+		return true
+	}
+
+	// Another goroutine is already resuming — wait for it.
+	s.mu.Lock()
+	done := s.resumeDone
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	s.mu.Lock()
+	ok := !s.closed
+	s.mu.Unlock()
+	return ok
+}
+
+// notifyEvent calls the OnSessionEvent callback if configured.
+func (s *Session) notifyEvent(event types.SessionEventKind) {
+	if s.onEvent != nil {
+		s.onEvent(s.id, event)
+	}
 }
 
 // markClosed transitions to closed state and signals done.

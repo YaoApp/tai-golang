@@ -334,8 +334,9 @@ func (x *SessionResume) GetLastDataSeq() uint64 {
 type SessionOpened struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`     // Actual runtime used (e.g. "agent")
-	Isolation     string                 `protobuf:"bytes,3,opt,name=isolation,proto3" json:"isolation,omitempty"` // Actual isolation (e.g. "host", "container")
+	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`                               // Actual runtime used (e.g. "agent")
+	Isolation     string                 `protobuf:"bytes,3,opt,name=isolation,proto3" json:"isolation,omitempty"`                           // Actual isolation (e.g. "host", "container")
+	LastDataSeq   uint64                 `protobuf:"varint,4,opt,name=last_data_seq,json=lastDataSeq,proto3" json:"last_data_seq,omitempty"` // Recovery: last data stream seq buffered (0 on fresh open)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -389,6 +390,13 @@ func (x *SessionOpened) GetIsolation() string {
 		return x.Isolation
 	}
 	return ""
+}
+
+func (x *SessionOpened) GetLastDataSeq() uint64 {
+	if x != nil {
+		return x.LastDataSeq
+	}
+	return 0
 }
 
 // SessionClosed is Tai's report that a session has ended.
@@ -842,12 +850,13 @@ const file_session_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\"\n" +
 	"\rlast_ctrl_seq\x18\x03 \x01(\x04R\vlastCtrlSeq\x12\"\n" +
-	"\rlast_data_seq\x18\x04 \x01(\x04R\vlastDataSeq\"f\n" +
+	"\rlast_data_seq\x18\x04 \x01(\x04R\vlastDataSeq\"\x8a\x01\n" +
 	"\rSessionOpened\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x1c\n" +
-	"\tisolation\x18\x03 \x01(\tR\tisolation\"c\n" +
+	"\tisolation\x18\x03 \x01(\tR\tisolation\x12\"\n" +
+	"\rlast_data_seq\x18\x04 \x01(\x04R\vlastDataSeq\"c\n" +
 	"\rSessionClosed\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +

@@ -144,6 +144,8 @@ func (sh *SessionHandler) HandleStream(stream *MockLightStream) {
 	switch stream.FirstFrame.Kind {
 	case "open":
 		sh.handleOpen(stream)
+	case "resume":
+		sh.handleResume(stream)
 	case "data":
 		sh.handleData(stream)
 	default:
@@ -189,6 +191,55 @@ func (sh *SessionHandler) handleOpen(ctrl *MockLightStream) {
 	if sh.onOpen != nil {
 		sh.onOpen(ms)
 	}
+}
+
+func (sh *SessionHandler) handleResume(ctrl *MockLightStream) {
+	var resume pb.SessionResume
+	if err := proto.Unmarshal(ctrl.FirstFrame.Data, &resume); err != nil {
+		ctrl.Close()
+		return
+	}
+
+	sh.mu.Lock()
+	ms, ok := sh.sessions[resume.SessionId]
+	sh.mu.Unlock()
+	if !ok {
+		errData, _ := proto.Marshal(&pb.SessionError{
+			SessionId: resume.SessionId,
+			Code:      "session_not_found",
+			Message:   "session not found",
+		})
+		sh.codec.WriteFrame(ctrl, &pb.Payload{
+			Namespace: types.NamespaceSession,
+			Kind:      "error",
+			Data:      errData,
+		})
+		ctrl.Close()
+		return
+	}
+
+	// Replace ctrl stream.
+	ms.mu.Lock()
+	oldCtrl := ms.ctrl
+	ms.ctrl = ctrl
+	ms.mu.Unlock()
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
+
+	// Send opened with lastDataSeq (use current dataSeq as buffer position).
+	ms.mu.Lock()
+	lastSeq := ms.dataSeq
+	ms.mu.Unlock()
+	openedData, _ := proto.Marshal(&pb.SessionOpened{
+		SessionId:   resume.SessionId,
+		LastDataSeq: lastSeq,
+	})
+	sh.codec.WriteFrame(ctrl, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "opened",
+		Data:      openedData,
+	})
 }
 
 func (sh *SessionHandler) handleData(dataStream *MockLightStream) {
