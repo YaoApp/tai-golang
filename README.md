@@ -6,9 +6,9 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 ## Status
 
-**Full chain working end-to-end** — Transport (L0–L2), Light/Heavy pool, Workspace CRUD + branch + file operations, Session 17-method interface, ACP event stream, dual-stream architecture, and the Demo App with React frontend are all working.
+**Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
 
-Not yet implemented: OperationToken validation in session handshake, Server Tools, Tunnel, Reconnection, Realtime.
+Not yet implemented: Server Tools, Tunnel, Realtime, Transport-level reconnection.
 
 ## Install
 
@@ -135,6 +135,15 @@ w, _ := bfs.Create("hello.txt")
 w.Write([]byte("Hello, World!"))
 w.Close()
 
+// Check existence
+exists, _ := bfs.Exists("hello.txt")
+
+// Archive extraction (auto-detects gzip/zip)
+bfs.WriteArchive(".skills/my-skill", archiveReader)
+
+// Read manifest
+manifest, _ := bfs.ReadManifest(".skills/my-skill")
+
 // Commit changes
 branch.Commit(ctx, "initial commit")
 ```
@@ -158,8 +167,8 @@ The SDK embeds into your application as a library — no separate process. Tai n
 
 ```
 server.go             Server + Session interfaces, NewServer, OpenSession
-session/              Session implementation (17 methods, dual-stream)
-workspace/            Remote workspace API (fs.FS + write, branch, history, watch)
+session/              Session implementation (17 methods, dual-stream, recovery buffer)
+workspace/            Remote workspace API (fs.FS + write, branch, history, watch, context, skills)
 node/                 Node registry and RemoteNode implementation
 types/                Shared types (Session, Workspace, Event, Permission, etc.)
 auth/                 AuthProvider interface + DefaultAuth (Ed25519 JWT)
@@ -194,19 +203,21 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 
 - **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
 - **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
-- **Session (17 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime (stub), StopRealtime (stub), Close, ID, NodeID, Status
-- **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions), commit/rollback, history query, GC, watch — 34 transport command kinds
-- **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken (issue/sign)
+- **Session (17 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime (stub), StopRealtime (stub), Close, ID, NodeID, Status, Done
+- **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal
+- **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions + Exists/WriteArchive/ReadManifest), commit/rollback, history query, GC, watch — 36 transport command kinds
+- **Context API**: Four-level scope model (bot → home → board → session), SeedContext, ReadContext, MergeContext
+- **Skills API**: SkillPack, SkillHash, SyncSkills with manifest-based incremental sync
+- **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken (issue/sign/validate)
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
 - **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
 - **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
-- **Test Infrastructure**: MockNode, MockLLM, MockSession, MockLightConn/Stream, 216 test functions
+- **Test Infrastructure**: MockNode, MockLLM, MockSession, MockLightConn/Stream, 280+ test functions
 
 ## Not Yet Implemented
 
-- OperationToken validation in session handshake
 - Server Tools (RegisterTool / tai call)
-- Reconnection (recovery buffer + seq replay)
+- Transport-level reconnection (connection-level retry + exponential backoff)
 - Tunnel
 - Realtime (voice)
 - Container remote management
