@@ -6,16 +6,19 @@ import (
 	"io/fs"
 )
 
-// WorkspaceFS extends fs.FS with write operations and Watch.
+// WorkspaceFS extends fs.FS with write operations, Watch, and archive utilities.
 type WorkspaceFS interface {
-	fs.FS                                         // Open / Stat / ReadDir
-	Create(name string) (io.WriteCloser, error)   // create or overwrite a file
-	Remove(name string) error                     // delete a file
-	RemoveAll(name string) error                  // recursive delete
-	Rename(oldname, newname string) error         // rename / move
-	MkdirAll(name string, perm fs.FileMode) error // create directory tree
-	Symlink(oldname, newname string) error        // symbolic link
-	Watch(patterns []string) (Watcher, error)     // file change notifications
+	fs.FS                                               // Open / Stat / ReadDir
+	Create(name string) (io.WriteCloser, error)         // create or overwrite a file
+	Remove(name string) error                           // delete a file
+	RemoveAll(name string) error                        // recursive delete
+	Rename(oldname, newname string) error               // rename / move
+	MkdirAll(name string, perm fs.FileMode) error       // create directory tree
+	Symlink(oldname, newname string) error              // symbolic link
+	Watch(patterns []string) (Watcher, error)           // file change notifications
+	Exists(name string) (bool, error)                   // check file/directory existence
+	WriteArchive(dir string, r io.Reader) error         // extract tar.gz/zip archive into dir
+	ReadManifest(dir string) (map[string]string, error) // read manifest.json hash map
 }
 
 // Watcher delivers file change events from the Tai side.

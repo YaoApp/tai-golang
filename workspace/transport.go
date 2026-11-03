@@ -82,11 +82,12 @@ func channelForMeta() ChannelType {
 
 // ---------- Command kinds (33 total) ----------
 
-// File operations (9)
+// File operations (10)
 const (
 	KindOpen      = "open"
 	KindCreate    = "create"
 	KindStat      = "stat"
+	KindExists    = "exists"
 	KindReadDir   = "read_dir"
 	KindRemove    = "remove"
 	KindRemoveAll = "remove_all"
@@ -128,6 +129,12 @@ const (
 	KindGetOrCreateBranch = "get_or_create_branch"
 	KindDeleteBranch      = "delete_branch"
 	KindMerge             = "merge"
+)
+
+// Archive + manifest (2)
+const (
+	KindWriteArchive = "write_archive"
+	KindReadManifest = "read_manifest"
 )
 
 // Long-lived (1)
@@ -215,6 +222,14 @@ type BranchMgmtRequest struct {
 	Into        string              `json:"into,omitempty"`
 	Meta        map[string]any      `json:"meta,omitempty"`
 	Opts        *types.MergeOptions `json:"opts,omitempty"`
+}
+
+// ArchiveRequest is the request for write_archive.
+type ArchiveRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Branch      string `json:"branch"`
+	Dir         string `json:"dir"`    // destination directory (e.g. ".skills/bots/postman")
+	Format      string `json:"format"` // "tar.gz" or "zip"
 }
 
 // WatchRequest is the request for watch.

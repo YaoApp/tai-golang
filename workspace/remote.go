@@ -47,6 +47,13 @@ func (rw *remoteWorkspace) Symlink(old, new string) error { return rw.fsImpl.Sym
 func (rw *remoteWorkspace) Watch(patterns []string) (types.Watcher, error) {
 	return rw.fsImpl.Watch(patterns)
 }
+func (rw *remoteWorkspace) Exists(name string) (bool, error) { return rw.fsImpl.Exists(name) }
+func (rw *remoteWorkspace) WriteArchive(dir string, r io.Reader) error {
+	return rw.fsImpl.WriteArchive(dir, r)
+}
+func (rw *remoteWorkspace) ReadManifest(dir string) (map[string]string, error) {
+	return rw.fsImpl.ReadManifest(dir)
+}
 
 // --- Workspace metadata ---
 
@@ -582,6 +589,113 @@ func (f *remoteBranchFS) Symlink(oldname, newname string) error {
 	return err
 }
 
+// Exists reports whether a file or directory exists at the given path.
+func (f *remoteBranchFS) Exists(name string) (bool, error) {
+	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: name}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return false, err
+	}
+	resp, err := roundTrip(context.Background(), f.nodeID, KindExists, data)
+	if err != nil {
+		return false, err
+	}
+	var result struct {
+		Exists bool `json:"exists"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return false, err
+	}
+	return result.Exists, nil
+}
+
+// WriteArchive streams an archive (tar.gz or zip) to the Tai side, which
+// extracts it into the given directory. The format is auto-detected from
+// the first bytes of r (0x1f 0x8b = gzip, 0x50 0x4b = zip).
+func (f *remoteBranchFS) WriteArchive(dir string, r io.Reader) error {
+	// Read first 2 bytes to detect format.
+	header := make([]byte, 2)
+	n, err := io.ReadFull(r, header)
+	if n == 0 {
+		if err != nil {
+			return fmt.Errorf("read archive header: %w", err)
+		}
+		return fmt.Errorf("read archive header: empty archive")
+	}
+	format := "tar.gz"
+	if n >= 2 && header[0] == 0x50 && header[1] == 0x4b {
+		format = "zip"
+	}
+
+	// Prepend the header bytes back.
+	combined := io.MultiReader(io.LimitReader(
+		&bytesReader{data: header[:n], pos: 0}, int64(n),
+	), r)
+
+	req := ArchiveRequest{WorkspaceID: f.wsID, Branch: f.branch, Dir: dir, Format: format}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	firstFrame := &pb.Payload{
+		Namespace: NamespaceWorkspace,
+		Kind:      KindWriteArchive,
+		Data:      data,
+	}
+	stream, err := transport.PkgOpenLightStream(context.Background(), f.nodeID, firstFrame)
+	if err != nil {
+		return fmt.Errorf("open write_archive stream: %w", err)
+	}
+
+	buf := make([]byte, 32*1024)
+	for {
+		nr, readErr := combined.Read(buf)
+		if nr > 0 {
+			if _, writeErr := stream.Write(buf[:nr]); writeErr != nil {
+				stream.Close()
+				return writeErr
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			stream.Close()
+			return readErr
+		}
+	}
+
+	if hc, ok := stream.(HalfCloser); ok {
+		if err := hc.CloseWrite(); err != nil {
+			stream.Close()
+			return err
+		}
+		_, err = ReadResponse(stream, KindWriteArchive)
+		stream.Close()
+		return err
+	}
+	return stream.Close()
+}
+
+// ReadManifest reads the skills manifest from the given directory.
+// Returns a map of relative path → hash string.
+func (f *remoteBranchFS) ReadManifest(dir string) (map[string]string, error) {
+	req := FileRequest{WorkspaceID: f.wsID, Branch: f.branch, Path: dir}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := roundTrip(context.Background(), f.nodeID, KindReadManifest, data)
+	if err != nil {
+		return nil, err
+	}
+	var manifest map[string]string
+	if err := json.Unmarshal(resp, &manifest); err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
 func (f *remoteBranchFS) Watch(patterns []string) (types.Watcher, error) {
 	req := WatchRequest{WorkspaceID: f.wsID, Branch: f.branch, Patterns: patterns}
 	data, err := json.Marshal(req)
@@ -915,6 +1029,24 @@ func (h *remoteHistory) BranchLog(branch string, opts types.LogOptions) ([]types
 		return nil, err
 	}
 	return entries, nil
+}
+
+// ---------- bytesReader ----------
+
+// bytesReader is a minimal io.Reader over a byte slice, used to prepend
+// the auto-detected archive header bytes back into the combined reader.
+type bytesReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *bytesReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
 }
 
 // ---------- Payload write helper ----------

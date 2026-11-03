@@ -165,10 +165,33 @@ err := n.DeleteWorkspace(ctx, "workspace-id")
 | Interface | Description |
 |-----------|-------------|
 | `Workspace` | Top-level object: `WorkspaceFS` + branch management + history + GC |
-| `WorkspaceFS` | `fs.FS` + `Create` / `Remove` / `RemoveAll` / `Rename` / `MkdirAll` / `Symlink` / `Watch` |
+| `WorkspaceFS` | `fs.FS` + `Create` / `Remove` / `RemoveAll` / `Rename` / `MkdirAll` / `Symlink` / `Watch` / `Exists` / `WriteArchive` / `ReadManifest` |
 | `Branch` | Branch-scoped file operations (`FS()`) + version control (`Commit` / `Diff` / `Rollback`) |
 | `History` | Commit queries: `Query` / `FileHistory` / `BranchLog` |
 | `Watcher` | Real-time file change events via `Events()` channel |
+
+### WorkspaceFS Utility Methods
+
+These methods are part of the `WorkspaceFS` interface, available on any `Workspace` or `branch.FS()`:
+
+| Method | Description |
+|--------|-------------|
+| `ws.Exists(name)` | Check file/directory existence |
+| `ws.WriteArchive(dir, r)` | Write tar.gz/zip archive to directory (SDK auto-detects format) |
+| `ws.ReadManifest(dir)` | Read manifest.json hash map |
+
+### Context & Skills APIs (package-level)
+
+| Function | Description |
+|----------|-------------|
+| `ContextDir(scope, id)` | Get context directory path (`.context/{scope}/{id}`) |
+| `SeedContext(fsys, scope, id, files)` | Initialize context files (skip existing) |
+| `ReadContext(fsys, scope, id)` | Read standard context files (`*ContextFiles`) |
+| `MergeContext(fsys, entries)` | Concatenate multi-scope context as Markdown |
+| `SkillHash(r)` | Compute SHA-256 hash (`"sha256:<hex>"`) |
+| `SyncSkills(wsFS, packs)` | Incremental skill sync, returns `(pushed, error)` |
+
+See [Workspace API — Exists / WriteArchive / ReadManifest](workspace.md#exists--writearchive--readmanifest), [Context API](workspace.md#context-api), and [Skills API](workspace.md#skills-api) for details.
 
 `Open()` returns a file implementing `fs.File` + `io.ReadSeeker`. Consumer code is identical to a local `*os.File` — `Seek` records the offset without network calls; `Read` reopens the stream at the new offset only when needed. This enables `http.ServeContent` for Range requests out of the box. See [Workspace API — Open](workspace.md#open) for details.
 

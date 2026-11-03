@@ -369,7 +369,7 @@ Closes the workspace. Currently a no-op; reserved for future resource cleanup.
 
 ```go
 type WorkspaceFS interface {
-    fs.FS                                           // Open(name) (fs.File, error)
+    fs.FS                                                  // Open(name) (fs.File, error)
     Create(name string) (io.WriteCloser, error)
     Remove(name string) error
     RemoveAll(name string) error
@@ -377,6 +377,9 @@ type WorkspaceFS interface {
     MkdirAll(name string, perm fs.FileMode) error
     Symlink(oldname, newname string) error
     Watch(patterns []string) (Watcher, error)
+    Exists(name string) (bool, error)                      // check file/directory existence
+    WriteArchive(dir string, r io.Reader) error            // extract tar.gz/zip into dir
+    ReadManifest(dir string) (map[string]string, error)    // read manifest.json hash map
 }
 ```
 
@@ -588,6 +591,211 @@ for ev := range watcher.Events() {
     fmt.Printf("[%s] %s\n", ev.Type, ev.Path)
 }
 ```
+
+## Exists / WriteArchive / ReadManifest
+
+Three methods on the `WorkspaceFS` interface for file existence checks, archive bulk writes, and manifest queries. Available on any `WorkspaceFS` value, including `Workspace` itself and `branch.FS()`.
+
+### Exists
+
+```go
+Exists(name string) (bool, error)
+```
+
+Reports whether a file or directory exists at the given path.
+
+**Wire:** `exists` command (File operations group). Request payload: `FileRequest{workspace_id, branch, path}`. Response: `{"exists":true/false}`.
+
+```go
+ok, err := ws.Exists(".skills/my-skill")
+if err != nil { ... }
+if ok {
+    fmt.Println("skill already deployed")
+}
+```
+
+### WriteArchive
+
+```go
+WriteArchive(dir string, r io.Reader) error
+```
+
+Streams a tar.gz or zip archive to the Tai side, which extracts it into the target directory. The **SDK** auto-detects the format from the first two bytes of `r` (`0x1f 0x8b` = gzip, `0x50 0x4b` = zip) and sends the `format` field to Tai.
+
+When writing under `.skills/`, Tai automatically updates `.skills/manifest.json` with the SHA-256 hash of the archive.
+
+**Wire:** `write_archive` command. Request payload: `ArchiveRequest{workspace_id, branch, dir, format}`. Body is streamed over the Light stream.
+
+**ArchiveRequest (wire type):**
+
+```go
+type ArchiveRequest struct {
+    WorkspaceID string `json:"workspace_id"`
+    Branch      string `json:"branch"`
+    Dir         string `json:"dir"`    // destination directory, e.g. ".skills/bots/postman"
+    Format      string `json:"format"` // "tar.gz" or "zip" (auto-detected by SDK)
+}
+```
+
+**Security:**
+- Path traversal guard: `filepath.Clean(target)` must stay within the branch directory
+- Zip-slip guard: extracted file paths must not escape the destination directory
+
+```go
+archive, _ := os.Open("skills-pack.tar.gz")
+defer archive.Close()
+
+err := ws.WriteArchive(".skills/code-review", archive)
+```
+
+### ReadManifest
+
+```go
+ReadManifest(dir string) (map[string]string, error)
+```
+
+Reads the `manifest.json` under the given directory. Returns `map[relPath]hash` for SDK-side `SyncSkills` incremental comparison. Returns an empty map (not an error) when no manifest file exists on the Tai side.
+
+**Wire:** `read_manifest` command. Request payload: `FileRequest{workspace_id, branch, path}`. Response: JSON `map[string]string`.
+
+```go
+manifest, err := ws.ReadManifest(".skills")
+if err != nil { ... }
+for name, hash := range manifest {
+    fmt.Printf("skill=%s hash=%s\n", name, hash)
+}
+```
+
+## Context API
+
+Four-level context scope model for managing hierarchical Agent Instructions composition.
+
+### Data Model
+
+```go
+type ContextScope string
+
+const (
+    ScopeBot     ContextScope = "bot"     // runtime instance defaults
+    ScopeHome    ContextScope = "home"    // user-level preferences
+    ScopeBoard   ContextScope = "board"   // board/project shared context
+    ScopeSession ContextScope = "session" // single session context
+)
+
+type ContextEntry struct {
+    Scope ContextScope
+    ID    string // e.g. botID, userID, boardID, sessionID
+}
+
+type ContextFiles struct {
+    Instruction []byte // INSTRUCTION.md content (nil if absent)
+    Memory      []byte // MEMORY.md content (nil if absent)
+    Preference  []byte // PREFERENCE.md content (nil if absent)
+}
+```
+
+Each scope stores exactly 3 files (`INSTRUCTION.md`, `MEMORY.md`, `PREFERENCE.md`) under `.context/{scope}/{id}/`.
+
+`ContextFiles` provides two methods:
+- `Empty() bool` — whether all three fields are nil
+- `FormatSection(label string) string` — formats non-nil files as a Markdown section (`## label` with each file as `### filename`)
+
+### ContextDir
+
+```go
+func ContextDir(scope ContextScope, id string) string
+```
+
+Returns the context directory path: `.context/{scope}/{id}`.
+
+### SeedContext
+
+```go
+func SeedContext(fsys types.WorkspaceFS, scope ContextScope, id string, files map[string][]byte) error
+```
+
+Initializes context files for a given scope. Creates the directory and writes each file, **skipping files that already exist** (designed for seeding bot defaults on first run without overwriting files the agent may have updated).
+
+```go
+err := workspace.SeedContext(bfs, workspace.ScopeBot, "default", map[string][]byte{
+    "INSTRUCTION.md": []byte("You are a helpful assistant."),
+    "MEMORY.md":      []byte(""),
+    "PREFERENCE.md":  []byte("Be concise and direct."),
+})
+```
+
+### ReadContext
+
+```go
+func ReadContext(fsys fs.FS, scope ContextScope, id string) (*ContextFiles, error)
+```
+
+Reads the 3 standard files from a scope directory. Missing files result in nil fields (not errors). Accepts `fs.FS` (not `WorkspaceFS`), so any `WorkspaceFS` value (which satisfies `fs.FS`) can be passed directly.
+
+### MergeContext
+
+```go
+func MergeContext(fsys fs.FS, entries []ContextEntry) (string, error)
+```
+
+Reads multiple scope directories in order and **concatenates** them into a single Markdown string. Entries are ordered from lowest to highest priority (typically bot → home → board → session). Each non-empty scope produces a `## scope/id` section. Empty scopes (all three files absent) are skipped.
+
+```go
+merged, err := workspace.MergeContext(bfs, []workspace.ContextEntry{
+    {Scope: workspace.ScopeBot, ID: "default"},
+    {Scope: workspace.ScopeHome, ID: "user-123"},
+    {Scope: workspace.ScopeBoard, ID: "project-abc"},
+    {Scope: workspace.ScopeSession, ID: "sess-xyz"},
+})
+// merged can be set as metadata["_agents_md"]
+```
+
+## Skills API
+
+Manifest-based incremental skill synchronization.
+
+### SkillPack
+
+```go
+type SkillPack struct {
+    Key     string    // manifest key, e.g. "bots/postman", "home", "board/dashboard-x"
+    Hash    string    // pre-computed hash via SkillHash ("sha256:hex...")
+    Archive io.Reader // tar.gz or zip archive; only read when hash differs
+}
+```
+
+Callers should compute the hash with `SkillHash` before constructing `SkillPack` to avoid consuming the `Archive` Reader twice.
+
+### SkillHash
+
+```go
+func SkillHash(r io.Reader) (string, error)
+```
+
+Computes the SHA-256 hash of a skill archive. Returns `"sha256:<hex>"`, matching the format used by Tai's `handleWriteArchive` for manifest comparison.
+
+### SyncSkills
+
+```go
+func SyncSkills(fsys types.WorkspaceFS, packs []SkillPack) (int, error)
+```
+
+Incrementally syncs skills to the `.skills/` directory. Returns the number of packs actually pushed:
+1. `ReadManifest(".skills")` fetches the remote hash map
+2. Compares each `pack.Hash` against `manifest[pack.Key]`
+3. Matching hash → skip; different → `RemoveAll` old content → `WriteArchive` new archive
+4. Returns `(pushed, nil)`
+
+```go
+packs := []workspace.SkillPack{
+    {Key: "bots/postman", Hash: postmanHash, Archive: postmanArchive},
+    {Key: "home",         Hash: homeHash,    Archive: homeArchive},
+}
+pushed, err := workspace.SyncSkills(ws, packs)
+fmt.Printf("pushed %d skills\n", pushed)
+```
+
+> **Note:** SyncSkills integration tests require a live transport connection and are deferred to the demo app phase. Only `SkillHash` unit tests exist currently.
 
 ## Branch Interface
 
@@ -916,15 +1124,16 @@ type RegistryEntry struct {
 
 All commands use the `"workspace"` namespace. Frame format: **4-byte big-endian length prefix + Protobuf `Payload`**. Responses use `<kind>.result` suffix; errors use `"error"` kind.
 
-### 33 Command Kinds
+### 36 Command Kinds
 
-**File operations (9):**
+**File operations (10):**
 
 | Kind | Wire Request Type | Description |
 |------|-------------------|-------------|
 | `open` | `FileRequest` | Open file for reading |
 | `create` | `FileRequest` | Create/overwrite file |
 | `stat` | `FileRequest` | File metadata |
+| `exists` | `FileRequest` | Check file/directory existence |
 | `read_dir` | `FileRequest` | List directory |
 | `remove` | `FileRequest` | Delete file |
 | `remove_all` | `FileRequest` | Recursive delete |
@@ -969,6 +1178,13 @@ All commands use the `"workspace"` namespace. Frame format: **4-byte big-endian 
 | `get_or_create_branch` | `BranchMgmtRequest` | Get or create branch |
 | `delete_branch` | `BranchMgmtRequest` | Delete branch |
 | `merge` | `BranchMgmtRequest` | Merge branches |
+
+**Archives + Manifest (2):**
+
+| Kind | Wire Request Type | Description |
+|------|-------------------|-------------|
+| `write_archive` | `ArchiveRequest` | Write tar.gz/zip archive to directory |
+| `read_manifest` | `FileRequest` | Read manifest.json hash map |
 
 **Long-lived (1):**
 
@@ -1048,6 +1264,12 @@ type WatchRequest struct {
     WorkspaceID string   `json:"workspace_id"`
     Branch      string   `json:"branch"`
     Patterns    []string `json:"patterns"`
+}
+
+type ArchiveRequest struct {
+    WorkspaceID string `json:"workspace_id"`
+    Branch      string `json:"branch"`
+    Dir         string `json:"dir"`
 }
 ```
 
