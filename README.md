@@ -8,7 +8,7 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 **Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
 
-Not yet implemented: Server Tools, Tunnel, Realtime, Transport-level reconnection.
+Not yet implemented: Server Tools, Tunnel, Realtime.
 
 ## Install
 
@@ -217,7 +217,6 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 ## Not Yet Implemented
 
 - Server Tools (RegisterTool / tai call)
-- Transport-level reconnection (connection-level retry + exponential backoff)
 - Tunnel
 - Realtime (voice)
 - Container remote management
