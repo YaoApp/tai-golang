@@ -485,7 +485,7 @@ func TestSessionStartStopRealtime(t *testing.T) {
 
 	s := New("sess-rt", "node-1", ctrl.stream, data.stream, codec)
 
-	if err := s.StartRealtime(&types.RealtimeConfig{}); err == nil {
+	if err := s.StartRealtime(&types.RealtimeRequest{}); err == nil {
 		t.Error("StartRealtime: expected error, got nil")
 	}
 	if err := s.StopRealtime(); err == nil {

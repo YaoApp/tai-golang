@@ -151,7 +151,12 @@ func (s *Session) UpdateSession(_ context.Context, opts *types.SessionUpdateOpti
 }
 
 // StartRealtime is a placeholder for the Realtime extension.
-func (s *Session) StartRealtime(_ *types.RealtimeConfig) error {
+func (s *Session) StartRealtime(_ *types.RealtimeRequest) error {
+	return fmt.Errorf("tai: realtime not implemented")
+}
+
+// UpdateRealtime is a placeholder for the Realtime extension.
+func (s *Session) UpdateRealtime(_ *types.RealtimeUpdateOptions) error {
 	return fmt.Errorf("tai: realtime not implemented")
 }
 

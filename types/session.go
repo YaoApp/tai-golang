@@ -103,7 +103,8 @@ type Session interface {
 	RecvEvent() (*SessionMsg, error)
 	RecvAction() (*SessionMsg, error)
 
-	StartRealtime(cfg *RealtimeConfig) error
+	StartRealtime(req *RealtimeRequest) error
+	UpdateRealtime(opts *RealtimeUpdateOptions) error
 	StopRealtime() error
 
 	Close(ctx context.Context) error
@@ -147,5 +148,70 @@ const (
 // OnSessionEventFunc is called for session lifecycle events.
 type OnSessionEventFunc func(sessionID string, event SessionEventKind)
 
-// RealtimeConfig is a placeholder for Realtime extension configuration.
-type RealtimeConfig struct{}
+// RealtimeRequest carries all parameters to start a Realtime session.
+// Primary must be a Realtime model (gpt-realtime-2.1 / qwen-omni-turbo / gemini-live).
+// Roles are optional and carry other-purpose models (light for summaries, heavy for reasoning, etc.).
+type RealtimeRequest struct {
+	Providers Providers     `json:"providers"`
+	Audio     *AudioConfig  `json:"audio,omitempty"`
+	Motion    *MotionConfig `json:"motion,omitempty"`
+	Video     *VideoConfig  `json:"video,omitempty"`
+}
+
+// RealtimeUpdateOptions are runtime configuration changes for a running Realtime session.
+// nil fields mean "no change". Providers cannot be changed at runtime (requires Stop + Start).
+type RealtimeUpdateOptions struct {
+	Audio  *AudioConfig  `json:"audio,omitempty"`
+	Motion *MotionConfig `json:"motion,omitempty"`
+	Video  *VideoConfig  `json:"video,omitempty"`
+}
+
+// AudioConfig configures audio input/output for a Realtime session.
+type AudioConfig struct {
+	InputFormat    string     `json:"input_format,omitempty"`
+	OutputFormat   string     `json:"output_format,omitempty"`
+	SampleRate     int        `json:"sample_rate,omitempty"`
+	Channels       int        `json:"channels,omitempty"`
+	VAD            *VADConfig `json:"vad,omitempty"`
+	Voice          string     `json:"voice,omitempty"`
+	NoiseReduction string     `json:"noise_reduction,omitempty"`
+}
+
+// VADConfig configures voice activity detection.
+type VADConfig struct {
+	Mode              string  `json:"mode,omitempty"`
+	Threshold         float64 `json:"threshold,omitempty"`
+	SilenceDurationMs int     `json:"silence_duration_ms,omitempty"`
+	PrefixPaddingMs   int     `json:"prefix_padding_ms,omitempty"`
+}
+
+// MotionConfig configures data-driven Avatar motion output.
+type MotionConfig struct {
+	Enabled bool   `json:"enabled"`
+	Profile string `json:"profile,omitempty"`
+	FPS     int    `json:"fps,omitempty"`
+}
+
+// VideoConfig configures video input and output.
+type VideoConfig struct {
+	Input  *VideoInputConfig  `json:"input,omitempty"`
+	Output *VideoOutputConfig `json:"output,omitempty"`
+}
+
+// VideoInputConfig configures user camera input.
+type VideoInputConfig struct {
+	Enabled   bool `json:"enabled"`
+	MaxFPS    int  `json:"max_fps,omitempty"`
+	MaxWidth  int  `json:"max_width,omitempty"`
+	MaxHeight int  `json:"max_height,omitempty"`
+}
+
+// VideoOutputConfig configures avatar/rendered video output.
+type VideoOutputConfig struct {
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode,omitempty"`
+	MaxFPS  int    `json:"max_fps,omitempty"`
+	Width   int    `json:"width,omitempty"`
+	Height  int    `json:"height,omitempty"`
+	Codec   string `json:"codec,omitempty"`
+}

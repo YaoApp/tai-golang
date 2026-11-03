@@ -39,25 +39,26 @@ import (
 
 // Re-export types from sub-packages for backward compatibility.
 type (
-	Node               = types.Node
-	NodeRuntime        = types.NodeRuntime
-	RemoteNode         = types.RemoteNode
-	AuthProvider       = types.AuthProvider
-	NodeInfo           = types.NodeInfo
-	TokenScope         = types.TokenScope
-	WellKnownResponse  = types.WellKnownResponse
-	TLSInfo            = types.TLSInfo
-	Session            = types.Session
-	SessionMsg         = types.SessionMsg
-	ControlMsg         = types.ControlMsg
-	OpenSessionRequest = types.OpenSessionRequest
-	SessionRequest     = types.SessionRequest
-	UserMessage        = types.UserMessage
-	ToolDefinition     = types.ToolDefinition
-	ToolHandler        = types.ToolHandler
-	TunnelProvider     = types.TunnelProvider
-	TunnelBindRequest  = types.TunnelBindRequest
-	RealtimeConfig     = types.RealtimeConfig
+	Node                  = types.Node
+	NodeRuntime           = types.NodeRuntime
+	RemoteNode            = types.RemoteNode
+	AuthProvider          = types.AuthProvider
+	NodeInfo              = types.NodeInfo
+	TokenScope            = types.TokenScope
+	WellKnownResponse     = types.WellKnownResponse
+	TLSInfo               = types.TLSInfo
+	Session               = types.Session
+	SessionMsg            = types.SessionMsg
+	ControlMsg            = types.ControlMsg
+	OpenSessionRequest    = types.OpenSessionRequest
+	SessionRequest        = types.SessionRequest
+	UserMessage           = types.UserMessage
+	ToolDefinition        = types.ToolDefinition
+	ToolHandler           = types.ToolHandler
+	TunnelProvider        = types.TunnelProvider
+	TunnelBindRequest     = types.TunnelBindRequest
+	RealtimeRequest       = types.RealtimeRequest
+	RealtimeUpdateOptions = types.RealtimeUpdateOptions
 )
 
 // Re-export constants.
