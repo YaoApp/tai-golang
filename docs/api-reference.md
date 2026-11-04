@@ -104,15 +104,28 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 | Method | Description |
 |--------|-------------|
 | `UpdateSession(ctx, opts)` | Update session configuration |
-| `StartRealtime(cfg)` | Start realtime mode (not implemented) |
-| `StopRealtime()` | Stop realtime mode (not implemented) |
+
+### Realtime
+
+| Method | Description |
+|--------|-------------|
+| `StartRealtime(req)` | Start realtime mode (voice interaction) |
+| `UpdateRealtime(opts)` | Update realtime config (voice, modality) |
+| `StopRealtime()` | Stop realtime mode |
+| `AudioAppend(data)` | Send PCM audio frames |
+| `AudioCommit()` | Commit audio buffer (manual VAD) |
+| `AudioClear()` | Clear audio buffer |
+| `AudioInterrupt()` | Interrupt model speech output |
+| `RecvAudio()` | Receive model speech audio frames (`<-chan *AudioFrame`) |
+
+See [Realtime Protocol](realtime.md) for wire-level event details.
 
 ### Receive
 
 | Method | Description |
 |--------|-------------|
 | `RecvEvent()` | Read next ACP event from data stream (blocks; underlying stream EOF on end) |
-| `RecvAction()` | Read next action from ctrl stream (permissions, disposition) |
+| `RecvAction()` | Read next action from ctrl stream (permissions, disposition, realtime ctrl events) |
 
 ## Auth
 

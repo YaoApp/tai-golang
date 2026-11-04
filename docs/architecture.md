@@ -51,7 +51,7 @@ Both ports are configurable via `ServerConfig.HTTPPort` and `ServerConfig.Transp
 
 Each session occupies two Light streams:
 
-- **ctrl stream**: Bidirectional, low-volume commands (prompt, cancel, permission requests)
+- **ctrl stream**: Bidirectional — commands (prompt, cancel, realtime.start) + server push events (realtime lifecycle, workspace_change)
 - **data stream**: Tai → SDK, high-volume ACP event stream
 
 Separation ensures urgent control messages (cancel, permission) are not blocked by large data frames.
@@ -67,5 +67,15 @@ OpenLightStream(data)    →    handleData → close(dataReady)
 sendCtrl(prompt)         →    handlePrompt → session.Prompt
                               agent turn → events
                          ←    event frames on data stream
+                         ←    ctrl push: realtime.started, workspace_change, ...
 sendCtrl(close)          →    handleClose → Destroy → sendClosed
 ```
+
+### Audio Stream (Realtime)
+
+When Realtime is active, a third bidirectional stream carries PCM audio:
+
+- **H3 (QUIC)**: Audio frames sent as QUIC datagrams (low latency)
+- **H2 (TCP)**: Separate Light stream opened after `realtime.started`
+
+See [Realtime Protocol](realtime.md) for details.

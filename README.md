@@ -108,6 +108,27 @@ for {
 }
 ```
 
+## Realtime (Voice)
+
+```go
+// Start realtime mode
+session.StartRealtime(&tai.RealtimeRequest{
+    Model: "gpt-4o-realtime-preview",
+})
+
+// Send audio + receive speech
+session.AudioAppend(pcmData)
+session.AudioCommit()
+
+go func() {
+    for frame := range session.RecvAudio() {
+        speaker.Play(frame.Data)
+    }
+}()
+
+session.StopRealtime()
+```
+
 ## Working with Workspaces
 
 ```go
@@ -190,6 +211,7 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 - [Workspace API](docs/workspace.md)
 - [Session Protocol](docs/session-protocol.md)
 - [ACP Events Reference](docs/events.md)
+- [Realtime Protocol](docs/realtime.md)
 - [Resource URI Convention](docs/uri.md)
 - [Demo App Guide](docs/demo-guide.md)
 

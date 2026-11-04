@@ -70,3 +70,40 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     Request:   &types.SessionRequest{Runtime: "agent"},
 })
 ```
+
+## Realtime (Voice)
+
+```go
+// Start realtime mode
+err := session.StartRealtime(&types.RealtimeRequest{
+    Model: "gpt-4o-realtime-preview",
+})
+
+// Send microphone audio
+session.AudioAppend(pcmData)
+session.AudioCommit() // manual VAD: signal end of speech
+
+// Receive model speech
+go func() {
+    for frame := range session.RecvAudio() {
+        speaker.Play(frame.Data) // PCM playback
+    }
+}()
+
+// Receive realtime events (ctrl stream)
+go func() {
+    for {
+        action, err := session.RecvAction()
+        if err != nil { break }
+        switch action.Kind {
+        case "realtime.task_start":
+            // agent started processing a task
+        case "audio.speech_started":
+            // model started speaking
+        }
+    }
+}()
+
+// Stop realtime
+session.StopRealtime()
+```
