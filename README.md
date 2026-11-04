@@ -6,9 +6,9 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 ## Status
 
-**Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
+**Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods + Realtime audio, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
 
-Not yet implemented: Server Tools, Tunnel, Realtime.
+Not yet implemented: Server Tools, Tunnel, Realtime Motion/Video.
 
 ## Install
 
@@ -203,7 +203,8 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 
 - **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
 - **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
-- **Session (17 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime (stub), StopRealtime (stub), Close, ID, NodeID, Status, Done
+- **Session (25 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, RecvAudio, RecvMotion (stub), SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
+- **Realtime Audio**: QUIC datagram (H3) + bidi stream fallback (H2), EncodeAudioFrame/DecodeAudioFrame, DatagramConn interface, H2 stale frame detection
 - **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal
 - **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions + Exists/WriteArchive/ReadManifest), commit/rollback, history query, GC, watch — 36 transport command kinds
 - **Context API**: Four-level scope model (bot → home → board → session), SeedContext, ReadContext, MergeContext
@@ -212,13 +213,13 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
 - **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
 - **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
-- **Test Infrastructure**: MockNode, MockLLM, MockSession, MockLightConn/Stream, 280+ test functions
+- **Test Infrastructure**: MockNode, MockLLM, MockSession (+ Realtime auto-reply), MockLightConn/Stream, 310+ test functions
 
 ## Not Yet Implemented
 
 - Server Tools (RegisterTool / tai call)
 - Tunnel
-- Realtime (voice)
+- Realtime Motion/Video (Plan 7)
 - Container remote management
 
 ## License

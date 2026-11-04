@@ -107,6 +107,20 @@ type Session interface {
 	UpdateRealtime(opts *RealtimeUpdateOptions) error
 	StopRealtime() error
 
+	// Audio I/O (requires active Realtime session)
+	AudioAppend(data []byte) error
+	AudioCommit() error
+	AudioClear() error
+	AudioInterrupt() error
+	RecvAudio() <-chan *AudioFrame
+
+	// Motion (data-driven Avatar; Plan 7)
+	RecvMotion() <-chan *MotionFrame
+
+	// Video (Plan 7)
+	SendVideoFrame(frame *VideoFrame) error
+	RecvVideoFrame() <-chan *VideoFrame
+
 	Close(ctx context.Context) error
 }
 
@@ -215,3 +229,16 @@ type VideoOutputConfig struct {
 	Height  int    `json:"height,omitempty"`
 	Codec   string `json:"codec,omitempty"`
 }
+
+// AudioFrame is a decoded audio datagram carrying PCM data and a sequence number
+// for loss detection and reordering.
+type AudioFrame struct {
+	Data []byte // PCM16 raw audio
+	Seq  uint32 // datagram sequence number
+}
+
+// MotionFrame carries data-driven Avatar blendshape data. (Plan 7 placeholder)
+type MotionFrame struct{}
+
+// VideoFrame carries a video frame. (Plan 7 placeholder)
+type VideoFrame struct{}

@@ -44,12 +44,28 @@ type Session struct {
 	buffer     *recvBuffer              // received events for seq verification
 	resuming   atomic.Bool              // true while resume is in progress
 	resumeDone chan struct{}            // closed when resume completes or fails
+
+	// Realtime state (protected by mu unless otherwise noted)
+	openStreamFn   OpenStreamFunc         // opens Light streams for H2 audio
+	dgConn         transport.DatagramConn // H3 datagram I/O; nil on H2
+	audioChannelID uint32
+	audioSeq       atomic.Uint32          // outbound datagram sequence counter
+	audioOut       chan *types.AudioFrame // downstream audio frames
+	audioCancel    context.CancelFunc     // cancels audio I/O goroutines
+	audioStream    io.ReadWriteCloser     // H2 audio bidi stream; nil on H3
+	audioWriteMu   sync.Mutex             // serializes H2 audio stream writes
 }
+
+// OpenStreamFunc opens a Light stream to a node. Used by H2 audio to open
+// the audio bidi stream. Defaults to transport.PkgOpenLightStream.
+type OpenStreamFunc func(ctx context.Context, nodeID string, firstFrame *pb.Payload) (io.ReadWriteCloser, error)
 
 // Options configures optional Session behavior.
 type Options struct {
-	ResumeFn types.ResumeFunc         // enables automatic resume on disconnect
-	OnEvent  types.OnSessionEventFunc // lifecycle event callback
+	ResumeFn     types.ResumeFunc         // enables automatic resume on disconnect
+	OnEvent      types.OnSessionEventFunc // lifecycle event callback
+	DatagramConn transport.DatagramConn   // QUIC datagram I/O for Realtime audio (nil on H2)
+	OpenStreamFn OpenStreamFunc           // opens Light streams; nil = transport.PkgOpenLightStream
 }
 
 // New creates a Session with ctrl and data streams already established.
@@ -68,6 +84,11 @@ func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.Fram
 	if len(opts) > 0 {
 		s.resumeFn = opts[0].ResumeFn
 		s.onEvent = opts[0].OnEvent
+		s.dgConn = opts[0].DatagramConn
+		s.openStreamFn = opts[0].OpenStreamFn
+	}
+	if s.openStreamFn == nil {
+		s.openStreamFn = transport.PkgOpenLightStream
 	}
 	s.status.Store(types.SessionRunning)
 	go s.readCtrlLoop()
@@ -150,19 +171,222 @@ func (s *Session) UpdateSession(_ context.Context, opts *types.SessionUpdateOpti
 	return s.sendCtrl("update_session", opts)
 }
 
-// StartRealtime is a placeholder for the Realtime extension.
-func (s *Session) StartRealtime(_ *types.RealtimeRequest) error {
-	return fmt.Errorf("tai: realtime not implemented")
+// StartRealtime upgrades the session to Realtime mode.
+// Sends "realtime.start" on the ctrl stream and blocks until Tai replies
+// with "realtime.started" carrying audio_channel_id and capabilities.
+// On H3 transports, a datagram receive goroutine is started immediately.
+// On H2 transports, an audio bidi stream is opened as fallback.
+func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
+	if req == nil {
+		return fmt.Errorf("StartRealtime: nil request")
+	}
+
+	s.mu.Lock()
+	if s.audioChannelID != 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("realtime already active")
+	}
+	s.mu.Unlock()
+
+	if err := s.sendCtrl("realtime.start", req); err != nil {
+		return fmt.Errorf("send realtime.start: %w", err)
+	}
+
+	// Block until Tai confirms with realtime.started.
+	msg, err := s.RecvAction()
+	if err != nil {
+		return fmt.Errorf("wait realtime.started: %w", err)
+	}
+	if msg.Kind != "realtime.started" {
+		return fmt.Errorf("expected realtime.started, got %q", msg.Kind)
+	}
+
+	var started struct {
+		Capabilities   json.RawMessage `json:"capabilities"`
+		AudioChannelID uint32          `json:"audio_channel_id"`
+	}
+	if err := json.Unmarshal(msg.Data, &started); err != nil {
+		return fmt.Errorf("parse realtime.started: %w", err)
+	}
+
+	audioOut := make(chan *types.AudioFrame, 64)
+	audioCtx, audioCancel := context.WithCancel(context.Background())
+
+	s.mu.Lock()
+	s.audioChannelID = started.AudioChannelID
+	s.audioOut = audioOut
+	s.audioCancel = audioCancel
+	s.mu.Unlock()
+
+	// Start audio I/O based on transport protocol.
+	if s.dgConn != nil && s.dgConn.Proto() == "H3" {
+		go s.recvAudioDatagram(audioCtx, started.AudioChannelID, audioOut)
+	} else {
+		if err := s.openAudioStreamH2(audioCtx, started.AudioChannelID, audioOut); err != nil {
+			audioCancel()
+			s.mu.Lock()
+			s.audioChannelID = 0
+			s.audioOut = nil
+			s.audioCancel = nil
+			s.mu.Unlock()
+			return fmt.Errorf("open audio stream: %w", err)
+		}
+	}
+
+	return nil
 }
 
-// UpdateRealtime is a placeholder for the Realtime extension.
-func (s *Session) UpdateRealtime(_ *types.RealtimeUpdateOptions) error {
-	return fmt.Errorf("tai: realtime not implemented")
+// UpdateRealtime applies runtime configuration changes to the active Realtime session.
+// The confirmation (realtime.updated) arrives asynchronously via RecvAction.
+func (s *Session) UpdateRealtime(opts *types.RealtimeUpdateOptions) error {
+	s.mu.Lock()
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if !active {
+		return fmt.Errorf("realtime not active")
+	}
+	return s.sendCtrl("realtime.update", opts)
 }
 
-// StopRealtime is a placeholder for the Realtime extension.
+// StopRealtime stops the active Realtime session.
+// Cancels audio I/O goroutines, closes H2 audio stream if present,
+// then notifies Tai via ctrl.
 func (s *Session) StopRealtime() error {
-	return fmt.Errorf("tai: realtime not implemented")
+	s.mu.Lock()
+	cancelFn := s.audioCancel
+	audioStream := s.audioStream
+	channelID := s.audioChannelID
+	if channelID == 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("realtime not active")
+	}
+	s.audioCancel = nil
+	s.audioStream = nil
+	s.audioChannelID = 0
+	s.audioOut = nil
+	s.audioSeq.Store(0)
+	s.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+	if audioStream != nil {
+		audioStream.Close()
+	}
+	// audioOut is closed by the audio I/O goroutine on exit (via defer),
+	// not here, to avoid a send-on-closed-channel panic.
+
+	return s.sendCtrl("realtime.stop", nil)
+}
+
+// AudioAppend sends PCM audio data to Tai.
+// On H3: encodes as a datagram frame and sends via QUIC datagram.
+// On H2: encodes and writes to the audio bidi stream.
+func (s *Session) AudioAppend(data []byte) error {
+	s.mu.Lock()
+	channelID := s.audioChannelID
+	audioStream := s.audioStream
+	s.mu.Unlock()
+
+	if channelID == 0 {
+		return fmt.Errorf("realtime not active")
+	}
+
+	seq := s.audioSeq.Add(1)
+	frame := transport.EncodeAudioFrame(channelID, seq, data)
+
+	if s.dgConn != nil && s.dgConn.Proto() == "H3" {
+		return s.dgConn.SendDatagram(frame)
+	}
+
+	// H2: write framed Payload to audio bidi stream.
+	if audioStream == nil {
+		return fmt.Errorf("audio stream not open")
+	}
+	s.audioWriteMu.Lock()
+	defer s.audioWriteMu.Unlock()
+	return s.codec.WriteFrame(audioStream, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "audio",
+		Data:      frame,
+	})
+}
+
+// AudioCommit commits the audio buffer (manual VAD mode).
+func (s *Session) AudioCommit() error {
+	s.mu.Lock()
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if !active {
+		return fmt.Errorf("realtime not active")
+	}
+	return s.sendCtrl("audio.commit", nil)
+}
+
+// AudioClear clears the audio buffer.
+func (s *Session) AudioClear() error {
+	s.mu.Lock()
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if !active {
+		return fmt.Errorf("realtime not active")
+	}
+	return s.sendCtrl("audio.clear", nil)
+}
+
+// AudioInterrupt interrupts the agent's current audio output.
+func (s *Session) AudioInterrupt() error {
+	s.mu.Lock()
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if !active {
+		return fmt.Errorf("realtime not active")
+	}
+	return s.sendCtrl("audio.interrupt", nil)
+}
+
+// RecvAudio returns a channel that delivers decoded audio frames from Tai.
+// Returns nil if Realtime is not active.
+func (s *Session) RecvAudio() <-chan *types.AudioFrame {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.audioOut
+}
+
+// recvAudioDatagram runs in a goroutine, receiving QUIC datagrams,
+// decoding audio frames, filtering by channelID, and pushing to audioOut.
+func (s *Session) recvAudioDatagram(ctx context.Context, channelID uint32, audioOut chan<- *types.AudioFrame) {
+	defer close(audioOut)
+	for {
+		data, err := s.dgConn.ReceiveDatagram(ctx)
+		if err != nil {
+			return
+		}
+		ch, seq, pcm, err := transport.DecodeAudioFrame(data)
+		if err != nil || ch != channelID {
+			continue
+		}
+		select {
+		case audioOut <- &types.AudioFrame{Data: pcm, Seq: seq}:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// RecvMotion is a placeholder for the motion extension (Plan 7).
+func (s *Session) RecvMotion() <-chan *types.MotionFrame {
+	return nil
+}
+
+// SendVideoFrame is a placeholder for the video extension (Plan 7).
+func (s *Session) SendVideoFrame(_ *types.VideoFrame) error {
+	return fmt.Errorf("tai: video not implemented")
+}
+
+// RecvVideoFrame is a placeholder for the video extension (Plan 7).
+func (s *Session) RecvVideoFrame() <-chan *types.VideoFrame {
+	return nil
 }
 
 // RecvEvent reads the next event from the data stream. Blocks.
@@ -234,7 +458,22 @@ func (s *Session) Close(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
+	// Cancel Realtime audio goroutines if active.
+	cancelFn := s.audioCancel
+	audioStream := s.audioStream
+	s.audioCancel = nil
+	s.audioStream = nil
+	s.audioChannelID = 0
+	s.audioOut = nil
+	s.audioSeq.Store(0)
 	s.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+	if audioStream != nil {
+		audioStream.Close()
+	}
 
 	// Send close before marking closed (sendCtrl checks the flag).
 	s.status.Store(types.SessionClosing)

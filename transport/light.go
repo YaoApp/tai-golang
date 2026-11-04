@@ -485,6 +485,34 @@ func (p *lightPool) setHeavyPool(hp *heavyPool) {
 // Length-prefixed protobuf helpers (reused by mock)
 // ---------------------------------------------------------------------------
 
+// DatagramConn returns the DatagramConn for the underlying Light connection.
+// On H3 connections, this provides real QUIC datagram send/receive.
+// On H2 connections, SendDatagram/ReceiveDatagram return ErrDatagramNotSupported.
+func (s *LightStream) DatagramConn() DatagramConn {
+	return s.conn
+}
+
+// SendDatagram sends a raw datagram on the WebTransport session (H3 only).
+func (lc *lightConn) SendDatagram(data []byte) error {
+	if lc.proto != "H3" || lc.session == nil {
+		return ErrDatagramNotSupported
+	}
+	return lc.session.SendDatagram(data)
+}
+
+// ReceiveDatagram receives a raw datagram from the WebTransport session (H3 only).
+func (lc *lightConn) ReceiveDatagram(ctx context.Context) ([]byte, error) {
+	if lc.proto != "H3" || lc.session == nil {
+		return nil, ErrDatagramNotSupported
+	}
+	return lc.session.ReceiveDatagram(ctx)
+}
+
+// Proto returns the transport protocol ("H3" or "H2").
+func (lc *lightConn) Proto() string {
+	return lc.proto
+}
+
 // NewLightStreamForTest creates a LightStream from raw io handles.
 // Intended for unit tests only.
 func NewLightStreamForTest(r io.ReadCloser, w io.WriteCloser) *LightStream {
@@ -492,5 +520,15 @@ func NewLightStreamForTest(r io.ReadCloser, w io.WriteCloser) *LightStream {
 		r:    r,
 		w:    w,
 		conn: &lightConn{},
+	}
+}
+
+// NewLightStreamForTestWithProto creates a LightStream with a specified protocol.
+// Intended for unit tests that need to control H3/H2 behavior.
+func NewLightStreamForTestWithProto(r io.ReadCloser, w io.WriteCloser, proto string) *LightStream {
+	return &LightStream{
+		r:    r,
+		w:    w,
+		conn: &lightConn{proto: proto},
 	}
 }

@@ -19,6 +19,7 @@ type MockSession struct {
 	Request *types.SessionRequest
 	ctrl    *MockLightStream
 	data    *MockLightStream
+	audio   *MockLightStream // H2 audio bidi stream (set by handleAudio)
 	codec   *transport.FrameCodec
 	dataSeq uint64
 	mu      sync.Mutex
@@ -113,6 +114,86 @@ func (ms *MockSession) Close() {
 	}
 }
 
+// SendAction writes a ctrl event frame (Payload{Kind:"event"}) to the ctrl stream.
+// This mirrors how Tai's runDataPump sends Realtime ctrl events
+// (e.g. "realtime.started", "realtime.updated", "audio.committed").
+func (ms *MockSession) SendAction(kind string, data any) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if ms.closed {
+		return fmt.Errorf("mock session closed")
+	}
+
+	var payload []byte
+	if data != nil {
+		var err error
+		payload, err = json.Marshal(data)
+		if err != nil {
+			return err
+		}
+	}
+
+	msgData, err := proto.Marshal(&pb.SessionMessage{
+		Kind: kind,
+		Data: payload,
+	})
+	if err != nil {
+		return err
+	}
+	return ms.codec.WriteFrame(ms.ctrl, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "event",
+		Data:      msgData,
+	})
+}
+
+// RealtimeAutoReply starts a goroutine that reads ctrl commands and
+// auto-replies to Realtime actions. Runs until the session is closed.
+// channelID is the audio_channel_id to return in realtime.started.
+func (ms *MockSession) RealtimeAutoReply(channelID uint32) {
+	go func() {
+		for {
+			msg, err := ms.RecvCtrl()
+			if err != nil {
+				return
+			}
+			switch msg.Kind {
+			case "realtime.start":
+				ms.SendAction("realtime.started", map[string]any{
+					"capabilities":     map[string]any{"audio": true},
+					"audio_channel_id": channelID,
+				})
+			case "realtime.update":
+				ms.SendAction("realtime.updated", json.RawMessage(msg.Data))
+			case "realtime.stop":
+				ms.SendAction("realtime.stopped", struct{}{})
+			case "audio.commit":
+				ms.SendAction("audio.committed", map[string]any{"item_id": "mock"})
+			case "audio.clear":
+				ms.SendAction("audio.cleared", map[string]any{})
+			case "audio.interrupt":
+				ms.SendAction("audio.interrupted", map[string]any{"item_id": "mock", "position_ms": 0})
+			}
+		}
+	}()
+}
+
+// FeedAudio sends encoded audio frames to the audio stream (H2 mock).
+// The data should already be encoded with transport.EncodeAudioFrame.
+func (ms *MockSession) FeedAudio(audio *MockLightStream, frames []byte) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if ms.closed {
+		return fmt.Errorf("mock session closed")
+	}
+	codec := transport.DefaultCodec()
+	return codec.WriteFrame(audio, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      "audio",
+		Data:      frames,
+	})
+}
+
 // bindData binds the data stream to this session.
 func (ms *MockSession) bindData(data *MockLightStream) {
 	ms.mu.Lock()
@@ -148,6 +229,8 @@ func (sh *SessionHandler) HandleStream(stream *MockLightStream) {
 		sh.handleResume(stream)
 	case "data":
 		sh.handleData(stream)
+	case "audio":
+		sh.handleAudio(stream)
 	default:
 		stream.Close()
 	}
@@ -258,6 +341,26 @@ func (sh *SessionHandler) handleData(dataStream *MockLightStream) {
 	}
 
 	ms.bindData(dataStream)
+}
+
+func (sh *SessionHandler) handleAudio(audioStream *MockLightStream) {
+	var sd pb.SessionData
+	if err := proto.Unmarshal(audioStream.FirstFrame.Data, &sd); err != nil {
+		audioStream.Close()
+		return
+	}
+
+	sh.mu.Lock()
+	ms, ok := sh.sessions[sd.SessionId]
+	sh.mu.Unlock()
+	if !ok {
+		audioStream.Close()
+		return
+	}
+
+	ms.mu.Lock()
+	ms.audio = audioStream
+	ms.mu.Unlock()
 }
 
 // Session returns the MockSession for the given ID, or nil.

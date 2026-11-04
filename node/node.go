@@ -215,10 +215,17 @@ func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequ
 		return nil, fmt.Errorf("open data stream: %w", err)
 	}
 
+	// Extract DatagramConn from the ctrl LightStream for Realtime audio.
+	var dgConn transport.DatagramConn
+	if ls, ok := ctrlStream.(*transport.LightStream); ok {
+		dgConn = ls.DatagramConn()
+	}
+
 	resumeFn := n.makeResumeFn(req.SessionID, req.Token, req.IssueToken)
 	sess := session.New(req.SessionID, n.nodeID, ctrlStream, dataStream, codec, session.Options{
-		ResumeFn: resumeFn,
-		OnEvent:  req.OnEvent,
+		ResumeFn:     resumeFn,
+		OnEvent:      req.OnEvent,
+		DatagramConn: dgConn,
 	})
 
 	// Start automatic OperationToken refresh for long-running sessions.
@@ -240,10 +247,17 @@ func (n *remoteNode) ResumeSession(ctx context.Context, req *types.ResumeSession
 	if err != nil {
 		return nil, err
 	}
+	// Extract DatagramConn from the ctrl LightStream for Realtime audio.
+	var dgConn transport.DatagramConn
+	if ls, ok := newCtrl.(*transport.LightStream); ok {
+		dgConn = ls.DatagramConn()
+	}
+
 	resumeFn := n.makeResumeFn(req.SessionID, req.Token, nil)
 	sess := session.New(req.SessionID, n.nodeID, newCtrl, newData, codec, session.Options{
-		ResumeFn: resumeFn,
-		OnEvent:  req.OnEvent,
+		ResumeFn:     resumeFn,
+		OnEvent:      req.OnEvent,
+		DatagramConn: dgConn,
 	})
 	return sess, nil
 }

@@ -476,7 +476,7 @@ func TestSessionUpdateSession(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSessionStartStopRealtime(t *testing.T) {
+func TestSessionStartRealtime_NilRequest(t *testing.T) {
 	codec := transport.DefaultCodec()
 	ctrl := newTestPair()
 	data := newTestPair()
@@ -485,11 +485,22 @@ func TestSessionStartStopRealtime(t *testing.T) {
 
 	s := New("sess-rt", "node-1", ctrl.stream, data.stream, codec)
 
-	if err := s.StartRealtime(&types.RealtimeRequest{}); err == nil {
-		t.Error("StartRealtime: expected error, got nil")
+	if err := s.StartRealtime(nil); err == nil {
+		t.Error("StartRealtime(nil): expected error, got nil")
 	}
+}
+
+func TestSessionStopRealtime_NotActive(t *testing.T) {
+	codec := transport.DefaultCodec()
+	ctrl := newTestPair()
+	data := newTestPair()
+	defer ctrl.close()
+	defer data.close()
+
+	s := New("sess-rt2", "node-1", ctrl.stream, data.stream, codec)
+
 	if err := s.StopRealtime(); err == nil {
-		t.Error("StopRealtime: expected error, got nil")
+		t.Error("StopRealtime: expected error when not active, got nil")
 	}
 }
 
