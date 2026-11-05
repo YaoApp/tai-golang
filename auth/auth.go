@@ -4,7 +4,9 @@ package auth
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"sync"
@@ -119,9 +121,18 @@ func (a *defaultAuth) IssueOperationToken(nodeID, sessionID string, ops []string
 	return token.SignedString(a.privateKey)
 }
 
-// SigningPublicKey returns the current Ed25519 public key for OperationToken verification.
+// SigningPublicKey returns the current Ed25519 public key in PEM format
+// for OperationToken verification on the Tai node side.
 func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
-	return a.keyID, []byte(a.publicKey)
+	pkix, err := x509.MarshalPKIXPublicKey(ed25519.PublicKey(a.publicKey))
+	if err != nil {
+		return a.keyID, []byte(a.publicKey)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pkix,
+	})
+	return a.keyID, pemBytes
 }
 
 // WellKnownInfo returns default transport metadata.

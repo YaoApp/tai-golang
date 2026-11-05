@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -117,8 +118,8 @@ func TestSigningPublicKey(t *testing.T) {
 	if keyID == "" {
 		t.Error("keyID should not be empty")
 	}
-	if len(pubKey) != ed25519.PublicKeySize {
-		t.Errorf("pubKey length=%d, want %d", len(pubKey), ed25519.PublicKeySize)
+	if !bytes.HasPrefix(pubKey, []byte("-----BEGIN PUBLIC KEY-----")) {
+		t.Errorf("pubKey should be PEM-encoded, got: %s", pubKey[:min(40, len(pubKey))])
 	}
 }
 

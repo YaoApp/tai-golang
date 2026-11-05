@@ -50,6 +50,16 @@ export default function SessionsPage() {
     setSessions((prev) => prev.filter((s) => s.id !== id));
   };
 
+  const handleResume = async (id: string) => {
+    try {
+      setError('');
+      const result = await api.sessions.resume(id);
+      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, status: result.status } : s));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Resume failed');
+    }
+  };
+
   return (
     <div style={{ display: 'flex', gap: 20 }}>
       <div>
@@ -155,9 +165,27 @@ export default function SessionsPage() {
                     <span style={{ color: '#999' }}>auto</span>
                   )}
                 </td>
-                <td style={td}>{s.status}</td>
-                <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
                 <td style={td}>
+                  <span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status}</span>
+                </td>
+                <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
+                <td style={{ ...td, display: 'flex', gap: 4 }}>
+                  {(s.status === 'disconnected' || s.status === 'resume_error') && (
+                    <button
+                      onClick={() => handleResume(s.id)}
+                      style={{
+                        padding: '2px 8px',
+                        border: '1px solid #28a745',
+                        borderRadius: 3,
+                        background: 'transparent',
+                        color: '#28a745',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                      }}
+                    >
+                      Resume
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(s.id)}
                     style={{
@@ -184,3 +212,14 @@ export default function SessionsPage() {
 
 const th: React.CSSProperties = { textAlign: 'left', padding: '6px 8px' };
 const td: React.CSSProperties = { padding: '6px 8px' };
+
+function statusColor(status: string): string {
+  switch (status) {
+    case 'running': return '#28a745';
+    case 'disconnected': return '#fd7e14';
+    case 'closed': return '#6c757d';
+    case 'resume_error': return '#dc3545';
+    case 'recovery_gap': return '#dc3545';
+    default: return '#333';
+  }
+}

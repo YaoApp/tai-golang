@@ -146,7 +146,7 @@ func TestStartRealtime_H3(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -176,13 +176,13 @@ func TestStartRealtime_AlreadyActive(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err == nil {
@@ -197,7 +197,7 @@ func TestUpdateRealtime(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -246,7 +246,7 @@ func TestStopRealtime(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -295,7 +295,7 @@ func TestAudioAppend_H3(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -342,7 +342,7 @@ func TestAudioCommit(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -374,7 +374,7 @@ func TestAudioClear(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -406,7 +406,7 @@ func TestAudioInterrupt(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -431,6 +431,38 @@ func TestAudioInterrupt(t *testing.T) {
 	}
 }
 
+func TestResponseCreate(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	var gotKind string
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		frame, _ := env.codec.ReadFrame(env.ctrl.remoteR)
+		if frame == nil {
+			return
+		}
+		var msg pb.SessionMessage
+		proto.Unmarshal(frame.Data, &msg)
+		gotKind = msg.Kind
+	}()
+
+	env.session.ResponseCreate()
+	wg.Wait()
+	if gotKind != "response.create" {
+		t.Errorf("ctrl kind = %q, want response.create", gotKind)
+	}
+}
+
 func TestRecvAudio_H3_Roundtrip(t *testing.T) {
 	env := newRealtimeTestEnv("H3")
 	defer env.close()
@@ -438,7 +470,7 @@ func TestRecvAudio_H3_Roundtrip(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -468,7 +500,7 @@ func TestRecvAudio_H3_FilterWrongChannel(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -500,7 +532,7 @@ func TestFullRoundtrip_H3(t *testing.T) {
 	// Start realtime.
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -650,7 +682,7 @@ func TestStartRealtime_H2(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -669,7 +701,7 @@ func TestRecvAudio_H2_Roundtrip(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -703,7 +735,7 @@ func TestRecvAudio_H2_StaleFrameDetection(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -758,7 +790,7 @@ func TestAudioAppend_H2(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -808,7 +840,9 @@ func TestStartRealtime_WrongResponseKind(t *testing.T) {
 	env := newRealtimeTestEnv("H3")
 	defer env.close()
 
-	// Tai replies with wrong kind.
+	// Tai replies with a non-realtime event then closes the stream.
+	// StartRealtime skips unrelated events while waiting for
+	// realtime.started, so the close triggers an error exit.
 	go func() {
 		env.codec.ReadFrame(env.ctrl.remoteR) // consume realtime.start
 		replyData, _ := proto.Marshal(&pb.SessionMessage{
@@ -820,11 +854,12 @@ func TestStartRealtime_WrongResponseKind(t *testing.T) {
 			Kind:      "event",
 			Data:      replyData,
 		})
+		env.ctrl.remoteW.Close()
 	}()
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err == nil {
@@ -855,7 +890,7 @@ func TestStartRealtime_BadJSON(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err == nil {
@@ -875,7 +910,7 @@ func TestStartRealtime_CtrlClosed(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err == nil {
@@ -917,7 +952,7 @@ func TestStartRealtime_H2_OpenFails(t *testing.T) {
 
 	err := s.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err == nil {
@@ -952,6 +987,14 @@ func TestAudioInterrupt_NotActive(t *testing.T) {
 	}
 }
 
+func TestResponseCreate_NotActive(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+	if err := env.session.ResponseCreate(); err == nil {
+		t.Error("ResponseCreate: expected error when not active")
+	}
+}
+
 func TestAudioSeqReset_AfterStopStart(t *testing.T) {
 	env := newRealtimeTestEnv("H3")
 	defer env.close()
@@ -960,7 +1003,7 @@ func TestAudioSeqReset_AfterStopStart(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	env.session.AudioAppend([]byte{0x01})
@@ -974,7 +1017,7 @@ func TestAudioSeqReset_AfterStopStart(t *testing.T) {
 	env.simulateTaiRealtimeStart(2)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	env.session.AudioAppend([]byte{0x02})
@@ -1049,7 +1092,7 @@ func TestRecvRender_ActiveAfterStart(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -1065,7 +1108,7 @@ func TestRecvRender_NilAfterStop(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -1084,7 +1127,7 @@ func TestRenderStream_AllTypes(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -1194,7 +1237,7 @@ func TestRenderStream_InvalidJSON(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -1222,7 +1265,7 @@ func TestRenderStream_ClosedOnStop(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 
@@ -1275,7 +1318,7 @@ func TestRecvMotion_H3_Roundtrip(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 		Motion: &types.MotionConfig{Enabled: true, Provider: "fast", Profile: "arkit_52", FPS: 30},
 	})
@@ -1344,7 +1387,7 @@ func TestRenderEvent_UniStream(t *testing.T) {
 	env.simulateTaiRealtimeStart(1)
 	env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 

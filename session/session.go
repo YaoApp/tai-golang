@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/yaoapp/tai-golang/pb"
 	"github.com/yaoapp/tai-golang/transport"
@@ -199,17 +200,39 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 	}
 	s.mu.Unlock()
 
+	// Drain actions buffered before we start the handshake.
+	s.drainStaleActions()
+
 	if err := s.sendCtrl("realtime.start", req); err != nil {
 		return fmt.Errorf("send realtime.start: %w", err)
 	}
 
 	// Block until Tai confirms with realtime.started.
-	msg, err := s.RecvAction()
-	if err != nil {
-		return fmt.Errorf("wait realtime.started: %w", err)
-	}
-	if msg.Kind != "realtime.started" {
-		return fmt.Errorf("expected realtime.started, got %q", msg.Kind)
+	// Skip unrelated actions (e.g. workspace_change) that arrive
+	// asynchronously between sending realtime.start and receiving the reply.
+	// A 30-second deadline guards against Tai never responding.
+	deadline := time.After(30 * time.Second)
+	var msg *types.SessionMsg
+	for {
+		select {
+		case m, ok := <-s.actions:
+			if !ok {
+				return fmt.Errorf("wait realtime.started: %w", io.EOF)
+			}
+			switch m.Kind {
+			case "realtime.started":
+				msg = m
+			case "realtime.error":
+				return fmt.Errorf("realtime start rejected: %s", string(m.Data))
+			default:
+				continue
+			}
+		case <-s.done:
+			return fmt.Errorf("wait realtime.started: session closed")
+		case <-deadline:
+			return fmt.Errorf("timeout waiting for realtime.started (30s)")
+		}
+		break
 	}
 
 	var started struct {
@@ -341,13 +364,64 @@ func (s *Session) StopRealtime() error {
 	if renderCancelFn != nil {
 		renderCancelFn() // triggers stream.Close() in readRenderStream's cancel goroutine
 	}
+
+	// Notify the server BEFORE closing the audio stream. audioStream.Close()
+	// on H2 can block waiting for transport-level RST_STREAM; the server must
+	// learn about the stop first so its state is clean for the next start.
+	err := s.sendCtrl("realtime.stop", nil)
+
+	// audioOut/motionOut/renderOut are closed by their I/O goroutines on exit
+	// (via defer), not here, to avoid a send-on-closed-channel panic.
 	if audioStream != nil {
 		audioStream.Close()
 	}
-	// audioOut/motionOut/renderOut are closed by their I/O goroutines on exit
-	// (via defer), not here, to avoid a send-on-closed-channel panic.
 
-	return s.sendCtrl("realtime.stop", nil)
+	return err
+}
+
+// cleanupRealtimeLocal clears SDK-side realtime state without sending
+// realtime.stop to the server. Called from readCtrlLoop when the server
+// sends realtime.stopped (provider death auto-cleanup). Idempotent:
+// skips if audioChannelID is already 0 (e.g. StopRealtime ran first).
+func (s *Session) cleanupRealtimeLocal() {
+	s.mu.Lock()
+	if s.audioChannelID == 0 {
+		s.mu.Unlock()
+		return
+	}
+	cancelFn := s.audioCancel
+	audioStream := s.audioStream
+	s.audioCancel = nil
+	s.audioStream = nil
+	s.audioChannelID = 0
+	s.audioOut = nil
+	s.audioSeq.Store(0)
+
+	dgCancelFn := s.dgCancel
+	s.dgCancel = nil
+	s.motionChannelID = 0
+	s.motionOut = nil
+
+	renderCancelFn := s.renderCancel
+	s.renderCancel = nil
+	s.renderStream = nil
+	s.renderOut = nil
+	s.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+	if dgCancelFn != nil {
+		dgCancelFn()
+	}
+	if renderCancelFn != nil {
+		renderCancelFn()
+	}
+	// Close in a goroutine to avoid blocking readCtrlLoop — H2
+	// audioStream.Close() can wait for transport-level RST_STREAM.
+	if audioStream != nil {
+		go audioStream.Close()
+	}
 }
 
 // AudioAppend sends PCM audio data to Tai.
@@ -414,6 +488,17 @@ func (s *Session) AudioInterrupt() error {
 		return fmt.Errorf("realtime not active")
 	}
 	return s.sendCtrl("audio.interrupt", nil)
+}
+
+// ResponseCreate triggers model response generation (manual VAD mode).
+func (s *Session) ResponseCreate() error {
+	s.mu.Lock()
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if !active {
+		return fmt.Errorf("realtime not active")
+	}
+	return s.sendCtrl("response.create", nil)
 }
 
 // RecvAudio returns a channel that delivers decoded audio frames from Tai.
@@ -723,6 +808,12 @@ func (s *Session) readCtrlLoop() {
 		}
 		select {
 		case s.actions <- &types.SessionMsg{Seq: msg.Seq, Kind: msg.Kind, Data: msg.Data}:
+			// Server-initiated stop: clean SDK realtime state so that
+			// a subsequent StartRealtime succeeds. The server already
+			// tore down its side; we only clean local resources here.
+			if msg.Kind == "realtime.stopped" {
+				s.cleanupRealtimeLocal()
+			}
 		case <-s.done:
 			return
 		}
@@ -826,4 +917,17 @@ func (s *Session) markClosed() {
 	s.closed = true
 	s.status.Store(types.SessionClosed)
 	s.mu.Unlock()
+}
+
+// drainStaleActions discards any actions already buffered in the channel.
+// Called before sending realtime.start so that stale events from prior text
+// turns do not interfere with the realtime.started handshake.
+func (s *Session) drainStaleActions() {
+	for {
+		select {
+		case <-s.actions:
+		default:
+			return
+		}
+	}
 }

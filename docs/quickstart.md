@@ -80,7 +80,7 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 // Start realtime mode
 err := session.StartRealtime(&types.RealtimeRequest{
     Providers: types.Providers{
-        Primary: types.ProviderSpec{
+        Primary: types.Provider{
             Provider: "openai", Model: "gpt-4o-realtime-preview",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },

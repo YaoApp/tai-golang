@@ -4,9 +4,20 @@ import type { WSMessage } from '../../../hooks/useWebSocket';
 interface Props {
   ctrlMessages: WSMessage[];
   dataMessages: WSMessage[];
+  renderMessages: WSMessage[];
   ctrlConnected: boolean;
   dataConnected: boolean;
+  renderConnected: boolean;
   onSend: (msg: WSMessage) => void;
+}
+
+interface RenderEvent {
+  type: string;
+  content?: string;
+  transcript?: string;
+  emotion?: string;
+  intensity?: number;
+  state?: string;
 }
 
 interface ChatEntry {
@@ -18,8 +29,10 @@ interface ChatEntry {
 export default function ChatPanel({
   ctrlMessages,
   dataMessages,
+  renderMessages,
   ctrlConnected,
   dataConnected,
+  renderConnected,
   onSend,
 }: Props) {
   const [input, setInput] = useState('');
@@ -111,6 +124,47 @@ export default function ChatPanel({
     entries.push({ role: 'assistant', content: assistantBuf });
   }
 
+  // Process render stream events (transcript, emotion).
+  let realtimeTranscript = '';
+  let currentEmotion = '';
+  for (const m of renderMessages) {
+    const re = m as unknown as RenderEvent;
+    switch (re.type) {
+      case 'transcript.delta':
+        realtimeTranscript += re.content ?? '';
+        break;
+      case 'transcript.done':
+        if (re.transcript) {
+          entries.push({ role: 'assistant', content: re.transcript, kind: 'transcript' });
+          realtimeTranscript = '';
+        }
+        break;
+      case 'input_transcript.done':
+        if (re.transcript) {
+          entries.push({ role: 'user', content: re.transcript, kind: 'voice-input' });
+        }
+        break;
+      case 'emotion':
+        currentEmotion = `${re.emotion ?? ''} (${re.intensity ?? 0})`;
+        break;
+    }
+  }
+  if (realtimeTranscript) {
+    entries.push({ role: 'assistant', content: realtimeTranscript, kind: 'transcript-streaming' });
+  }
+
+  // Surface error events from ctrl stream in the chat view.
+  for (const m of ctrlMessages) {
+    const d = m.data as Record<string, unknown> | undefined;
+    if (m.kind === 'realtime.error') {
+      const msg = (d?.message as string) || (d?.code as string) || 'Realtime error';
+      entries.push({ role: 'system', content: `❌ Realtime Error: ${msg}`, kind: 'error' });
+    } else if (m.kind === 'error') {
+      const msg = (d?.message as string) || 'Error';
+      entries.push({ role: 'system', content: `❌ ${msg}`, kind: 'error' });
+    }
+  }
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [entries.length, assistantBuf.length]);
@@ -121,7 +175,9 @@ export default function ChatPanel({
       <div style={{ display: 'flex', gap: 12, marginBottom: 8, fontSize: 12, alignItems: 'center' }}>
         <span>ctrl: <Dot ok={ctrlConnected} /></span>
         <span>data: <Dot ok={dataConnected} /></span>
+        {renderConnected && <span>render: <Dot ok={renderConnected} /></span>}
         <span style={{ color: '#888' }}>Events: {dataMessages.length}</span>
+        {currentEmotion && <span style={{ color: '#9c27b0', fontWeight: 600 }}>Emotion: {currentEmotion}</span>}
         <label style={{ marginLeft: 'auto', cursor: 'pointer' }}>
           <input type="checkbox" checked={showRaw} onChange={() => setShowRaw(!showRaw)} />
           {' '}Raw
@@ -139,6 +195,13 @@ export default function ChatPanel({
                 {m.data !== undefined && (
                   <pre style={jsonPre}>{JSON.stringify(m.data, null, 2)}</pre>
                 )}
+              </div>
+            ))}
+            <h4 style={{ margin: '12px 0 8px', fontSize: 13 }}>Render Stream ({renderMessages.length})</h4>
+            {renderMessages.map((m, i) => (
+              <div key={i} style={eventLine}>
+                <span style={{ ...kindBadge, background: '#e8d5f5' }}>{(m as unknown as RenderEvent).type}</span>
+                <pre style={jsonPre}>{JSON.stringify(m, null, 2)}</pre>
               </div>
             ))}
             <h4 style={{ margin: '12px 0 8px', fontSize: 13 }}>Ctrl Stream ({ctrlMessages.length})</h4>
@@ -163,6 +226,24 @@ export default function ChatPanel({
 
       {/* Input */}
       <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={() => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.onchange = () => {
+              const file = fileInput.files?.[0];
+              if (file) {
+                setInput((prev) => prev + ` [file: ${file.name}]`);
+              }
+            };
+            fileInput.click();
+          }}
+          disabled={!ctrlConnected}
+          style={{ padding: '8px', border: '1px solid #ccc', borderRadius: 4, background: '#fff', cursor: ctrlConnected ? 'pointer' : 'default', fontSize: 16 }}
+          title="Attach file"
+        >
+          +
+        </button>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -184,8 +265,12 @@ export default function ChatPanel({
 
 function ChatBubble({ entry }: { entry: ChatEntry }) {
   if (entry.role === 'system') {
+    const isErr = entry.kind === 'error';
     return (
-      <div style={{ textAlign: 'center', fontSize: 11, color: '#888', margin: '6px 0' }}>
+      <div style={{
+        textAlign: 'center', fontSize: isErr ? 12 : 11, margin: '6px 0',
+        color: isErr ? '#dc3545' : '#888', fontWeight: isErr ? 600 : 400,
+      }}>
         {entry.content}
       </div>
     );

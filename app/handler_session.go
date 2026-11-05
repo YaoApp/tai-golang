@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -34,7 +35,7 @@ func (h *SessionHandler) List(w http.ResponseWriter, _ *http.Request) {
 			"id":        s.ID,
 			"nodeId":    s.NodeID,
 			"createdAt": s.CreatedAt,
-			"status":    s.Status,
+			"status":    s.GetStatus(),
 		}
 		if s.WorkspaceID != "" {
 			entry["workspaceId"] = s.WorkspaceID
@@ -108,10 +109,29 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Request.WorkspaceID = ws.ID()
 	}
 
+	// Capture store reference for lifecycle callbacks.
+	store := h.store
+
 	session, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: sessionID,
 		Token:     opToken,
 		Request:   req.Request,
+		OnEvent: func(sid string, event types.SessionEventKind) {
+			si, ok := store.GetSession(sid)
+			if !ok {
+				return
+			}
+			switch event {
+			case types.EventDisconnected:
+				si.SetStatus("disconnected", store)
+			case types.EventResumed:
+				si.SetStatus("running", store)
+			case types.EventRecoveryGap:
+				si.SetStatus("recovery_gap", store)
+			case types.EventResumeError:
+				si.SetStatus("resume_error", store)
+			}
+		},
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "open session: "+err.Error())
@@ -144,6 +164,12 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	h.store.AddSession(info)
 
+	// Monitor session lifecycle in the background.
+	go func() {
+		<-session.Done()
+		info.SetStatus("closed", store)
+	}()
+
 	writeJSON(w, map[string]any{
 		"id":            sessionID,
 		"nodeId":        req.NodeID,
@@ -172,7 +198,88 @@ func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "closed"})
 }
 
+// Resume reconnects to an existing session after a disconnect.
+func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	info, ok := h.store.GetSession(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	rn := node.Get(info.NodeID)
+	if rn == nil {
+		writeError(w, http.StatusNotFound, "node not found")
+		return
+	}
+
+	store := h.store
+	opToken, err := h.auth.IssueOperationToken(info.NodeID, id, []string{"session"}, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "issue operation token: "+err.Error())
+		return
+	}
+
+	newSession, err := rn.ResumeSession(r.Context(), &types.ResumeSessionRequest{
+		SessionID:   id,
+		Token:       opToken,
+		LastCtrlSeq: 0,
+		LastDataSeq: 0,
+		OnEvent: func(sid string, event types.SessionEventKind) {
+			si, ok := store.GetSession(sid)
+			if !ok {
+				return
+			}
+			switch event {
+			case types.EventDisconnected:
+				si.SetStatus("disconnected", store)
+			case types.EventResumed:
+				si.SetStatus("running", store)
+			case types.EventRecoveryGap:
+				si.SetStatus("recovery_gap", store)
+			case types.EventResumeError:
+				si.SetStatus("resume_error", store)
+			}
+		},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "resume session: "+err.Error())
+		return
+	}
+
+	// Replace the session object and reset status.
+	info.mu.Lock()
+	info.Session = newSession
+	info.Status = "running"
+	info.mu.Unlock()
+
+	store.broadcast(`{"event":"session_status","sessionId":"` + id + `","status":"running"}`)
+
+	// Monitor new session lifecycle.
+	go func() {
+		<-newSession.Done()
+		info.SetStatus("closed", store)
+	}()
+
+	writeJSON(w, map[string]any{
+		"id":     id,
+		"status": "running",
+	})
+}
+
 // WSCtrl relays the ctrl stream between browser and session.
+//
+// Channel lifecycle (avoids RecvAction race with StartRealtime):
+//
+//   - Text mode: NO RecvAction goroutine. Prompt/Cancel/Steer send commands;
+//     agent responses arrive on the data stream (RecvEvent via WSData).
+//   - start_realtime: goroutine calls StartRealtime (blocking, exclusive
+//     RecvAction access — no competing reader). On success, starts a
+//     RecvAction relay goroutine for ctrl events (audio.speech_started, etc.).
+//   - stop_realtime: calls StopRealtime, sends realtime.stopped to browser.
+//     The RecvAction goroutine exits upon reading realtime.stopped from Tai.
+//   - Subsequent start_realtime waits for the previous RecvAction goroutine
+//     to exit (with timeout) before calling StartRealtime again.
 func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	info, ok := h.store.GetSession(id)
@@ -191,84 +298,445 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// Read actions from session → send to browser.
+	var wsMu sync.Mutex
+	sendJSON := func(v any) {
+		wsMu.Lock()
+		defer wsMu.Unlock()
+		if err := conn.WriteJSON(v); err != nil {
+			log.Printf("ctrl ws write: %v", err)
+		}
+	}
+
+	// Read browser commands into a channel so the main select can multiplex.
+	type ctrlCmd struct {
+		Kind string          `json:"kind"`
+		Data json.RawMessage `json:"data"`
+	}
+	cmdCh := make(chan ctrlCmd, 8)
 	go func() {
+		defer close(cmdCh)
 		defer cancel()
 		for {
-			act, err := info.Session.RecvAction()
-			if err != nil {
+			var cmd ctrlCmd
+			if err := conn.ReadJSON(&cmd); err != nil {
 				return
 			}
-			msg := map[string]any{
-				"seq":  act.Seq,
-				"kind": act.Kind,
+			cmdCh <- cmd
+		}
+	}()
+
+	// Realtime lifecycle state (protected by rtMu).
+	var (
+		rtMu     sync.Mutex
+		rtActive bool
+		rtDone   chan struct{} // closed when the RecvAction goroutine exits; nil initially
+	)
+
+	// startActionRelay launches a RecvAction goroutine that relays ctrl events
+	// to the browser. It returns a channel that closes when the goroutine exits.
+	// Call ONLY when no other RecvAction reader exists (after StartRealtime returns).
+	startActionRelay := func() chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for {
+				act, err := info.Session.RecvAction()
+				if err != nil {
+					return
+				}
+				msg := map[string]any{"seq": act.Seq, "kind": act.Kind}
+				if len(act.Data) > 0 {
+					var data any
+					if uerr := json.Unmarshal(act.Data, &data); uerr == nil {
+						msg["data"] = data
+					}
+				}
+				sendJSON(msg)
+
+				// Exit only when the realtime session definitively ends.
+				// realtime.error is a transient notification (e.g. provider
+				// error); realtime.stopped follows when the server finishes
+				// cleanup. Exiting early on realtime.error would miss the
+				// subsequent realtime.stopped and leave the SDK state dirty.
+				if act.Kind == "realtime.stopped" {
+					rtMu.Lock()
+					rtActive = false
+					rtMu.Unlock()
+					return
+				}
 			}
-			if len(act.Data) > 0 {
-				var data any
-				json.Unmarshal(act.Data, &data)
-				msg["data"] = data
-			}
-			if err := conn.WriteJSON(msg); err != nil {
+		}()
+		return done
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-info.Session.Done():
+			return
+		case cmd, ok := <-cmdCh:
+			if !ok {
 				return
+			}
+			switch cmd.Kind {
+
+			// ---- Text-mode commands ----
+
+			case "prompt":
+				var um types.UserMessage
+				json.Unmarshal(cmd.Data, &um)
+				if err := info.Session.Prompt(&um); err != nil {
+					log.Printf("prompt: %v", err)
+				}
+
+			case "followup":
+				var um types.UserMessage
+				json.Unmarshal(cmd.Data, &um)
+				go func() {
+					disp, ferr := info.Session.Followup(&um)
+					if ferr != nil {
+						sendJSON(map[string]any{
+							"kind": "followup_error",
+							"data": map[string]string{"message": ferr.Error()},
+						})
+					} else {
+						sendJSON(map[string]any{
+							"kind": "followup_disposition",
+							"data": map[string]string{"disposition": string(disp)},
+						})
+					}
+				}()
+
+			case "cancel":
+				if err := info.Session.Cancel(); err != nil {
+					log.Printf("cancel: %v", err)
+				}
+
+			case "steer":
+				var um types.UserMessage
+				json.Unmarshal(cmd.Data, &um)
+				go func() {
+					if _, serr := info.Session.Steer(&um); serr != nil {
+						log.Printf("steer: %v", serr)
+					}
+				}()
+
+			case "resolve_permission":
+				var rp struct {
+					RequestID string                   `json:"requestId"`
+					Response  types.PermissionResponse `json:"response"`
+				}
+				json.Unmarshal(cmd.Data, &rp)
+				info.Session.ResolvePermission(rp.RequestID, &rp.Response)
+
+			case "resolve_elicitation":
+				var re struct {
+					ID       string                    `json:"id"`
+					Response types.ElicitationResponse `json:"response"`
+				}
+				json.Unmarshal(cmd.Data, &re)
+				info.Session.ResolveElicitation(re.ID, &re.Response)
+
+			case "update_queue":
+				var qa types.QueueAction
+				json.Unmarshal(cmd.Data, &qa)
+				if err := info.Session.UpdateQueue(&qa); err != nil {
+					log.Printf("update_queue: %v", err)
+				}
+
+			case "set_config_option":
+				var co struct {
+					ConfigID string                  `json:"configId"`
+					Value    types.ConfigOptionValue `json:"value"`
+				}
+				json.Unmarshal(cmd.Data, &co)
+				if err := info.Session.SetConfigOption(co.ConfigID, &co.Value); err != nil {
+					log.Printf("set_config_option: %v", err)
+				}
+
+			case "update_session":
+				var opts types.SessionUpdateOptions
+				json.Unmarshal(cmd.Data, &opts)
+				if err := info.Session.UpdateSession(r.Context(), &opts); err != nil {
+					log.Printf("update_session: %v", err)
+				}
+
+			// ---- Realtime lifecycle ----
+
+			case "start_realtime":
+				rtMu.Lock()
+				if rtActive {
+					rtMu.Unlock()
+					sendJSON(map[string]any{
+						"kind": "realtime.error",
+						"data": map[string]string{"message": "realtime already active"},
+					})
+					continue
+				}
+				prevDone := rtDone
+				rtMu.Unlock()
+
+				var req types.RealtimeRequest
+				json.Unmarshal(cmd.Data, &req)
+
+				go func() {
+					// Wait for any previous RecvAction goroutine to finish so we
+					// have exclusive access to RecvAction inside StartRealtime.
+					if prevDone != nil {
+						select {
+						case <-prevDone:
+						case <-time.After(5 * time.Second):
+							sendJSON(map[string]any{
+								"kind": "realtime.error",
+								"data": map[string]string{"message": "previous realtime cleanup timed out, try again"},
+							})
+							return
+						case <-ctx.Done():
+							return
+						}
+					}
+
+					// StartRealtime blocks: sends realtime.start, waits for
+					// realtime.started via RecvAction, opens audio/render streams.
+					if err := info.Session.StartRealtime(&req); err != nil {
+						log.Printf("StartRealtime: %v", err)
+						sendJSON(map[string]any{
+							"kind": "realtime.error",
+							"data": map[string]string{"message": err.Error()},
+						})
+						return
+					}
+
+					rtMu.Lock()
+					rtActive = true
+					rtMu.Unlock()
+
+					sendJSON(map[string]any{"kind": "realtime.started"})
+
+					// Start RecvAction relay (the ONLY reader now).
+					done := startActionRelay()
+					rtMu.Lock()
+					rtDone = done
+					rtMu.Unlock()
+				}()
+
+			case "update_realtime":
+				var opts types.RealtimeUpdateOptions
+				json.Unmarshal(cmd.Data, &opts)
+				if err := info.Session.UpdateRealtime(&opts); err != nil {
+					log.Printf("update_realtime: %v", err)
+				}
+
+			case "stop_realtime":
+				rtMu.Lock()
+				wasActive := rtActive
+				rtActive = false
+				prevDone := rtDone
+				rtDone = nil
+				rtMu.Unlock()
+
+				// StopRealtime closes audio/render channels and sends
+				// realtime.stop on the ctrl stream. Run in a goroutine
+				// with a timeout to prevent blocking the ctrl WS handler
+				// if the H2 audio stream Close hangs.
+				if wasActive {
+					stopDone := make(chan error, 1)
+					go func() { stopDone <- info.Session.StopRealtime() }()
+					select {
+					case err := <-stopDone:
+						if err != nil {
+							log.Printf("StopRealtime: %v", err)
+						}
+					case <-time.After(5 * time.Second):
+						log.Printf("StopRealtime: timeout (5s)")
+					case <-ctx.Done():
+					}
+				}
+
+				// Wait for action relay to exit. Tai sends realtime.stopped
+				// back on ctrl; the relay reads it and returns.
+				if prevDone != nil {
+					select {
+					case <-prevDone:
+					case <-time.After(3 * time.Second):
+						log.Printf("stop_realtime: action relay exit timeout")
+					case <-ctx.Done():
+					}
+				}
+				sendJSON(map[string]any{"kind": "realtime.stopped"})
+
+			// ---- Audio sub-commands (forwarded during active realtime) ----
+
+			case "audio_commit":
+				if err := info.Session.AudioCommit(); err != nil {
+					log.Printf("audio_commit: %v", err)
+				}
+			case "audio_clear":
+				if err := info.Session.AudioClear(); err != nil {
+					log.Printf("audio_clear: %v", err)
+				}
+			case "audio_interrupt":
+				if err := info.Session.AudioInterrupt(); err != nil {
+					log.Printf("audio_interrupt: %v", err)
+				}
+			case "response_create":
+				if err := info.Session.ResponseCreate(); err != nil {
+					log.Printf("response_create: %v", err)
+				}
+
+			case "close":
+				info.Session.Close(context.Background())
+				return
+			}
+		}
+	}
+}
+
+// WSAudio relays binary audio between browser and session (bidirectional).
+// Connect AFTER receiving realtime.started — RecvAudio returns a non-nil
+// channel only when StartRealtime has completed.
+func (h *SessionHandler) WSAudio(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	info, ok := h.store.GetSession(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade audio: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	audioCh := info.Session.RecvAudio()
+	if audioCh == nil {
+		// Brief grace period in case the audio WS upgrade races with
+		// StartRealtime setting up channels.
+		time.Sleep(500 * time.Millisecond)
+		audioCh = info.Session.RecvAudio()
+		if audioCh == nil {
+			log.Printf("audio ws: RecvAudio returned nil (realtime not active)")
+			return
+		}
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// Session → Browser: send PCM audio frames as binary WS messages.
+	go func() {
+		defer cancel()
+		sendCount := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame, ok := <-audioCh:
+				if !ok {
+					log.Printf("audio ws: audioCh closed after sending %d frames", sendCount)
+					return
+				}
+				sendCount++
+				if sendCount <= 3 || sendCount%100 == 0 {
+					log.Printf("audio ws: send #%d (%d bytes) to browser", sendCount, len(frame.Data))
+				}
+				if err := conn.WriteMessage(websocket.BinaryMessage, frame.Data); err != nil {
+					log.Printf("audio ws: write error after %d sends: %v", sendCount, err)
+					return
+				}
 			}
 		}
 	}()
 
-	// Read commands from browser → dispatch to session.
+	// Browser → Session: relay binary WS messages as AudioAppend.
+	appendCount := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-
-		var cmd struct {
-			Kind string          `json:"kind"`
-			Data json.RawMessage `json:"data"`
-		}
-		if err := conn.ReadJSON(&cmd); err != nil {
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("audio ws: read done after %d appends: %v", appendCount, err)
 			return
 		}
+		if msgType == websocket.BinaryMessage && len(data) > 0 {
+			if err := info.Session.AudioAppend(data); err != nil {
+				log.Printf("audio append: %v", err)
+				return
+			}
+			appendCount++
+			if appendCount <= 3 || appendCount%100 == 0 {
+				log.Printf("audio append: #%d (%d bytes) OK", appendCount, len(data))
+			}
+		}
+	}
+}
 
-		switch cmd.Kind {
-		case "prompt":
-			var um types.UserMessage
-			json.Unmarshal(cmd.Data, &um)
-			if err := info.Session.Prompt(&um); err != nil {
-				log.Printf("prompt: %v", err)
+// WSRender relays the render stream (transcript, emotion) from session to
+// browser (read-only). Connect AFTER receiving realtime.started.
+func (h *SessionHandler) WSRender(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	info, ok := h.store.GetSession(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade render: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ch := info.Session.RecvRender()
+	if ch == nil {
+		time.Sleep(500 * time.Millisecond)
+		ch = info.Session.RecvRender()
+		if ch == nil {
+			log.Printf("render ws: RecvRender returned nil (realtime not active)")
+			conn.WriteJSON(map[string]string{"type": "_closed"})
+			return
+		}
+	}
+
+	// Drain WebSocket reads so close frames are detected.
+	closeCh := make(chan struct{})
+	go func() {
+		defer close(closeCh)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
 			}
-		case "followup":
-			var um types.UserMessage
-			json.Unmarshal(cmd.Data, &um)
-			info.Session.Followup(&um)
-		case "cancel":
-			info.Session.Cancel()
-		case "steer":
-			var um types.UserMessage
-			json.Unmarshal(cmd.Data, &um)
-			info.Session.Steer(&um)
-		case "resolve_permission":
-			var rp struct {
-				RequestID string                   `json:"requestId"`
-				Response  types.PermissionResponse `json:"response"`
+		}
+	}()
+
+	for {
+		select {
+		case evt, ok := <-ch:
+			if !ok {
+				conn.WriteJSON(map[string]string{"type": "_closed"})
+				return
 			}
-			json.Unmarshal(cmd.Data, &rp)
-			info.Session.ResolvePermission(rp.RequestID, &rp.Response)
-		case "resolve_elicitation":
-			var re struct {
-				ID       string                    `json:"id"`
-				Response types.ElicitationResponse `json:"response"`
+			if err := conn.WriteJSON(evt); err != nil {
+				return
 			}
-			json.Unmarshal(cmd.Data, &re)
-			info.Session.ResolveElicitation(re.ID, &re.Response)
-		case "close":
-			info.Session.Close(context.Background())
+		case <-closeCh:
+			return
+		case <-info.Session.Done():
+			conn.WriteJSON(map[string]string{"type": "_closed"})
 			return
 		}
 	}
 }
 
 // WSData relays the data stream (events) from session to browser (read-only).
+// Independent of ctrl/render/audio — runs for the entire session lifetime.
 func (h *SessionHandler) WSData(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	info, ok := h.store.GetSession(id)

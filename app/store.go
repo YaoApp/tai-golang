@@ -26,6 +26,22 @@ type SessionInfo struct {
 	WorkspaceID   string        `json:"workspaceId,omitempty"`
 	WorkspaceName string        `json:"workspaceName,omitempty"`
 	Session       types.Session `json:"-"`
+	mu            sync.Mutex    // protects Status writes
+}
+
+// GetStatus returns the current session status (thread-safe).
+func (si *SessionInfo) GetStatus() string {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	return si.Status
+}
+
+// SetStatus updates the session status and broadcasts the change.
+func (si *SessionInfo) SetStatus(status string, store *Store) {
+	si.mu.Lock()
+	si.Status = status
+	si.mu.Unlock()
+	store.broadcast(`{"event":"session_status","sessionId":"` + si.ID + `","status":"` + status + `"}`)
 }
 
 // Store holds in-memory state for the demo app.

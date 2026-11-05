@@ -117,6 +117,8 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ status: string }>(`/api/sessions/${id}`, { method: 'DELETE' }),
+    resume: (id: string) =>
+      request<{ id: string; status: string }>(`/api/sessions/${id}/resume`, { method: 'POST' }),
   },
   docs: {
     list: () => request<DocEntry[]>('/api/docs'),

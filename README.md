@@ -119,7 +119,7 @@ for {
 // Start realtime mode
 session.StartRealtime(&tai.RealtimeRequest{
     Providers: tai.Providers{
-        Primary: tai.ProviderSpec{
+        Primary: tai.Provider{
             Provider: "openai", Model: "gpt-4o-realtime-preview",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },

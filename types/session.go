@@ -113,6 +113,7 @@ type Session interface {
 	AudioCommit() error
 	AudioClear() error
 	AudioInterrupt() error
+	ResponseCreate() error
 	RecvAudio() <-chan *AudioFrame
 
 	// Render channels (data-driven Avatar motion + render stream)
@@ -122,6 +123,9 @@ type Session interface {
 	// Video (Plan 7)
 	SendVideoFrame(frame *VideoFrame) error
 	RecvVideoFrame() <-chan *VideoFrame
+
+	// Done returns a channel that is closed when the session terminates.
+	Done() <-chan struct{}
 
 	Close(ctx context.Context) error
 }

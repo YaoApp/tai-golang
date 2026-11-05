@@ -173,6 +173,8 @@ func (ms *MockSession) RealtimeAutoReply(channelID uint32) {
 				ms.SendAction("audio.cleared", map[string]any{})
 			case "audio.interrupt":
 				ms.SendAction("audio.interrupted", map[string]any{"item_id": "mock", "position_ms": 0})
+			case "response.create":
+				// No specific ack event; OpenAI processes it internally.
 			}
 		}
 	}()

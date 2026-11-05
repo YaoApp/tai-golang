@@ -34,10 +34,13 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	mux.HandleFunc("GET /api/sessions", sessionH.List)
 	mux.HandleFunc("POST /api/sessions", sessionH.Create)
 	mux.HandleFunc("DELETE /api/sessions/{id}", sessionH.Delete)
+	mux.HandleFunc("POST /api/sessions/{id}/resume", sessionH.Resume)
 
 	// Session WebSocket relay
 	mux.HandleFunc("GET /ws/sessions/{id}/ctrl", sessionH.WSCtrl)
 	mux.HandleFunc("GET /ws/sessions/{id}/data", sessionH.WSData)
+	mux.HandleFunc("GET /ws/sessions/{id}/render", sessionH.WSRender)
+	mux.HandleFunc("GET /ws/sessions/{id}/audio", sessionH.WSAudio)
 
 	// Workspace endpoints
 	mux.HandleFunc("GET /api/workspaces", wsH.ListWorkspaces)
