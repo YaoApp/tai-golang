@@ -70,7 +70,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Request.Isolation = "host"
 	}
 
-	// Pass DeepSeek credentials to the agent subprocess via session env.
+	// Pass API credentials to the agent subprocess via session env.
 	if req.Request.Env == nil {
 		req.Request.Env = make(map[string]string)
 	}
@@ -83,6 +83,42 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			baseURL = "https://api.deepseek.com/v1"
 		}
 		req.Request.Env["DEEPSEEK_BASE_URL"] = baseURL
+	}
+	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" && req.Request.Env["OPENAI_API_KEY"] == "" {
+		req.Request.Env["OPENAI_API_KEY"] = apiKey
+	}
+
+	// Convert frontend ProvidersMatrix {default,light,realtime} → runtime Providers {primary,roles}.
+	// The runtime expects: primary = default role, roles = {light, realtime, ...}.
+	if len(req.Request.LLM) > 0 {
+		var matrix map[string]json.RawMessage
+		if err := json.Unmarshal(req.Request.LLM, &matrix); err == nil {
+			converted := make(map[string]json.RawMessage)
+			roles := make(map[string]json.RawMessage)
+			for role, endpoint := range matrix {
+				if role == "default" || role == "primary" {
+					converted["primary"] = endpoint
+				} else {
+					roles[role] = endpoint
+				}
+			}
+			// If no explicit "default"/"primary", use first available non-realtime role.
+			if _, ok := converted["primary"]; !ok {
+				for role, endpoint := range matrix {
+					if role != "realtime" {
+						converted["primary"] = endpoint
+						break
+					}
+				}
+			}
+			if len(roles) > 0 {
+				rolesJSON, _ := json.Marshal(roles)
+				converted["roles"] = rolesJSON
+			}
+			if rewritten, err := json.Marshal(converted); err == nil {
+				req.Request.LLM = rewritten
+			}
+		}
 	}
 
 	sessionID := auth.GenerateID("sess")
@@ -388,6 +424,10 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				json.Unmarshal(cmd.Data, &um)
 				if err := info.Session.Prompt(&um); err != nil {
 					log.Printf("prompt: %v", err)
+					sendJSON(map[string]any{
+						"kind": "prompt_error",
+						"data": map[string]string{"message": err.Error()},
+					})
 				}
 
 			case "followup":

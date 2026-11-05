@@ -13,7 +13,8 @@ export default function SessionDetailPage() {
 
   const ctrl = useWebSocket(id ? `/ws/sessions/${id}/ctrl` : null);
   const data = useWebSocket(id ? `/ws/sessions/${id}/data` : null);
-  const render = useWebSocket(realtimeActive && id ? `/ws/sessions/${id}/render` : null);
+  // Render WS managed by RealtimePanel independently; keep hook for future reconnect detection.
+  useWebSocket(realtimeActive && id ? `/ws/sessions/${id}/render` : null);
 
   useEffect(() => {
     if (!id) return;
@@ -23,6 +24,18 @@ export default function SessionDetailPage() {
     });
   }, [id]);
 
+  // Update session title from data stream session_info_update
+  useEffect(() => {
+    for (const m of data.messages) {
+      if (m.kind === 'session_info_update') {
+        const d = m.data as Record<string, unknown> | undefined;
+        if (d?.title && typeof d.title === 'string') {
+          setSession((prev) => prev ? { ...prev, title: d.title as string } : prev);
+        }
+      }
+    }
+  }, [data.messages]);
+
   const handleRealtimeChange = useCallback((active: boolean) => {
     setRealtimeActive(active);
   }, []);
@@ -30,22 +43,29 @@ export default function SessionDetailPage() {
   if (!id) return <p>No session selected</p>;
 
   const wsLabel = session?.workspaceName || session?.workspaceId?.slice(0, 12);
+  const sessionTitle = (session as SessionInfo & { title?: string })?.title;
 
   return (
-    <div style={{ height: 'calc(100vh - 100px)' }}>
-      <h2 style={{ margin: '0 0 4px', fontSize: 16 }}>
-        Session: {id}
-        {session && (
-          <span style={{ marginLeft: 12, fontSize: 13, fontWeight: 400, color: session.status === 'running' ? '#28a745' : '#fd7e14' }}>
-            [{session.status}]
-          </span>
+    <div style={{ height: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 8 }}>
+        <h2 style={{ margin: '0 0 2px', fontSize: 16 }}>
+          {sessionTitle || `Session: ${id}`}
+          {session && (
+            <span style={{ marginLeft: 12, fontSize: 13, fontWeight: 400, color: session.status === 'running' ? '#28a745' : '#fd7e14' }}>
+              [{session.status}]
+            </span>
+          )}
+        </h2>
+        {wsLabel && (
+          <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
+            Workspace: <Link to={`/workspaces/${session?.workspaceId}?nodeId=${session?.nodeId}`} style={{ color: '#0066cc' }}>{wsLabel}</Link>
+            <span style={{ marginLeft: 12, color: '#999' }}>ID: {id}</span>
+          </p>
         )}
-      </h2>
-      {wsLabel && (
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: '#666' }}>
-          Workspace: <Link to={`/workspaces/${session?.workspaceId}?nodeId=${session?.nodeId}`} style={{ color: '#0066cc' }}>{wsLabel}</Link>
-        </p>
-      )}
+      </div>
+
+      {/* Realtime Panel (independent, above chat) */}
       <RealtimePanel
         sessionId={id}
         ctrlConnected={ctrl.connected}
@@ -53,15 +73,20 @@ export default function SessionDetailPage() {
         onSendCtrl={ctrl.send}
         onRealtimeChange={handleRealtimeChange}
       />
-      <ChatPanel
-        ctrlMessages={ctrl.messages}
-        dataMessages={data.messages}
-        renderMessages={render.messages}
-        ctrlConnected={ctrl.connected}
-        dataConnected={data.connected}
-        renderConnected={render.connected}
-        onSend={ctrl.send}
-      />
+
+      {/* Text Chat Panel */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ChatPanel
+          sessionId={id}
+          ctrlMessages={ctrl.messages}
+          dataMessages={data.messages}
+          ctrlConnected={ctrl.connected}
+          dataConnected={data.connected}
+          onSend={ctrl.send}
+          workspaceId={session?.workspaceId}
+          nodeId={session?.nodeId}
+        />
+      </div>
     </div>
   );
 }

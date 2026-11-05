@@ -2,3 +2,4 @@ app/tai-demo
 app/app
 *.out
 tai
+app/logs/tai.log

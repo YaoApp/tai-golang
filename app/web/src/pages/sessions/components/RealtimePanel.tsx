@@ -244,6 +244,7 @@ export default function RealtimePanel({
         },
         motion: motionEnabled ? { enabled: true, provider: 'fast', fps: 30 } : undefined,
       },
+      receivedAt: Date.now(),
     });
     if (startTimerRef.current) clearTimeout(startTimerRef.current);
     startTimerRef.current = setTimeout(() => {
@@ -257,7 +258,7 @@ export default function RealtimePanel({
 
   const stopRealtime = useCallback(() => {
     setStatus('stopping');
-    onSendCtrl({ kind: 'stop_realtime' });
+    onSendCtrl({ kind: 'stop_realtime', receivedAt: Date.now() });
     cleanupAudio();
     setTimeout(() => {
       if (statusRef.current === 'stopping') {
@@ -337,8 +338,8 @@ export default function RealtimePanel({
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ color: '#28a745', fontWeight: 600, fontSize: 13 }}>● Connected</span>
             {micAnalyser && <span style={{ color: '#0066cc', fontSize: 12 }}>🎤 Mic active</span>}
-            <button onClick={() => onSendCtrl({ kind: 'audio_commit' })} style={actionBtn}>Commit</button>
-            <button onClick={() => onSendCtrl({ kind: 'audio_interrupt' })} style={actionBtn}>Interrupt</button>
+            <button onClick={() => onSendCtrl({ kind: 'audio_commit', receivedAt: Date.now() })} style={actionBtn}>Commit</button>
+            <button onClick={() => onSendCtrl({ kind: 'audio_interrupt', receivedAt: Date.now() })} style={actionBtn}>Interrupt</button>
             <button onClick={stopRealtime} style={stopBtnS}>Stop</button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

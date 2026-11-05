@@ -4,6 +4,8 @@ export interface WSMessage {
   seq?: number;
   kind: string;
   data?: unknown;
+  receivedAt: number; // Date.now() when message was received/sent
+  direction?: 'in' | 'out'; // 'in' = received from server, 'out' = sent by client
 }
 
 export function useWebSocket(url: string | null) {
@@ -23,7 +25,8 @@ export function useWebSocket(url: string | null) {
     ws.onclose = () => setConnected(false);
     ws.onmessage = (e) => {
       try {
-        const msg: WSMessage = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const msg: WSMessage = { ...parsed, receivedAt: Date.now(), direction: 'in' };
         setMessages((prev) => [...prev, msg]);
       } catch {
         // ignore non-JSON
@@ -38,7 +41,9 @@ export function useWebSocket(url: string | null) {
   }, [url]);
 
   const send = useCallback((msg: WSMessage) => {
+    const outMsg: WSMessage = { ...msg, receivedAt: Date.now(), direction: 'out' };
     wsRef.current?.send(JSON.stringify(msg));
+    setMessages((prev) => [...prev, outMsg]);
   }, []);
 
   const clear = useCallback(() => setMessages([]), []);

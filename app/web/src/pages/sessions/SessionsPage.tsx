@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
 import type { SessionInfo, WorkspaceEntry } from '../../api';
+import type { SessionRequest } from '../../types';
 import { useCurrentNode } from '../../hooks/useCurrentNode';
 import SessionList from './components/SessionList';
+import SessionCreateForm from './components/SessionCreateForm';
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [currentNode, setCurrentNode, nodes] = useCurrentNode();
   const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
-  const [selectedWs, setSelectedWs] = useState('');
   const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
 
   const refresh = () => {
@@ -19,29 +21,22 @@ export default function SessionsPage() {
 
   useEffect(() => { refresh(); }, []);
 
-  // Load workspaces when node changes
   useEffect(() => {
     if (!currentNode) { setWorkspaces([]); return; }
     api.workspaces.list(currentNode).then(setWorkspaces).catch(() => setWorkspaces([]));
   }, [currentNode]);
 
-  const handleCreate = async () => {
-    const nodeId = currentNode || nodes[0]?.id;
-    if (!nodeId) {
-      setError('No nodes available. Register a node first.');
-      return;
-    }
+  const handleCreate = async (nodeId: string, req: SessionRequest) => {
     try {
       setError('');
-      const req: Record<string, unknown> = {};
-      if (selectedWs) {
-        req.workspaceId = selectedWs;
-      }
-      const s = await api.sessions.create(nodeId, Object.keys(req).length > 0 ? req : undefined);
+      setCreating(true);
+      const s = await api.sessions.create(nodeId, req as unknown as Record<string, unknown>);
       setSessions((prev) => [...prev, s]);
       navigate(`/sessions/${s.id}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -70,64 +65,30 @@ export default function SessionsPage() {
         />
       </div>
       <div style={{ flex: 1 }}>
-        <h1>Sessions</h1>
-
-        {/* Create */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={currentNode}
-            onChange={(e) => setCurrentNode(e.target.value)}
-            style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc' }}
-          >
-            <option value="">Select node...</option>
-            {nodes.map((n) => (
-              <option key={n.id} value={n.id}>{n.id}</option>
-            ))}
-          </select>
-          <select
-            value={selectedWs}
-            onChange={(e) => setSelectedWs(e.target.value)}
-            style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc', minWidth: 160 }}
-            disabled={!currentNode}
-          >
-            <option value="">Auto-create workspace</option>
-            {workspaces.map((ws) => (
-              <option key={ws.id} value={ws.id}>
-                {ws.name || ws.id.slice(0, 12)}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={handleCreate}
-            style={{
-              padding: '6px 16px',
-              border: 'none',
-              borderRadius: 4,
-              background: '#0066cc',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            Create Session
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h1 style={{ margin: 0 }}>Sessions</h1>
           <button
             onClick={refresh}
-            style={{
-              padding: '6px 12px',
-              border: '1px solid #ccc',
-              borderRadius: 4,
-              background: '#fff',
-              cursor: 'pointer',
-            }}
+            style={{ padding: '6px 12px', border: '1px solid #ccc', borderRadius: 4, background: '#fff', cursor: 'pointer' }}
           >
             Refresh
           </button>
         </div>
 
-        {error && <p style={{ color: 'red' }}>{error}</p>}
+        {/* Create Form */}
+        <SessionCreateForm
+          nodes={nodes}
+          currentNode={currentNode}
+          onNodeChange={setCurrentNode}
+          workspaces={workspaces}
+          onSubmit={handleCreate}
+          disabled={creating}
+        />
+
+        {error && <p style={{ color: 'red', margin: '8px 0' }}>{error}</p>}
 
         {/* Session table */}
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, marginTop: 8 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #ddd' }}>
               <th style={th}>ID</th>
@@ -142,11 +103,7 @@ export default function SessionsPage() {
             {sessions.map((s) => (
               <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td style={td}>
-                  <a
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); navigate(`/sessions/${s.id}`); }}
-                    style={{ color: '#0066cc' }}
-                  >
+                  <a href="#" onClick={(e) => { e.preventDefault(); navigate(`/sessions/${s.id}`); }} style={{ color: '#0066cc' }}>
                     {s.id}
                   </a>
                 </td>
@@ -171,35 +128,9 @@ export default function SessionsPage() {
                 <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
                 <td style={{ ...td, display: 'flex', gap: 4 }}>
                   {(s.status === 'disconnected' || s.status === 'resume_error') && (
-                    <button
-                      onClick={() => handleResume(s.id)}
-                      style={{
-                        padding: '2px 8px',
-                        border: '1px solid #28a745',
-                        borderRadius: 3,
-                        background: 'transparent',
-                        color: '#28a745',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                      }}
-                    >
-                      Resume
-                    </button>
+                    <button onClick={() => handleResume(s.id)} style={resumeBtn}>Resume</button>
                   )}
-                  <button
-                    onClick={() => handleDelete(s.id)}
-                    style={{
-                      padding: '2px 8px',
-                      border: '1px solid #dc3545',
-                      borderRadius: 3,
-                      background: 'transparent',
-                      color: '#dc3545',
-                      cursor: 'pointer',
-                      fontSize: 12,
-                    }}
-                  >
-                    Close
-                  </button>
+                  <button onClick={() => handleDelete(s.id)} style={deleteBtn}>Close</button>
                 </td>
               </tr>
             ))}
@@ -212,6 +143,16 @@ export default function SessionsPage() {
 
 const th: React.CSSProperties = { textAlign: 'left', padding: '6px 8px' };
 const td: React.CSSProperties = { padding: '6px 8px' };
+
+const resumeBtn: React.CSSProperties = {
+  padding: '2px 8px', border: '1px solid #28a745', borderRadius: 3,
+  background: 'transparent', color: '#28a745', cursor: 'pointer', fontSize: 12,
+};
+
+const deleteBtn: React.CSSProperties = {
+  padding: '2px 8px', border: '1px solid #dc3545', borderRadius: 3,
+  background: 'transparent', color: '#dc3545', cursor: 'pointer', fontSize: 12,
+};
 
 function statusColor(status: string): string {
   switch (status) {
