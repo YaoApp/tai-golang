@@ -41,6 +41,7 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	mux.HandleFunc("GET /ws/sessions/{id}/data", sessionH.WSData)
 	mux.HandleFunc("GET /ws/sessions/{id}/render", sessionH.WSRender)
 	mux.HandleFunc("GET /ws/sessions/{id}/audio", sessionH.WSAudio)
+	mux.HandleFunc("GET /ws/sessions/{id}/motion", sessionH.WSMotion)
 
 	// Workspace endpoints
 	mux.HandleFunc("GET /api/workspaces", wsH.ListWorkspaces)

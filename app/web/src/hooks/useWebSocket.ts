@@ -26,7 +26,10 @@ export function useWebSocket(url: string | null) {
     ws.onmessage = (e) => {
       try {
         const parsed = JSON.parse(e.data);
-        const msg: WSMessage = { ...parsed, receivedAt: Date.now(), direction: 'in' };
+        // Normalize: ctrl/data use {kind, data}, render uses {type, content, ...}.
+        const kind = parsed.kind || parsed.type || 'unknown';
+        const data = parsed.data !== undefined ? parsed.data : parsed;
+        const msg: WSMessage = { seq: parsed.seq, kind, data, receivedAt: Date.now(), direction: 'in' };
         setMessages((prev) => [...prev, msg]);
       } catch {
         // ignore non-JSON

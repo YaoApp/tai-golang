@@ -520,6 +520,40 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				var req types.RealtimeRequest
 				json.Unmarshal(cmd.Data, &req)
 
+				// Inject API keys from environment (frontend never sends keys).
+				if req.Providers.Primary.APIKey == "" {
+					switch req.Providers.Primary.Provider {
+					case "openai":
+						if k := os.Getenv("OPENAI_API_KEY"); k != "" {
+							req.Providers.Primary.APIKey = k
+						}
+					case "deepseek":
+						if k := os.Getenv("DEEPSEEK_API_KEY"); k != "" {
+							req.Providers.Primary.APIKey = k
+						}
+					case "qwen":
+						if k := os.Getenv("QWEN_API_KEY"); k != "" {
+							req.Providers.Primary.APIKey = k
+						}
+					}
+				}
+				for role, prov := range req.Providers.Roles {
+					if prov.APIKey == "" {
+						switch prov.Provider {
+						case "openai":
+							if k := os.Getenv("OPENAI_API_KEY"); k != "" {
+								prov.APIKey = k
+								req.Providers.Roles[role] = prov
+							}
+						case "deepseek":
+							if k := os.Getenv("DEEPSEEK_API_KEY"); k != "" {
+								prov.APIKey = k
+								req.Providers.Roles[role] = prov
+							}
+						}
+					}
+				}
+
 				go func() {
 					// Wait for any previous RecvAction goroutine to finish so we
 					// have exclusive access to RecvAction inside StartRealtime.
@@ -764,6 +798,69 @@ func (h *SessionHandler) WSRender(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := conn.WriteJSON(evt); err != nil {
+				return
+			}
+		case <-closeCh:
+			return
+		case <-info.Session.Done():
+			conn.WriteJSON(map[string]string{"type": "_closed"})
+			return
+		}
+	}
+}
+
+// WSMotion relays motion frames (blendshape, head pose, viseme) from session
+// to browser as JSON. Connect AFTER receiving motion.started on ctrl.
+// Throttled: sends every 3rd frame (~10fps from 30fps source).
+func (h *SessionHandler) WSMotion(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	info, ok := h.store.GetSession(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade motion: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ch := info.Session.RecvMotion()
+	if ch == nil {
+		time.Sleep(500 * time.Millisecond)
+		ch = info.Session.RecvMotion()
+		if ch == nil {
+			log.Printf("motion ws: RecvMotion returned nil (motion not enabled)")
+			conn.WriteJSON(map[string]string{"type": "_closed"})
+			return
+		}
+	}
+
+	closeCh := make(chan struct{})
+	go func() {
+		defer close(closeCh)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	count := 0
+	for {
+		select {
+		case frame, ok := <-ch:
+			if !ok {
+				conn.WriteJSON(map[string]string{"type": "_closed"})
+				return
+			}
+			count++
+			if count%3 != 0 {
+				continue // ~10fps throttle
+			}
+			if err := conn.WriteJSON(frame); err != nil {
 				return
 			}
 		case <-closeCh:

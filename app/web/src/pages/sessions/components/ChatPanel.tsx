@@ -16,13 +16,20 @@ import PlanPanel from './PlanPanel';
 import TerminalCard from './TerminalCard';
 import PermissionDialog from './PermissionDialog';
 import ElicitationDialog from './ElicitationDialog';
+import SubtitlePanel from './SubtitlePanel';
 
 interface Props {
   sessionId: string;
   ctrlMessages: WSMessage[];
   dataMessages: WSMessage[];
+  renderMessages: WSMessage[];
   ctrlConnected: boolean;
   dataConnected: boolean;
+  renderConnected: boolean;
+  realtimeActive: boolean;
+  micAnalyser: AnalyserNode | null;
+  playAnalyser: AnalyserNode | null;
+  audioStats: { inFrames: number; outFrames: number; inBytes: number; outBytes: number };
   onSend: (msg: WSMessage) => void;
   workspaceId?: string;
   nodeId?: string;
@@ -42,8 +49,14 @@ export default function ChatPanel({
   sessionId: _sessionId,
   ctrlMessages,
   dataMessages,
+  renderMessages,
   ctrlConnected,
   dataConnected,
+  renderConnected: _renderConnected,
+  realtimeActive,
+  micAnalyser,
+  playAnalyser,
+  audioStats,
   onSend,
   workspaceId,
   nodeId,
@@ -55,6 +68,23 @@ export default function ChatPanel({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const ctrlEndRef = useRef<HTMLDivElement>(null);
   const dataEndRef = useRef<HTMLDivElement>(null);
+  const renderEndRef = useRef<HTMLDivElement>(null);
+
+  // Subtitle panel + render/audio panel visibility
+  const [subtitleVisible, setSubtitleVisible] = useState(false);
+  const [renderPanelVisible, setRenderPanelVisible] = useState(false);
+  const [audioPanelVisible, setAudioPanelVisible] = useState(false);
+  const prevRealtimeRef = useRef(false);
+
+  // Auto-open subtitle/render/audio when Realtime activates
+  useEffect(() => {
+    if (realtimeActive && !prevRealtimeRef.current) {
+      setSubtitleVisible(true);
+      setRenderPanelVisible(true);
+      setAudioPanelVisible(true);
+    }
+    prevRealtimeRef.current = realtimeActive;
+  }, [realtimeActive]);
 
   // Local user messages (shown immediately on send, before server echo)
   const [localUserMessages, setLocalUserMessages] = useState<LocalUserMessage[]>([]);
@@ -125,6 +155,9 @@ export default function ChatPanel({
   useEffect(() => {
     dataEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [dataMessages.length]);
+  useEffect(() => {
+    renderEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [renderMessages.length]);
 
   // Send message
   const handleSend = useCallback(() => {
@@ -252,17 +285,29 @@ export default function ChatPanel({
 
       {/* Dual-column layout */}
       <div style={dualPane}>
-        {/* Left: Rendered chat view */}
-        <div style={leftPane}>
-          {displayItems.map((item, i) => (
-            <DisplayItemRenderer key={i} item={item} />
-          ))}
-          <div ref={chatEndRef} />
+        {/* Left: Text Chat (upper) + Subtitle (lower) */}
+        <div style={leftColumn}>
+          <div style={leftUpperPane}>
+            {displayItems.map((item, i) => (
+              <DisplayItemRenderer key={i} item={item} />
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+          {subtitleVisible && (
+            <div style={leftLowerPane}>
+              <SubtitlePanel
+                renderMessages={renderMessages}
+                realtimeActive={realtimeActive}
+                micAnalyser={micAnalyser}
+                playAnalyser={playAnalyser}
+                onClose={() => setSubtitleVisible(false)}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Right: Raw event panels */}
+        {/* Right: Raw event panels (ctrl/data + render/audio) */}
         <div style={rightPane}>
-          {/* Ctrl channel — 1/3 height */}
           <div style={ctrlSection}>
             <div style={sectionHeader}>
               Ctrl <span style={countBadge}>{ctrlMessages.length}</span>
@@ -275,7 +320,6 @@ export default function ChatPanel({
             </div>
           </div>
 
-          {/* Data channel — 2/3 height */}
           <div style={dataSection}>
             <div style={sectionHeader}>
               Data <span style={countBadge}>{dataMessages.length}</span>
@@ -287,6 +331,40 @@ export default function ChatPanel({
               <div ref={dataEndRef} />
             </div>
           </div>
+
+          {renderPanelVisible && (
+            <div style={renderSection}>
+              <div style={sectionHeader}>
+                Render <span style={countBadge}>{renderMessages.length}</span>
+                <button onClick={() => setRenderPanelVisible(false)} style={panelCloseBtn}>×</button>
+              </div>
+              <div style={sectionBody}>
+                {renderMessages.map((m, i) => (
+                  <RawEventLine key={i} msg={m} channel="render" />
+                ))}
+                <div ref={renderEndRef} />
+              </div>
+            </div>
+          )}
+
+          {audioPanelVisible && (
+            <div style={audioSection}>
+              <div style={sectionHeader}>
+                Audio <span style={countBadge}>
+                  {audioStats.inFrames + audioStats.outFrames}
+                </span>
+                <button onClick={() => setAudioPanelVisible(false)} style={panelCloseBtn}>×</button>
+              </div>
+              <div style={sectionBody}>
+                <div style={{ fontSize: 11, color: '#555', lineHeight: 1.8 }}>
+                  <div>⬇ Received: {audioStats.inFrames} frames ({formatBytes(audioStats.inBytes)})</div>
+                  <div>⬆ Sent: {audioStats.outFrames} frames ({formatBytes(audioStats.outBytes)})</div>
+                  <div>Sample Rate: 24000 Hz / PCM16 / Mono</div>
+                  {realtimeActive && <div style={{ color: '#28a745' }}>● Streaming</div>}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -395,7 +473,7 @@ function DisplayItemRenderer({ item }: { item: DisplayItem }) {
 
 // --- Raw event line with timestamp + collapsible JSON ---
 
-function RawEventLine({ msg, channel }: { msg: WSMessage; channel: 'ctrl' | 'data' }) {
+function RawEventLine({ msg, channel }: { msg: WSMessage; channel: 'ctrl' | 'data' | 'render' }) {
   const [expanded, setExpanded] = useState(false);
   const ts = formatTime(msg.receivedAt);
   const isOut = msg.direction === 'out';
@@ -879,9 +957,17 @@ const dualPane: React.CSSProperties = {
   display: 'flex', flex: 1, gap: 8, minHeight: 0,
 };
 
-const leftPane: React.CSSProperties = {
+const leftColumn: React.CSSProperties = {
+  flex: 3, display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0,
+};
+
+const leftUpperPane: React.CSSProperties = {
   flex: 3, overflow: 'auto', padding: 12,
   border: '1px solid #eee', borderRadius: 4, background: '#fafafa',
+};
+
+const leftLowerPane: React.CSSProperties = {
+  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 80,
 };
 
 const rightPane: React.CSSProperties = {
@@ -894,13 +980,23 @@ const ctrlSection: React.CSSProperties = {
 };
 
 const dataSection: React.CSSProperties = {
-  flex: 2, display: 'flex', flexDirection: 'column', minHeight: 0,
+  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
   border: '1px solid #eee', borderRadius: 4, background: '#f8faff',
+};
+
+const renderSection: React.CSSProperties = {
+  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+  border: '1px solid #eee', borderRadius: 4, background: '#f0fff4',
+};
+
+const audioSection: React.CSSProperties = {
+  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+  border: '1px solid #eee', borderRadius: 4, background: '#fff5f5',
 };
 
 const sectionHeader: React.CSSProperties = {
   padding: '4px 8px', fontSize: 11, fontWeight: 700, borderBottom: '1px solid #eee',
-  flexShrink: 0,
+  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4,
 };
 
 const sectionBody: React.CSSProperties = {
@@ -911,6 +1007,17 @@ const countBadge: React.CSSProperties = {
   display: 'inline-block', padding: '1px 5px', borderRadius: 8,
   background: '#ddd', fontSize: 10, fontWeight: 400, marginLeft: 4,
 };
+
+const panelCloseBtn: React.CSSProperties = {
+  marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
+  color: '#999', fontSize: 13, padding: '0 2px', lineHeight: 1,
+};
+
+function formatBytes(b: number): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const rawLine: React.CSSProperties = {
   marginBottom: 2, paddingBottom: 2, borderBottom: '1px solid #f0f0f0',
