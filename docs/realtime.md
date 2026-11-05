@@ -1,6 +1,6 @@
 # Realtime Protocol
 
-Realtime enables voice interaction over a persistent session. Commands flow Yao → Tai on the ctrl stream; events flow Tai → Yao on the ctrl stream (lifecycle/control) or data stream (transcripts). A separate bidirectional audio stream carries PCM frames.
+Realtime enables voice interaction over a persistent session. Commands flow Yao → Tai on the ctrl stream; lifecycle/control events flow Tai → Yao on the ctrl stream. A separate bidirectional audio stream carries PCM frames. A dedicated render uni stream carries transcript, audio lifecycle, and emotion events. An optional motion channel carries avatar motion via QUIC datagram — see [render.md](render.md) for the full render protocol.
 
 ## Commands (Yao → Tai)
 
@@ -23,14 +23,17 @@ Server-initiated push events routed through the ctrl stream (reliable, unsequenc
 
 | Kind | Description |
 |------|-------------|
-| `realtime.started` | Realtime session started (capabilities + audio channel) |
+| `realtime.started` | Realtime session started (capabilities + audio/motion channels) |
 | `realtime.updated` | Realtime config updated |
 | `realtime.stopped` | Realtime session stopped |
 | `realtime.error` | Realtime-specific error |
+| `motion.started` | Motion output started (profile, fps, channel_id) |
+| `motion.stopped` | Motion output stopped (final_audio_seq, frames_sent) |
 
 ```json
 // realtime.started — Realtime session started
-{ "capabilities": { "audio": true, "motion": false }, "audio_channel_id": 1 }
+{ "capabilities": { "audio": true, "motion": true, "transcript": true },
+  "audio_channel_id": 1, "motion_channel_id": 2 }
 
 // realtime.updated — config changed
 { "audio": { "voice": "alloy" } }
@@ -39,7 +42,15 @@ Server-initiated push events routed through the ctrl stream (reliable, unsequenc
 
 // realtime.error
 { "code": "provider_error", "message": "upstream timeout" }
+
+// motion.started — avatar motion output started (blendshape_names present only for vendor profile)
+{ "profile": "arkit_52", "fps": 30, "motion_channel_id": 2, "motion_version": 2 }
+
+// motion.stopped — avatar motion output stopped
+{ "final_audio_seq": 5200, "frames_sent": 312 }
 ```
+
+For the full render protocol (motion frames, transcript, emotion, degradation), see [render.md](render.md).
 
 ### Audio Control
 
@@ -77,31 +88,6 @@ Server-initiated push events routed through the ctrl stream (reliable, unsequenc
 { "task_id": "task_def", "source": "realtime", "reason": "user_interrupt" }
 ```
 
-## Data Stream Events (Tai → Yao)
-
-Audio transcript events are delivered on the data stream (reliable, ordered).
-
-| Kind | ID Field | Description |
-|------|----------|-------------|
-| `audio.transcript.delta` | — | Model speech transcript streaming fragment |
-| `audio.transcript.done` | — | Model speech transcript complete |
-| `audio.done` | `item_id` | Model audio output complete |
-| `input_transcript.done` | — | User audio input transcript complete |
-
-```json
-// audio.transcript.delta — model speech transcript fragment
-{ "content": "Hello" }
-
-// audio.transcript.done — model speech transcript complete
-{ "transcript": "Hello, how can I help?" }
-
-// audio.done — model audio output complete
-{ "item_id": "item_001", "duration_ms": 5200 }
-
-// input_transcript.done — user audio input transcript complete
-{ "transcript": "What's the weather today?" }
-```
-
 ## Audio Stream
 
 When Realtime is active, a separate bidirectional audio stream carries PCM audio frames.
@@ -111,3 +97,14 @@ When Realtime is active, a separate bidirectional audio stream carries PCM audio
 | 1 | Yao → Tai | `audio` | `SessionData { session_id }` (opens audio bidi stream after `realtime.started`) |
 | — | Yao → Tai | PCM | Raw PCM audio frames (user microphone input) |
 | — | Tai → Yao | PCM | Model speech audio frames (TTS output) |
+
+## Render Channels
+
+Render data flows through dedicated transports, independent of ctrl and data streams:
+
+| Channel | Transport | Content | SDK Method | Availability |
+|---------|-----------|---------|------------|-------------|
+| Render | Dedicated uni stream (reliable, ordered) | `transcript.delta` / `transcript.done` / `audio.done` / `input_transcript.done` / `emotion` JSON | `RecvRender()` | Always (when Realtime is active) |
+| Motion | QUIC datagram (95 bytes/frame) | MotionFrame at 30fps | `RecvMotion()` | Only when motion is enabled |
+
+The render stream is always available when Realtime is active, even without motion. See [render.md](render.md) for the complete render protocol specification.

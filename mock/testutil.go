@@ -74,29 +74,44 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 	pool, _ := DefaultPoolConfig()
 	reg := node.NewRegistry(pool, workspace.DefaultPolicy())
 
-	tr := transport.NewServer(a, reg, codec)
-	transport.SetDefault(tr)
-
-	if unauthTimeout > 0 {
-		tr.SetUnauthTimeout(unauthTimeout)
-	}
-
 	httpSrv := transport.NewHTTPServer(a)
 
-	// Initialize light and heavy pools before starting listeners.
-	tr.InitLightPool(pool)
-	tr.InitHeavyPool(pool)
+	// StartTCP(":0") picks a random TCP port, but StartH3 needs the same
+	// port for UDP. Under concurrent tests another test may already hold
+	// that UDP port, causing "bind: address already in use". Retry with a
+	// fresh Server (Close invalidates the old one) up to 5 times.
+	const maxRetries = 5
+	var tr *transport.Server
+	for attempt := range maxRetries {
+		tr = transport.NewServer(a, reg, codec)
 
-	// Start TCP+H3 transport.
-	if err := tr.StartTCP("127.0.0.1:0", tlsCfg); err != nil {
-		t.Fatalf("startTCP: %v", err)
+		if unauthTimeout > 0 {
+			tr.SetUnauthTimeout(unauthTimeout)
+		}
+		tr.InitLightPool(pool)
+		tr.InitHeavyPool(pool)
+
+		if err := tr.StartTCP("127.0.0.1:0", tlsCfg); err != nil {
+			t.Fatalf("startTCP: %v", err)
+		}
+		tcpAddr := tr.TCPAddr()
+		host, port, _ := net.SplitHostPort(tcpAddr)
+		if err := tr.StartH3(net.JoinHostPort(host, port), tlsCfg); err != nil {
+			tr.CloseLightPool()
+			tr.CloseHeavyPool()
+			tr.Close(context.Background())
+			if attempt < maxRetries-1 {
+				t.Logf("startH3 attempt %d: %v (retrying)", attempt+1, err)
+				continue
+			}
+			t.Fatalf("startH3: %v (after %d attempts)", err, maxRetries)
+		}
+		break
 	}
+	transport.SetDefault(tr)
+
 	tcpAddr := tr.TCPAddr()
-	host, port, _ := net.SplitHostPort(tcpAddr)
-	if err := tr.StartH3(net.JoinHostPort(host, port), tlsCfg); err != nil {
-		tr.Close(context.Background())
-		t.Fatalf("startH3: %v", err)
-	}
+	_, port, _ := net.SplitHostPort(tcpAddr)
 
 	// Configure well-known info.
 	if wk, ok := a.(interface {

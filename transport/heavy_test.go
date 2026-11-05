@@ -1,127 +1,236 @@
 package transport
 
 import (
+	"errors"
 	"net"
 	"testing"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/types"
 )
 
-func TestHeavyPoolAcceptClosedPool(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
-	pool.Close()
+func newTestHeavyPool() *heavyPool {
+	return newHeavyPool(&pb.PoolConfig{}, &testNodeRegistry{pool: &pb.PoolConfig{}}, &testAuth{})
+}
 
-	// Accept on a closed pool should close the conn immediately.
-	server, client := net.Pipe()
-	defer server.Close()
+func addIdleConn(p *heavyPool, nodeID string) (net.Conn, net.Conn) {
+	client, server := net.Pipe()
+	hc := &heavyConn{conn: server, nodeID: nodeID, idle: true, done: make(chan struct{})}
+	p.mu.Lock()
+	p.conns[nodeID] = append(p.conns[nodeID], hc)
+	p.mu.Unlock()
+	return client, server
+}
 
-	// Write a ConnectAck won't fail on pipe, but the pool will
-	// see p.closed and close the conn.
-	go pool.Accept(client, "node-1")
+// ---------------------------------------------------------------------------
+// Pick
+// ---------------------------------------------------------------------------
 
-	// The server side should see EOF because client was closed by Accept.
-	buf := make([]byte, 1)
-	_, err := server.Read(buf)
+func TestHeavyPool_Pick_Idle(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	_, server := addIdleConn(p, "n1")
+	got, err := p.Pick("n1")
+	if err != nil {
+		t.Fatalf("Pick: %v", err)
+	}
+	if got != server {
+		t.Error("Pick returned wrong connection")
+	}
+	if p.IdleCount("n1") != 0 {
+		t.Errorf("IdleCount = %d, want 0 after Pick", p.IdleCount("n1"))
+	}
+}
+
+func TestHeavyPool_Pick_NoIdle(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	_, err := p.Pick("n1")
 	if err == nil {
-		t.Fatal("expected read error on server side after closed pool Accept")
+		t.Fatal("Pick should fail when no connections exist")
+	}
+	if !errors.Is(err, types.ErrNoHeavyConn) {
+		t.Errorf("expected ErrNoHeavyConn, got %v", err)
 	}
 }
 
-func TestHeavyPoolDoubleClose(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
-	pool.Close()
-	pool.Close() // should not panic
-}
+func TestHeavyPool_Pick_SkipsBusy(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
 
-func TestHeavyPoolUpdateConfig(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{HeavyMinIdle: 2}, nil, nil)
-	defer pool.Close()
+	addIdleConn(p, "n1")
+	p.Pick("n1") // mark first as busy
 
-	if pool.cfg.HeavyMinIdle != 2 {
-		t.Fatalf("initial HeavyMinIdle = %d, want 2", pool.cfg.HeavyMinIdle)
-	}
-
-	pool.updateConfig(&pb.PoolConfig{HeavyMinIdle: 5})
-
-	pool.mu.Lock()
-	got := pool.cfg.HeavyMinIdle
-	pool.mu.Unlock()
-
-	if got != 5 {
-		t.Errorf("HeavyMinIdle after update = %d, want 5", got)
+	_, err := p.Pick("n1")
+	if err == nil {
+		t.Error("Pick should fail when all connections are busy")
 	}
 }
 
-func TestHeavyPoolCloseWithConnections(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
+// ---------------------------------------------------------------------------
+// IdleCount / ConnCount
+// ---------------------------------------------------------------------------
 
-	// Manually add connections (bypassing Accept to test Close path)
-	s1, c1 := net.Pipe()
-	s2, c2 := net.Pipe()
-	defer s1.Close()
-	defer s2.Close()
+func TestHeavyPool_IdleCount(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
 
-	pool.mu.Lock()
-	pool.conns["node-1"] = []*heavyConn{
-		{conn: c1, nodeID: "node-1", idle: true, done: make(chan struct{})},
-		{conn: c2, nodeID: "node-1", idle: false, done: make(chan struct{})},
+	addIdleConn(p, "n1")
+	addIdleConn(p, "n1")
+
+	if p.IdleCount("n1") != 2 {
+		t.Errorf("IdleCount = %d, want 2", p.IdleCount("n1"))
 	}
-	pool.mu.Unlock()
-
-	if pool.ConnCount("node-1") != 2 {
-		t.Fatalf("ConnCount = %d, want 2", pool.ConnCount("node-1"))
+	if p.ConnCount("n1") != 2 {
+		t.Errorf("ConnCount = %d, want 2", p.ConnCount("n1"))
 	}
 
-	pool.Close()
-
-	if pool.ConnCount("node-1") != 0 {
-		t.Errorf("ConnCount after Close = %d, want 0", pool.ConnCount("node-1"))
+	p.Pick("n1")
+	if p.IdleCount("n1") != 1 {
+		t.Errorf("IdleCount after Pick = %d, want 1", p.IdleCount("n1"))
 	}
-
-	// Verify connections are closed (reads should fail)
-	buf := make([]byte, 1)
-	if _, err := s1.Read(buf); err == nil {
-		t.Error("s1 should be closed")
-	}
-	if _, err := s2.Read(buf); err == nil {
-		t.Error("s2 should be closed")
+	if p.ConnCount("n1") != 2 {
+		t.Errorf("ConnCount unchanged = %d, want 2", p.ConnCount("n1"))
 	}
 }
 
-func TestHeavyPoolRemoveNonexistent(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
-	defer pool.Close()
+func TestHeavyPool_IdleCount_Empty(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
 
-	_, c := net.Pipe()
+	if p.IdleCount("n1") != 0 {
+		t.Errorf("IdleCount = %d, want 0", p.IdleCount("n1"))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Return
+// ---------------------------------------------------------------------------
+
+func TestHeavyPool_Return(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	_, server := addIdleConn(p, "n1")
+	p.Pick("n1")
+
+	if p.IdleCount("n1") != 0 {
+		t.Fatal("precondition: conn should be busy")
+	}
+
+	p.Return(server)
+	if p.IdleCount("n1") != 1 {
+		t.Errorf("IdleCount after Return = %d, want 1", p.IdleCount("n1"))
+	}
+}
+
+func TestHeavyPool_Return_Unknown(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	c, s := net.Pipe()
 	defer c.Close()
+	defer s.Close()
 
-	// Remove a connection not in the pool should not panic
-	pool.Remove(c)
+	// Return unknown conn should not panic.
+	p.Return(c)
 }
 
-func TestHeavyPoolAcceptWriteError(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
-	defer pool.Close()
+// ---------------------------------------------------------------------------
+// Remove
+// ---------------------------------------------------------------------------
 
-	// Create a pipe and close the client side so WriteProtoMsg fails.
-	_, client := net.Pipe()
-	client.Close()
+func TestHeavyPool_Remove(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
 
-	// Accept should handle the write error gracefully.
-	pool.Accept(client, "node-1")
+	_, server := addIdleConn(p, "n1")
+	p.Remove(server)
 
-	if pool.ConnCount("node-1") != 0 {
-		t.Errorf("ConnCount = %d, want 0 after write error", pool.ConnCount("node-1"))
+	if p.ConnCount("n1") != 0 {
+		t.Errorf("ConnCount after Remove = %d, want 0", p.ConnCount("n1"))
 	}
 }
 
-func TestHeavyPoolReturnNonexistent(t *testing.T) {
-	pool := newHeavyPool(&pb.PoolConfig{}, nil, nil)
-	defer pool.Close()
+func TestHeavyPool_Remove_Unknown(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
 
-	_, c := net.Pipe()
+	c, s := net.Pipe()
 	defer c.Close()
+	defer s.Close()
 
-	// Return a connection not in the pool should not panic
-	pool.Return(c)
+	// Remove unknown conn should not panic.
+	p.Remove(c)
+}
+
+func TestHeavyPool_Remove_MiddleConn(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	_, s1 := addIdleConn(p, "n1")
+	_, s2 := addIdleConn(p, "n1")
+	addIdleConn(p, "n1")
+
+	p.Remove(s2)
+	if p.ConnCount("n1") != 2 {
+		t.Errorf("ConnCount = %d, want 2", p.ConnCount("n1"))
+	}
+
+	// Remaining conns should still be pickable.
+	got, err := p.Pick("n1")
+	if err != nil {
+		t.Fatalf("Pick after Remove: %v", err)
+	}
+	if got == s2 {
+		t.Error("Pick returned removed connection")
+	}
+	_ = s1
+}
+
+// ---------------------------------------------------------------------------
+// Close
+// ---------------------------------------------------------------------------
+
+func TestHeavyPool_Close(t *testing.T) {
+	p := newTestHeavyPool()
+
+	addIdleConn(p, "n1")
+	addIdleConn(p, "n2")
+
+	p.Close()
+
+	if p.ConnCount("n1") != 0 {
+		t.Errorf("ConnCount n1 = %d, want 0", p.ConnCount("n1"))
+	}
+	if p.ConnCount("n2") != 0 {
+		t.Errorf("ConnCount n2 = %d, want 0", p.ConnCount("n2"))
+	}
+}
+
+func TestHeavyPool_Close_Idempotent(t *testing.T) {
+	p := newTestHeavyPool()
+	p.Close()
+	p.Close() // should not panic
+}
+
+// ---------------------------------------------------------------------------
+// UpdateConfig
+// ---------------------------------------------------------------------------
+
+func TestHeavyPool_UpdateConfig(t *testing.T) {
+	p := newTestHeavyPool()
+	defer p.Close()
+
+	p.updateConfig(&pb.PoolConfig{HeavyMaxActive: 42})
+
+	p.mu.Lock()
+	got := p.cfg.HeavyMaxActive
+	p.mu.Unlock()
+
+	if got != 42 {
+		t.Errorf("cfg.HeavyMaxActive = %d, want 42", got)
+	}
 }

@@ -57,16 +57,19 @@ node.OnRegister(func(n types.RemoteNode) error {
 })
 
 server, err := tai.NewServer(&tai.ServerConfig{
-    Auth: auth.DefaultAuth(privateKey),
+    TransportPort: 6099,
+    HTTPPort:      5099,
+    Auth:          auth.DefaultAuth(privateKey),
 })
 
-server.Start(ctx)
+go server.Start(ctx)
 
 // After a Tai node connects:
 n := node.Get("node-1")
+opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
 session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
-    Token:     operationToken,
+    Token:     opToken,
     Request:   &types.SessionRequest{Runtime: "agent"},
 })
 ```
@@ -76,7 +79,16 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 ```go
 // Start realtime mode
 err := session.StartRealtime(&types.RealtimeRequest{
-    Model: "gpt-4o-realtime-preview",
+    Providers: types.Providers{
+        Primary: types.ProviderSpec{
+            Provider: "openai", Model: "gpt-4o-realtime-preview",
+            BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
+        },
+    },
+    Audio: &types.AudioConfig{
+        OutputFormat: "pcm16", SampleRate: 24000, Channels: 1,
+        VAD: &types.VADConfig{Mode: "server_vad"},
+    },
 })
 
 // Send microphone audio
@@ -90,16 +102,28 @@ go func() {
     }
 }()
 
-// Receive realtime events (ctrl stream)
+// Receive render stream events (transcript, emotion)
+go func() {
+    for evt := range session.RecvRender() {
+        switch evt.Type {
+        case "transcript.delta":
+            subtitle.Append(evt.Content)
+        case "transcript.done":
+            subtitle.Finalize(evt.Transcript)
+        }
+    }
+}()
+
+// Receive ctrl events
 go func() {
     for {
         action, err := session.RecvAction()
         if err != nil { break }
         switch action.Kind {
-        case "realtime.task_start":
-            // agent started processing a task
         case "audio.speech_started":
             // model started speaking
+        case "realtime.task_start":
+            // agent started processing a task
         }
     }
 }()

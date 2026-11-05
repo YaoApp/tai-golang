@@ -8,7 +8,7 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 **Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods + Realtime audio, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
 
-Not yet implemented: Server Tools, Tunnel, Realtime Motion/Video.
+Not yet implemented: Server Tools, Tunnel, Realtime Video, ONNX model integration for balanced render preset.
 
 ## Install
 
@@ -55,6 +55,7 @@ import (
 
     tai "github.com/yaoapp/tai-golang"
     "github.com/yaoapp/tai-golang/auth"
+    "github.com/yaoapp/tai-golang/node"
 )
 
 func main() {
@@ -69,27 +70,31 @@ func main() {
         log.Fatal(err)
     }
 
-    server.OnNodeRegister(func(node *tai.Node) error {
-        log.Printf("node registered: %s", node.ID)
+    node.OnRegister(func(n tai.RemoteNode) error {
+        log.Printf("node registered: %s", n.Info().ID)
         return nil
     })
 
-    if err := server.Start(context.Background()); err != nil {
-        log.Fatal(err)
-    }
+    go func() {
+        if err := server.Start(context.Background()); err != nil {
+            log.Fatal(err)
+        }
+    }()
+
+    // Block until interrupt
+    select {}
 }
 ```
 
 ## Opening a Session
 
 ```go
-// Issue tokens
-nodeToken, _ := authProvider.IssueNodeToken("node-1")
+// Issue an operation token for the session
 opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
 
-// Open session on a registered node
-session, err := server.OpenSession(ctx, &tai.OpenSessionRequest{
-    NodeID:    "node-1",
+// Get a registered node and open a session
+n := node.Get("node-1")
+session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     opToken,
     Request:   &tai.SessionRequest{Runtime: "agent"},
@@ -113,12 +118,17 @@ for {
 ```go
 // Start realtime mode
 session.StartRealtime(&tai.RealtimeRequest{
-    Model: "gpt-4o-realtime-preview",
+    Providers: tai.Providers{
+        Primary: tai.ProviderSpec{
+            Provider: "openai", Model: "gpt-4o-realtime-preview",
+            BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
+        },
+    },
+    Audio: &tai.AudioConfig{OutputFormat: "pcm16", SampleRate: 24000},
 })
 
 // Send audio + receive speech
 session.AudioAppend(pcmData)
-session.AudioCommit()
 
 go func() {
     for frame := range session.RecvAudio() {
@@ -126,8 +136,52 @@ go func() {
     }
 }()
 
+// Receive render stream (transcript, emotion)
+go func() {
+    for evt := range session.RecvRender() {
+        switch evt.Type {
+        case "transcript.delta":
+            subtitle.Append(evt.Content)
+        case "emotion":
+            mood.Set(evt.Emotion, evt.Intensity)
+        }
+    }
+}()
+
 session.StopRealtime()
 ```
+
+## Render (Avatar Motion)
+
+```go
+// Start with motion enabled
+session.StartRealtime(&tai.RealtimeRequest{
+    Providers: providers,
+    Audio:  &tai.AudioConfig{OutputFormat: "pcm16", SampleRate: 24000},
+    Motion: &tai.MotionConfig{Enabled: true, Provider: "fast", Profile: "arkit_52", FPS: 30},
+})
+
+// Receive motion frames (30fps, 87 bytes each)
+go func() {
+    for frame := range session.RecvMotion() {
+        avatar.ApplyBlendshapes(frame.Face, frame.Head, frame.Gaze)
+    }
+}()
+
+// Receive render stream events (transcript, audio lifecycle, emotion)
+go func() {
+    for evt := range session.RecvRender() {
+        switch evt.Type {
+        case "transcript.delta", "transcript.done":
+            subtitle.Update(evt.Type, evt.Content, evt.Transcript)
+        case "emotion":
+            mood.Set(evt.State, evt.Emotion, evt.Intensity)
+        }
+    }
+}()
+```
+
+See [docs/render.md](docs/render.md) for the complete render protocol.
 
 ## Working with Workspaces
 
@@ -212,6 +266,7 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 - [Session Protocol](docs/session-protocol.md)
 - [ACP Events Reference](docs/events.md)
 - [Realtime Protocol](docs/realtime.md)
+- [Render Protocol](docs/render.md)
 - [Resource URI Convention](docs/uri.md)
 - [Demo App Guide](docs/demo-guide.md)
 
@@ -225,8 +280,9 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 
 - **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
 - **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
-- **Session (25 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, RecvAudio, RecvMotion (stub), SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
+- **Session (28 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, RecvAudio, RecvMotion, RecvRender, SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
 - **Realtime Audio**: QUIC datagram (H3) + bidi stream fallback (H2), EncodeAudioFrame/DecodeAudioFrame, DatagramConn interface, H2 stale frame detection
+- **Render (Avatar Motion)**: MotionFrame 87-byte wire format (Pack/Unpack), motion datagram encode/decode (95 bytes), RecvMotion (QUIC datagram), RecvRender (render stream), RenderEvent type, MotionConfig (provider/profile/fps)
 - **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal
 - **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions + Exists/WriteArchive/ReadManifest), commit/rollback, history query, GC, watch — 36 transport command kinds
 - **Context API**: Four-level scope model (bot → home → board → session), SeedContext, ReadContext, MergeContext
@@ -235,13 +291,14 @@ cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
 - **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
 - **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
-- **Test Infrastructure**: MockNode, MockLLM, MockSession (+ Realtime auto-reply), MockLightConn/Stream, 310+ test functions
+- **Test Infrastructure**: MockNode, MockLLM, MockSession (+ Realtime auto-reply), MockLightConn/Stream, 400+ test functions
 
 ## Not Yet Implemented
 
 - Server Tools (RegisterTool / tai call)
 - Tunnel
-- Realtime Motion/Video (Plan 7)
+- Realtime Video (Plan 7b)
+- ONNX model integration for balanced render preset
 - Container remote management
 
 ## License

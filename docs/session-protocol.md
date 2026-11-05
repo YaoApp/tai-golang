@@ -77,6 +77,7 @@ Same frame format as data events (`SessionMessage { kind, data(JSON) }`).
 | Category | Kinds |
 |----------|-------|
 | Realtime | See [realtime.md](realtime.md#ctrl-stream-events-tai--yao) |
+| Render | `motion.started`, `motion.stopped` (ctrl stream); transcript/emotion via dedicated render uni stream — see [render.md](render.md) |
 | Workspace | `workspace_change` |
 
 ### Workspace Change
@@ -101,4 +102,4 @@ ACP `UpdateType` values as `SessionMessage.kind`. Full JSON payloads and parsing
 | Plan | `plan_update`, `plan_removed`, `compaction_update`, `compaction_summary_chunk` |
 | Subagent | `subagent_update`, `session_message`, `session_message_chunk` |
 
-Realtime data stream events and audio stream: see [realtime.md](realtime.md).
+Realtime does **not** add events to the data stream. Transcript, audio lifecycle, and emotion events flow through a dedicated render uni stream (`RecvRender()`). Audio and motion use their own channels. See [realtime.md](realtime.md) and [render.md](render.md).

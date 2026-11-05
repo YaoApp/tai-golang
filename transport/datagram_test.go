@@ -1,7 +1,10 @@
 package transport
 
 import (
+	"math"
 	"testing"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
 func TestEncodeDecodeAudioFrame(t *testing.T) {
@@ -112,5 +115,102 @@ func TestEncodeAudioFrame_LargePCM(t *testing.T) {
 			t.Errorf("pcm[%d] = %d, want %d", i, gotPCM[i], b)
 			break
 		}
+	}
+}
+
+// --- Motion datagram tests ---
+
+func TestEncodeDecodeMotionFrame_Roundtrip(t *testing.T) {
+	f := &types.MotionFrame{
+		Version:      types.MotionFrameVersion,
+		Profile:      types.ProfileARKit52,
+		State:        types.StateSpeaking,
+		Emotion:      types.EmotionHappy,
+		Intensity:    200,
+		FrameSeq:     1234,
+		AudioSeq:     567890,
+		PtsMs:        9999,
+		GestureID:    types.GestureWave,
+		GesturePhase: 128,
+	}
+	for i := range f.Face {
+		f.Face[i] = uint8(i * 5)
+	}
+	f.Head = [3]int8{-10, 20, -5}
+	f.Gaze = [2]int8{3, -7}
+	f.Viseme = [5]uint8{100, 50, 200, 30, 10}
+	for i := range f.Body {
+		f.Body[i] = uint8(128 + i)
+	}
+
+	channelID := uint32(42)
+	seq := uint32(7)
+	encoded := EncodeMotionFrame(channelID, seq, f)
+	if len(encoded) != motionDatagramSize {
+		t.Fatalf("encoded size = %d, want %d", len(encoded), motionDatagramSize)
+	}
+
+	gotCh, gotSeq, gotFrame, err := DecodeMotionFrame(encoded)
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if gotCh != channelID {
+		t.Errorf("channelID = %d, want %d", gotCh, channelID)
+	}
+	if gotSeq != seq {
+		t.Errorf("seq = %d, want %d", gotSeq, seq)
+	}
+	if gotFrame.Version != f.Version || gotFrame.Profile != f.Profile {
+		t.Errorf("version/profile mismatch")
+	}
+	if gotFrame.FrameSeq != f.FrameSeq || gotFrame.AudioSeq != f.AudioSeq {
+		t.Errorf("seq fields mismatch: frame=%d/%d audio=%d/%d",
+			gotFrame.FrameSeq, f.FrameSeq, gotFrame.AudioSeq, f.AudioSeq)
+	}
+	if gotFrame.Head != f.Head || gotFrame.Gaze != f.Gaze {
+		t.Errorf("head/gaze mismatch")
+	}
+}
+
+func TestDecodeMotionFrame_TooShort(t *testing.T) {
+	for _, size := range []int{0, 8, 50, 94} {
+		_, _, _, err := DecodeMotionFrame(make([]byte, size))
+		if err != ErrShortDatagram {
+			t.Errorf("size %d: err = %v, want ErrShortDatagram", size, err)
+		}
+	}
+}
+
+func TestEncodeDecodeMotionFrame_MaxValues(t *testing.T) {
+	f := &types.MotionFrame{
+		Version:      types.MotionFrameVersion,
+		Profile:      255,
+		Intensity:    255,
+		FrameSeq:     math.MaxUint16,
+		AudioSeq:     math.MaxUint32,
+		PtsMs:        math.MaxUint32,
+		GesturePhase: 255,
+	}
+	f.Head = [3]int8{127, -128, 0}
+	f.Gaze = [2]int8{-128, 127}
+	encoded := EncodeMotionFrame(math.MaxUint32, math.MaxUint32, f)
+	gotCh, gotSeq, gotFrame, err := DecodeMotionFrame(encoded)
+	if err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if gotCh != math.MaxUint32 || gotSeq != math.MaxUint32 {
+		t.Errorf("header max values failed")
+	}
+	if gotFrame.FrameSeq != math.MaxUint16 || gotFrame.AudioSeq != math.MaxUint32 {
+		t.Errorf("frame max values failed")
+	}
+	if gotFrame.Head != f.Head || gotFrame.Gaze != f.Gaze {
+		t.Errorf("signed fields mismatch")
+	}
+}
+
+func TestMotionDatagramSize_Is95(t *testing.T) {
+	if motionDatagramSize != 95 {
+		t.Errorf("motionDatagramSize = %d, want 95", motionDatagramSize)
 	}
 }

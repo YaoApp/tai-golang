@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/yaoapp/tai-golang/pb"
@@ -58,7 +60,7 @@ func (cs *controlStream) run(ctx context.Context) {
 
 		msg, err := cs.codec.ReadFrame(cs.r)
 		if err != nil {
-			if err != io.EOF {
+			if !isNormalClose(err) {
 				log.Printf("tai-sdk: control read error node=%s: %v", cs.nodeID, err)
 			}
 			return
@@ -148,4 +150,18 @@ func (cs *controlStream) WriteControl(msg *pb.Payload) error {
 		cs.f.Flush()
 	}
 	return nil
+}
+
+// isNormalClose reports whether err represents a normal connection teardown
+// that should not be logged as an error.
+func isNormalClose(err error) bool {
+	if err == nil || err == io.EOF {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	// QUIC/H3 normal close: "H3 error (0x0)" or application error code 0.
+	s := err.Error()
+	return strings.Contains(s, "(0x0)") || strings.Contains(s, "NO_ERROR")
 }

@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,9 +52,19 @@ type Session struct {
 	audioChannelID uint32
 	audioSeq       atomic.Uint32          // outbound datagram sequence counter
 	audioOut       chan *types.AudioFrame // downstream audio frames
-	audioCancel    context.CancelFunc     // cancels audio I/O goroutines
+	audioCancel    context.CancelFunc     // cancels H2 audio stream goroutine; nil on H3
 	audioStream    io.ReadWriteCloser     // H2 audio bidi stream; nil on H3
 	audioWriteMu   sync.Mutex             // serializes H2 audio stream writes
+
+	// Datagram demux (H3 only): single goroutine dispatches by channel ID.
+	dgCancel context.CancelFunc // cancels the shared datagram read loop
+
+	// Motion + render stream state (protected by mu)
+	motionChannelID uint32
+	motionOut       chan *types.MotionFrame // downstream motion frames; nil when motion disabled
+	renderOut       chan *types.RenderEvent // downstream render stream events (transcript + emotion)
+	renderStream    io.ReadWriteCloser      // dedicated render uni stream; nil before StartRealtime
+	renderCancel    context.CancelFunc
 }
 
 // OpenStreamFunc opens a Light stream to a node. Used by H2 audio to open
@@ -202,8 +213,9 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 	}
 
 	var started struct {
-		Capabilities   json.RawMessage `json:"capabilities"`
-		AudioChannelID uint32          `json:"audio_channel_id"`
+		Capabilities    json.RawMessage `json:"capabilities"`
+		AudioChannelID  uint32          `json:"audio_channel_id"`
+		MotionChannelID uint32          `json:"motion_channel_id"`
 	}
 	if err := json.Unmarshal(msg.Data, &started); err != nil {
 		return fmt.Errorf("parse realtime.started: %w", err)
@@ -211,26 +223,69 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 
 	audioOut := make(chan *types.AudioFrame, 64)
 	audioCtx, audioCancel := context.WithCancel(context.Background())
+	renderOut := make(chan *types.RenderEvent, 16)
+	renderCtx, renderCancel := context.WithCancel(context.Background())
 
 	s.mu.Lock()
 	s.audioChannelID = started.AudioChannelID
 	s.audioOut = audioOut
 	s.audioCancel = audioCancel
+	s.renderOut = renderOut
+	s.renderCancel = renderCancel
 	s.mu.Unlock()
 
 	// Start audio I/O based on transport protocol.
 	if s.dgConn != nil && s.dgConn.Proto() == "H3" {
-		go s.recvAudioDatagram(audioCtx, started.AudioChannelID, audioOut)
+		// H3: single datagram read loop demuxes by channel ID.
+		var motionOut chan *types.MotionFrame
+		if started.MotionChannelID != 0 {
+			motionOut = make(chan *types.MotionFrame, 8)
+		}
+		dgCtx, dgCancel := context.WithCancel(context.Background())
+		s.mu.Lock()
+		s.dgCancel = dgCancel
+		if motionOut != nil {
+			s.motionChannelID = started.MotionChannelID
+			s.motionOut = motionOut
+		}
+		s.mu.Unlock()
+		go s.recvDatagramLoop(dgCtx, started.AudioChannelID, audioOut, started.MotionChannelID, motionOut)
 	} else {
+		// H2: audio over a dedicated bidi stream; motion not supported.
 		if err := s.openAudioStreamH2(audioCtx, started.AudioChannelID, audioOut); err != nil {
 			audioCancel()
+			renderCancel()
 			s.mu.Lock()
 			s.audioChannelID = 0
 			s.audioOut = nil
 			s.audioCancel = nil
+			s.renderOut = nil
+			s.renderCancel = nil
 			s.mu.Unlock()
 			return fmt.Errorf("open audio stream: %w", err)
 		}
+	}
+
+	// Open dedicated render uni stream (transcript + emotion).
+	if err := s.openRenderStream(renderCtx, renderOut); err != nil {
+		// Render stream failed — tear down audio and motion.
+		audioCancel()
+		renderCancel()
+		if s.dgCancel != nil {
+			s.dgCancel()
+		}
+		s.mu.Lock()
+		s.audioChannelID = 0
+		s.audioOut = nil
+		s.audioCancel = nil
+		s.dgCancel = nil
+		s.motionChannelID = 0
+		s.motionOut = nil
+		s.renderOut = nil
+		s.renderStream = nil
+		s.renderCancel = nil
+		s.mu.Unlock()
+		return fmt.Errorf("open render stream: %w", err)
 	}
 
 	return nil
@@ -265,16 +320,32 @@ func (s *Session) StopRealtime() error {
 	s.audioChannelID = 0
 	s.audioOut = nil
 	s.audioSeq.Store(0)
+
+	dgCancelFn := s.dgCancel
+	s.dgCancel = nil
+	s.motionChannelID = 0
+	s.motionOut = nil
+
+	renderCancelFn := s.renderCancel
+	s.renderCancel = nil
+	s.renderStream = nil
+	s.renderOut = nil
 	s.mu.Unlock()
 
 	if cancelFn != nil {
 		cancelFn()
 	}
+	if dgCancelFn != nil {
+		dgCancelFn()
+	}
+	if renderCancelFn != nil {
+		renderCancelFn() // triggers stream.Close() in readRenderStream's cancel goroutine
+	}
 	if audioStream != nil {
 		audioStream.Close()
 	}
-	// audioOut is closed by the audio I/O goroutine on exit (via defer),
-	// not here, to avoid a send-on-closed-channel panic.
+	// audioOut/motionOut/renderOut are closed by their I/O goroutines on exit
+	// (via defer), not here, to avoid a send-on-closed-channel panic.
 
 	return s.sendCtrl("realtime.stop", nil)
 }
@@ -353,30 +424,67 @@ func (s *Session) RecvAudio() <-chan *types.AudioFrame {
 	return s.audioOut
 }
 
-// recvAudioDatagram runs in a goroutine, receiving QUIC datagrams,
-// decoding audio frames, filtering by channelID, and pushing to audioOut.
-func (s *Session) recvAudioDatagram(ctx context.Context, channelID uint32, audioOut chan<- *types.AudioFrame) {
+// RecvMotion returns a channel that delivers motion frames from Tai.
+// Returns nil if motion is not enabled.
+func (s *Session) RecvMotion() <-chan *types.MotionFrame {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.motionOut
+}
+
+// RecvRender returns a channel that delivers render stream events
+// (transcript, audio.done, input_transcript.done, emotion).
+// Returns nil if Realtime is not active.
+func (s *Session) RecvRender() <-chan *types.RenderEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.renderOut
+}
+
+// recvDatagramLoop runs a single goroutine that reads all QUIC datagrams
+// and dispatches them by channel ID to audio or motion consumers. This avoids
+// the race where two independent goroutine readers could steal each other's
+// datagrams from the same connection.
+func (s *Session) recvDatagramLoop(ctx context.Context, audioCh uint32, audioOut chan<- *types.AudioFrame, motionCh uint32, motionOut chan<- *types.MotionFrame) {
 	defer close(audioOut)
+	if motionOut != nil {
+		defer close(motionOut)
+	}
 	for {
 		data, err := s.dgConn.ReceiveDatagram(ctx)
 		if err != nil {
 			return
 		}
-		ch, seq, pcm, err := transport.DecodeAudioFrame(data)
-		if err != nil || ch != channelID {
+		if len(data) < 4 {
 			continue
 		}
-		select {
-		case audioOut <- &types.AudioFrame{Data: pcm, Seq: seq}:
-		case <-ctx.Done():
-			return
+		ch := binary.BigEndian.Uint32(data[0:4])
+		switch ch {
+		case audioCh:
+			_, seq, pcm, err := transport.DecodeAudioFrame(data)
+			if err != nil {
+				continue
+			}
+			select {
+			case audioOut <- &types.AudioFrame{Data: pcm, Seq: seq}:
+			case <-ctx.Done():
+				return
+			}
+		case motionCh:
+			if motionOut == nil {
+				continue
+			}
+			_, _, frame, err := transport.DecodeMotionFrame(data)
+			if err != nil {
+				continue
+			}
+			select {
+			case motionOut <- frame:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
-}
-
-// RecvMotion is a placeholder for the motion extension (Plan 7).
-func (s *Session) RecvMotion() <-chan *types.MotionFrame {
-	return nil
 }
 
 // SendVideoFrame is a placeholder for the video extension (Plan 7).
@@ -466,10 +574,27 @@ func (s *Session) Close(ctx context.Context) error {
 	s.audioChannelID = 0
 	s.audioOut = nil
 	s.audioSeq.Store(0)
+
+	// Cancel datagram loop + motion/render goroutines if active.
+	dgCancelFn := s.dgCancel
+	s.dgCancel = nil
+	s.motionChannelID = 0
+	s.motionOut = nil
+
+	renderCancelFn := s.renderCancel
+	s.renderCancel = nil
+	s.renderStream = nil
+	s.renderOut = nil
 	s.mu.Unlock()
 
 	if cancelFn != nil {
 		cancelFn()
+	}
+	if dgCancelFn != nil {
+		dgCancelFn()
+	}
+	if renderCancelFn != nil {
+		renderCancelFn() // triggers stream.Close() in readRenderStream's cancel goroutine
 	}
 	if audioStream != nil {
 		audioStream.Close()

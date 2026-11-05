@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+
+	"github.com/yaoapp/tai-golang/types"
 )
 
 // Datagram frame format (05-channels-realtime.md):
@@ -43,4 +45,31 @@ func DecodeAudioFrame(data []byte) (channelID, seq uint32, pcm []byte, err error
 	seq = binary.BigEndian.Uint32(data[4:8])
 	pcm = data[datagramHeaderSize:]
 	return channelID, seq, pcm, nil
+}
+
+// motionDatagramSize is the total size of a motion datagram: 8-byte header + 87-byte MotionFrame.
+const motionDatagramSize = datagramHeaderSize + types.MotionFrameSize // 95
+
+// EncodeMotionFrame encodes a MotionFrame into the datagram wire format (95 bytes).
+func EncodeMotionFrame(channelID, seq uint32, frame *types.MotionFrame) []byte {
+	buf := make([]byte, motionDatagramSize)
+	binary.BigEndian.PutUint32(buf[0:4], channelID)
+	binary.BigEndian.PutUint32(buf[4:8], seq)
+	packed := frame.Pack()
+	copy(buf[datagramHeaderSize:], packed[:])
+	return buf
+}
+
+// DecodeMotionFrame decodes a motion datagram into its components.
+func DecodeMotionFrame(data []byte) (channelID, seq uint32, frame *types.MotionFrame, err error) {
+	if len(data) < motionDatagramSize {
+		return 0, 0, nil, ErrShortDatagram
+	}
+	channelID = binary.BigEndian.Uint32(data[0:4])
+	seq = binary.BigEndian.Uint32(data[4:8])
+	frame, err = types.UnpackMotionFrame(data[datagramHeaderSize:])
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return channelID, seq, frame, nil
 }

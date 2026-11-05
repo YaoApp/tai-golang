@@ -54,6 +54,7 @@ type realtimeTestEnv struct {
 	session *Session
 	ctrl    *testPair
 	data    *testPair
+	render  *testPair // dedicated render uni stream (Tai→SDK)
 	dgConn  *mockDatagramConn
 	codec   *transport.FrameCodec
 }
@@ -62,16 +63,21 @@ func newRealtimeTestEnv(proto string) *realtimeTestEnv {
 	codec := transport.DefaultCodec()
 	ctrl := newTestPair()
 	data := newTestPair()
+	render := newTestPair()
 	dgConn := newMockDatagramConn(proto)
 
 	s := New("rt-sess", "rt-node", ctrl.stream, data.stream, codec, Options{
 		DatagramConn: dgConn,
+		OpenStreamFn: func(_ context.Context, _ string, first *pb.Payload) (io.ReadWriteCloser, error) {
+			return render.stream, nil
+		},
 	})
 
 	return &realtimeTestEnv{
 		session: s,
 		ctrl:    ctrl,
 		data:    data,
+		render:  render,
 		dgConn:  dgConn,
 		codec:   codec,
 	}
@@ -80,6 +86,7 @@ func newRealtimeTestEnv(proto string) *realtimeTestEnv {
 func (env *realtimeTestEnv) close() {
 	env.ctrl.close()
 	env.data.close()
+	env.render.close()
 }
 
 // simulateTaiRealtimeStart reads the realtime.start ctrl command from
@@ -565,12 +572,13 @@ func TestMotionVideoStubs(t *testing.T) {
 	}
 }
 
-// h2TestEnv sets up a session with H2 transport and a mock audio stream.
+// h2TestEnv sets up a session with H2 transport and mock audio/render streams.
 type h2TestEnv struct {
 	session *Session
 	ctrl    *testPair
 	data    *testPair
 	audio   *testPair // mock H2 audio bidi stream
+	render  *testPair // mock render uni stream
 	codec   *transport.FrameCodec
 }
 
@@ -579,11 +587,15 @@ func newH2TestEnv() *h2TestEnv {
 	ctrl := newTestPair()
 	data := newTestPair()
 	audio := newTestPair()
+	render := newTestPair()
 	dgConn := newMockDatagramConn("H2")
 
 	s := New("h2-sess", "h2-node", ctrl.stream, data.stream, codec, Options{
 		DatagramConn: dgConn,
-		OpenStreamFn: func(_ context.Context, _ string, _ *pb.Payload) (io.ReadWriteCloser, error) {
+		OpenStreamFn: func(_ context.Context, _ string, first *pb.Payload) (io.ReadWriteCloser, error) {
+			if first.Kind == "render" {
+				return render.stream, nil
+			}
 			return audio.stream, nil
 		},
 	})
@@ -593,6 +605,7 @@ func newH2TestEnv() *h2TestEnv {
 		ctrl:    ctrl,
 		data:    data,
 		audio:   audio,
+		render:  render,
 		codec:   codec,
 	}
 }
@@ -601,6 +614,7 @@ func (env *h2TestEnv) close() {
 	env.ctrl.close()
 	env.data.close()
 	env.audio.close()
+	env.render.close()
 }
 
 func (env *h2TestEnv) simulateTaiRealtimeStart(channelID uint32) {
@@ -1004,3 +1018,359 @@ type nopWriteCloser struct{}
 
 func (nopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
 func (nopWriteCloser) Close() error                { return nil }
+
+// ---------------------------------------------------------------------------
+// RecvRender + render uni stream tests
+// ---------------------------------------------------------------------------
+
+// sendRenderFrame writes a render event frame on the remote end of the render
+// stream, simulating Tai sending data to the SDK.
+func (env *realtimeTestEnv) sendRenderFrame(kind string, payload []byte) {
+	env.codec.WriteFrame(env.render.remoteW, &pb.Payload{
+		Namespace: types.NamespaceSession,
+		Kind:      kind,
+		Data:      payload,
+	})
+}
+
+func TestRecvRender_NilBeforeStart(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	if env.session.RecvRender() != nil {
+		t.Error("RecvRender should be nil before StartRealtime")
+	}
+}
+
+func TestRecvRender_ActiveAfterStart(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	if env.session.RecvRender() == nil {
+		t.Error("RecvRender should not be nil after StartRealtime")
+	}
+}
+
+func TestRecvRender_NilAfterStop(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	go func() { env.codec.ReadFrame(env.ctrl.remoteR) }()
+	env.session.StopRealtime()
+
+	if env.session.RecvRender() != nil {
+		t.Error("RecvRender should be nil after StopRealtime")
+	}
+}
+
+func TestRenderStream_AllTypes(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	tests := []struct {
+		name    string
+		kind    string
+		payload string
+		check   func(t *testing.T, evt *types.RenderEvent)
+	}{
+		{
+			name:    "TranscriptDelta",
+			kind:    "transcript.delta",
+			payload: `{"content":"Hello","audio_seq":10}`,
+			check: func(t *testing.T, evt *types.RenderEvent) {
+				if evt.Type != "transcript.delta" {
+					t.Errorf("Type = %q, want transcript.delta", evt.Type)
+				}
+				if evt.Content != "Hello" {
+					t.Errorf("Content = %q, want Hello", evt.Content)
+				}
+				if evt.AudioSeq != 10 {
+					t.Errorf("AudioSeq = %d, want 10", evt.AudioSeq)
+				}
+			},
+		},
+		{
+			name:    "TranscriptDone",
+			kind:    "transcript.done",
+			payload: `{"transcript":"Hello world","audio_seq":20}`,
+			check: func(t *testing.T, evt *types.RenderEvent) {
+				if evt.Type != "transcript.done" {
+					t.Errorf("Type = %q, want transcript.done", evt.Type)
+				}
+				if evt.Transcript != "Hello world" {
+					t.Errorf("Transcript = %q, want Hello world", evt.Transcript)
+				}
+			},
+		},
+		{
+			name:    "AudioDone",
+			kind:    "audio.done",
+			payload: `{"item_id":"item-001","duration_ms":5200,"audio_seq":30}`,
+			check: func(t *testing.T, evt *types.RenderEvent) {
+				if evt.Type != "audio.done" {
+					t.Errorf("Type = %q, want audio.done", evt.Type)
+				}
+				if evt.ItemID != "item-001" {
+					t.Errorf("ItemID = %q, want item-001", evt.ItemID)
+				}
+				if evt.DurationMs != 5200 {
+					t.Errorf("DurationMs = %d, want 5200", evt.DurationMs)
+				}
+			},
+		},
+		{
+			name:    "InputTranscriptDone",
+			kind:    "input_transcript.done",
+			payload: `{"transcript":"user said something","audio_seq":15}`,
+			check: func(t *testing.T, evt *types.RenderEvent) {
+				if evt.Type != "input_transcript.done" {
+					t.Errorf("Type = %q, want input_transcript.done", evt.Type)
+				}
+				if evt.Transcript != "user said something" {
+					t.Errorf("Transcript = %q, want user said something", evt.Transcript)
+				}
+			},
+		},
+		{
+			name:    "Emotion",
+			kind:    "emotion",
+			payload: `{"state":"speaking","emotion":"happy","intensity":200}`,
+			check: func(t *testing.T, evt *types.RenderEvent) {
+				if evt.Type != "emotion" {
+					t.Errorf("Type = %q, want emotion", evt.Type)
+				}
+				if evt.State != "speaking" {
+					t.Errorf("State = %q, want speaking", evt.State)
+				}
+				if evt.Emotion != "happy" {
+					t.Errorf("Emotion = %q, want happy", evt.Emotion)
+				}
+				if evt.Intensity != 200 {
+					t.Errorf("Intensity = %d, want 200", evt.Intensity)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env.sendRenderFrame(tc.kind, []byte(tc.payload))
+			ch := env.session.RecvRender()
+			select {
+			case evt := <-ch:
+				tc.check(t, evt)
+			case <-time.After(time.Second):
+				t.Fatal("timeout waiting for render event")
+			}
+		})
+	}
+}
+
+func TestRenderStream_InvalidJSON(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	// Send invalid JSON on the render stream — should be silently skipped.
+	env.sendRenderFrame("emotion", []byte(`{bad json`))
+
+	// Then send a valid frame to verify the stream is still alive.
+	env.sendRenderFrame("emotion", []byte(`{"state":"idle","emotion":"neutral","intensity":0}`))
+
+	ch := env.session.RecvRender()
+	select {
+	case evt := <-ch:
+		if evt.Type != "emotion" {
+			t.Errorf("Type = %q, want emotion", evt.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout: render stream should recover from invalid JSON")
+	}
+}
+
+func TestRenderStream_ClosedOnStop(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	ch := env.session.RecvRender()
+
+	go func() { env.codec.ReadFrame(env.ctrl.remoteR) }()
+	env.session.StopRealtime()
+
+	// renderOut should be closed (readRenderStream defers close).
+	select {
+	case _, ok := <-ch:
+		if ok {
+			// Drain remaining events (may have been queued before close).
+			for range ch {
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("renderOut channel not closed after StopRealtime")
+	}
+}
+
+func TestRecvMotion_H3_Roundtrip(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	// Start realtime with motion enabled (motion_channel_id = 2).
+	go func() {
+		frame, err := env.codec.ReadFrame(env.ctrl.remoteR)
+		if err != nil {
+			return
+		}
+		var msg pb.SessionMessage
+		proto.Unmarshal(frame.Data, &msg)
+
+		startedData, _ := json.Marshal(map[string]any{
+			"capabilities":      map[string]any{"audio": true, "motion": true},
+			"audio_channel_id":  1,
+			"motion_channel_id": 2,
+		})
+		replyData, _ := proto.Marshal(&pb.SessionMessage{
+			Kind: "realtime.started",
+			Data: startedData,
+		})
+		env.codec.WriteFrame(env.ctrl.remoteW, &pb.Payload{
+			Namespace: types.NamespaceSession,
+			Kind:      "event",
+			Data:      replyData,
+		})
+	}()
+
+	err := env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+		Motion: &types.MotionConfig{Enabled: true, Provider: "fast", Profile: "arkit_52", FPS: 30},
+	})
+	if err != nil {
+		t.Fatalf("StartRealtime: %v", err)
+	}
+
+	if env.session.RecvMotion() == nil {
+		t.Fatal("RecvMotion should not be nil when motion is enabled")
+	}
+
+	// Simulate Tai sending a motion datagram on channel 2.
+	mf := &types.MotionFrame{
+		Version:   types.MotionFrameVersion,
+		Profile:   types.ProfileARKit52,
+		State:     types.StateSpeaking,
+		Emotion:   types.EmotionHappy,
+		Intensity: 200,
+		FrameSeq:  42,
+		AudioSeq:  100,
+		PtsMs:     1400,
+	}
+	encoded := transport.EncodeMotionFrame(2, 1, mf)
+	env.dgConn.recvCh <- encoded
+
+	motionCh := env.session.RecvMotion()
+	select {
+	case got := <-motionCh:
+		if got.FrameSeq != 42 {
+			t.Errorf("FrameSeq = %d, want 42", got.FrameSeq)
+		}
+		if got.State != types.StateSpeaking {
+			t.Errorf("State = %d, want %d", got.State, types.StateSpeaking)
+		}
+		if got.Emotion != types.EmotionHappy {
+			t.Errorf("Emotion = %d, want %d", got.Emotion, types.EmotionHappy)
+		}
+		if got.Intensity != 200 {
+			t.Errorf("Intensity = %d, want 200", got.Intensity)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for motion frame")
+	}
+
+	// Wrong channel ID should be filtered.
+	wrongFrame := transport.EncodeMotionFrame(99, 2, mf)
+	env.dgConn.recvCh <- wrongFrame
+
+	goodFrame := transport.EncodeMotionFrame(2, 3, mf)
+	env.dgConn.recvCh <- goodFrame
+
+	select {
+	case got := <-motionCh:
+		if got.FrameSeq != 42 {
+			t.Errorf("expected frame with FrameSeq=42, got %d (wrong channel should be filtered)", got.FrameSeq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for second motion frame")
+	}
+}
+
+func TestRenderEvent_UniStream(t *testing.T) {
+	env := newRealtimeTestEnv("H3")
+	defer env.close()
+
+	env.simulateTaiRealtimeStart(1)
+	env.session.StartRealtime(&types.RealtimeRequest{
+		Providers: types.Providers{
+			Primary: types.ProviderSpec{Provider: "openai", Model: "gpt-realtime-2.1"},
+		},
+	})
+
+	// Simulate Tai sending an emotion event on the dedicated render stream.
+	emotionPayload, _ := json.Marshal(map[string]any{
+		"state": "thinking", "emotion": "confused", "intensity": 150,
+	})
+	env.sendRenderFrame("emotion", emotionPayload)
+
+	// Should arrive on RecvRender.
+	renderCh := env.session.RecvRender()
+	select {
+	case evt := <-renderCh:
+		if evt.Type != "emotion" {
+			t.Errorf("Type = %q, want emotion", evt.Type)
+		}
+		if evt.State != "thinking" {
+			t.Errorf("State = %q, want thinking", evt.State)
+		}
+		if evt.Emotion != "confused" {
+			t.Errorf("Emotion = %q, want confused", evt.Emotion)
+		}
+		if evt.Intensity != 150 {
+			t.Errorf("Intensity = %d, want 150", evt.Intensity)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for render event on uni stream")
+	}
+}

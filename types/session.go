@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 )
 
@@ -114,8 +115,9 @@ type Session interface {
 	AudioInterrupt() error
 	RecvAudio() <-chan *AudioFrame
 
-	// Motion (data-driven Avatar; Plan 7)
+	// Render channels (data-driven Avatar motion + render stream)
 	RecvMotion() <-chan *MotionFrame
+	RecvRender() <-chan *RenderEvent
 
 	// Video (Plan 7)
 	SendVideoFrame(frame *VideoFrame) error
@@ -201,9 +203,11 @@ type VADConfig struct {
 
 // MotionConfig configures data-driven Avatar motion output.
 type MotionConfig struct {
-	Enabled bool   `json:"enabled"`
-	Profile string `json:"profile,omitempty"`
-	FPS     int    `json:"fps,omitempty"`
+	Enabled  bool              `json:"enabled"`
+	Provider string            `json:"provider,omitempty"` // "fast" | "balanced" | custom
+	Profile  string            `json:"profile,omitempty"`  // "arkit_52" | "live2d_16" | "viseme_15"
+	FPS      int               `json:"fps,omitempty"`      // default 30
+	Options  map[string]string `json:"options,omitempty"`  // provider-specific params
 }
 
 // VideoConfig configures video input and output.
@@ -237,8 +241,147 @@ type AudioFrame struct {
 	Seq  uint32 // datagram sequence number
 }
 
-// MotionFrame carries data-driven Avatar blendshape data. (Plan 7 placeholder)
-type MotionFrame struct{}
+// MotionFrame carries data-driven Avatar blendshape + motion data.
+// Wire format: 87 bytes payload, Big-Endian multi-byte integers.
+type MotionFrame struct {
+	Version      uint8     `json:"version"`
+	Profile      uint8     `json:"profile"`
+	State        uint8     `json:"state"`
+	Emotion      uint8     `json:"emotion"`
+	Intensity    uint8     `json:"intensity"`
+	FrameSeq     uint16    `json:"frame_seq"`
+	AudioSeq     uint32    `json:"audio_seq"`
+	PtsMs        uint32    `json:"pts_ms"`
+	Face         [52]uint8 `json:"face"`
+	Head         [3]int8   `json:"head"`
+	Gaze         [2]int8   `json:"gaze"`
+	Viseme       [5]uint8  `json:"viseme"`
+	GestureID    uint8     `json:"gesture_id"`
+	GesturePhase uint8     `json:"gesture_phase"`
+	Body         [8]uint8  `json:"body"`
+}
+
+// MotionFrameSize is the fixed wire size of a MotionFrame payload in bytes.
+const MotionFrameSize = 87
+
+// MotionFrameVersion is the current wire format version.
+const MotionFrameVersion uint8 = 2
+
+// Profile constants identify the blendshape layout.
+const (
+	ProfileARKit52  uint8 = 0
+	ProfileLive2D16 uint8 = 1
+	ProfileViseme15 uint8 = 2
+	ProfileVendor   uint8 = 3
+)
+
+// Gesture constants identify pre-defined gesture animations.
+const (
+	GestureNone  uint8 = 0
+	GestureNod   uint8 = 1
+	GestureWave  uint8 = 2
+	GestureShake uint8 = 3
+	GesturePoint uint8 = 4
+)
+
+// State constants (uint8, used in MotionFrame.State).
+const (
+	StateIdle      uint8 = 0
+	StateListening uint8 = 1
+	StateThinking  uint8 = 2
+	StateSpeaking  uint8 = 3
+)
+
+// Emotion constants (uint8, used in MotionFrame.Emotion).
+const (
+	EmotionNeutral   uint8 = 0
+	EmotionHappy     uint8 = 1
+	EmotionSurprised uint8 = 2
+	EmotionConfused  uint8 = 3
+	EmotionConcerned uint8 = 4
+)
+
+// Pack serializes a MotionFrame into the 87-byte wire format (Big-Endian).
+func (f *MotionFrame) Pack() [MotionFrameSize]byte {
+	var buf [MotionFrameSize]byte
+	buf[0] = f.Version
+	buf[1] = f.Profile
+	buf[2] = f.State
+	buf[3] = f.Emotion
+	buf[4] = f.Intensity
+	buf[5] = uint8(f.FrameSeq >> 8)
+	buf[6] = uint8(f.FrameSeq)
+	buf[7] = uint8(f.AudioSeq >> 24)
+	buf[8] = uint8(f.AudioSeq >> 16)
+	buf[9] = uint8(f.AudioSeq >> 8)
+	buf[10] = uint8(f.AudioSeq)
+	buf[11] = uint8(f.PtsMs >> 24)
+	buf[12] = uint8(f.PtsMs >> 16)
+	buf[13] = uint8(f.PtsMs >> 8)
+	buf[14] = uint8(f.PtsMs)
+	copy(buf[15:67], f.Face[:])
+	buf[67] = uint8(f.Head[0])
+	buf[68] = uint8(f.Head[1])
+	buf[69] = uint8(f.Head[2])
+	buf[70] = uint8(f.Gaze[0])
+	buf[71] = uint8(f.Gaze[1])
+	copy(buf[72:77], f.Viseme[:])
+	buf[77] = f.GestureID
+	buf[78] = f.GesturePhase
+	copy(buf[79:87], f.Body[:])
+	return buf
+}
+
+// UnpackMotionFrame deserializes a MotionFrame from wire bytes.
+func UnpackMotionFrame(data []byte) (*MotionFrame, error) {
+	if len(data) < MotionFrameSize {
+		return nil, ErrShortMotionFrame
+	}
+	if data[0] != MotionFrameVersion {
+		return nil, ErrBadMotionVersion
+	}
+	f := &MotionFrame{
+		Version:   data[0],
+		Profile:   data[1],
+		State:     data[2],
+		Emotion:   data[3],
+		Intensity: data[4],
+		FrameSeq:  uint16(data[5])<<8 | uint16(data[6]),
+		AudioSeq:  uint32(data[7])<<24 | uint32(data[8])<<16 | uint32(data[9])<<8 | uint32(data[10]),
+		PtsMs:     uint32(data[11])<<24 | uint32(data[12])<<16 | uint32(data[13])<<8 | uint32(data[14]),
+	}
+	copy(f.Face[:], data[15:67])
+	f.Head[0] = int8(data[67])
+	f.Head[1] = int8(data[68])
+	f.Head[2] = int8(data[69])
+	f.Gaze[0] = int8(data[70])
+	f.Gaze[1] = int8(data[71])
+	copy(f.Viseme[:], data[72:77])
+	f.GestureID = data[77]
+	f.GesturePhase = data[78]
+	copy(f.Body[:], data[79:87])
+	return f, nil
+}
+
+// ErrShortMotionFrame is returned when data is too short for a valid MotionFrame.
+var ErrShortMotionFrame = errors.New("data too short for MotionFrame")
+
+// ErrBadMotionVersion is returned when the version byte does not match MotionFrameVersion.
+var ErrBadMotionVersion = errors.New("unsupported MotionFrame version")
+
+// RenderEvent carries a message from the render stream (transcript, audio lifecycle, emotion).
+// Mirrors the server-side RenderStreamMsg — same JSON wire format, single channel.
+type RenderEvent struct {
+	Type       string `json:"type"`                  // "transcript.delta" | "transcript.done" | "audio.done" | "input_transcript.done" | "emotion"
+	Content    string `json:"content,omitempty"`     // transcript.delta: text fragment
+	Transcript string `json:"transcript,omitempty"`  // transcript.done / input_transcript.done: full text
+	AudioSeq   uint32 `json:"audio_seq,omitempty"`   // sequence counter
+	ItemID     string `json:"item_id,omitempty"`     // audio.done: response item ID
+	DurationMs int64  `json:"duration_ms,omitempty"` // audio.done: audio duration in ms
+	State      string `json:"state,omitempty"`       // emotion: session state
+	Emotion    string `json:"emotion,omitempty"`     // emotion: emotion label
+	Intensity  uint8  `json:"intensity,omitempty"`   // emotion: 0~255
+}
 
 // VideoFrame carries a video frame. (Plan 7 placeholder)
 type VideoFrame struct{}

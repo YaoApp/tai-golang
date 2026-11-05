@@ -308,7 +308,6 @@ func (t *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 
 	cs := newControlStream(nodeID, r.Body, w, t.reg, t.auth, t.codec)
 	cs.run(r.Context())
-	log.Printf("tai-sdk: Control stream closed for node %s", nodeID)
 }
 
 type lightSessionHandler func(nodeID string, sess *webtransport.Session, st *ConnState)
