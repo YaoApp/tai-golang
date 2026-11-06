@@ -469,7 +469,66 @@ func (f *remoteBranchFS) openLight(ctx context.Context, reqData []byte, name str
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
-	return &remoteFile{name: name, stream: stream}, nil
+
+	// Tai's handleOpen streams raw file bytes on success and sends one "error"
+	// frame (4-byte length prefix + protobuf) on failure. The stream stays open,
+	// so the head can be probed: a parseable frame with Kind=="error" means
+	// failure; anything else is file content and is handed to the caller as is.
+	prefix, errResp, err := probeOpenError(stream)
+	if err != nil {
+		stream.Close()
+		return nil, err
+	}
+	if errResp != nil {
+		stream.Close()
+		return nil, errResp
+	}
+
+	return &remoteFile{
+		name:   name,
+		stream: stream,
+		prefix: prefix, // bytes consumed while probing that belong to the file
+	}, nil
+}
+
+// probeOpenError checks whether the stream head is an error frame.
+//
+// A successful response starts with raw file content, which is very unlikely to
+// form a valid length prefix plus a parseable Payload with Kind=="error". So
+// failure is reported only when the frame parses and its Kind is error;
+// otherwise the consumed bytes are returned to be treated as file content.
+//
+// @param r the stream returned by Open
+// @returns consumed byte prefix, the error frame (nil on success), and any IO error
+func probeOpenError(r io.Reader) ([]byte, *ErrorResponse, error) {
+	var header [4]byte
+	n, err := io.ReadFull(r, header[:])
+	if err != nil {
+		// Fewer than 4 bytes, or the stream ended: all of it is file content.
+		return header[:n], nil, nil
+	}
+	size := int(header[0])<<24 | int(header[1])<<16 | int(header[2])<<8 | int(header[3])
+	if size <= 0 || size > 64<<20 {
+		return header[:], nil, nil
+	}
+
+	body := make([]byte, size)
+	if _, err := io.ReadFull(r, body); err != nil {
+		// The length prefix is not trustworthy: treat the bytes as content.
+		return append(header[:], body[:]...), nil, nil
+	}
+
+	var frame pb.Payload
+	if err := proto.Unmarshal(body, &frame); err != nil || frame.Kind != KindError {
+		return append(header[:], body...), nil, nil
+	}
+
+	var errResp ErrorResponse
+	_ = json.Unmarshal(frame.Data, &errResp)
+	if errResp.Code == "" {
+		errResp = ErrorResponse{Code: "OPEN_FAILED", Message: "unknown error"}
+	}
+	return nil, &errResp, nil
 }
 
 func (f *remoteBranchFS) openHeavy(ctx context.Context, reqData []byte, name string) (fs.File, error) {
@@ -835,6 +894,9 @@ func (f *heavyFile) Close() error {
 type remoteFile struct {
 	name   string
 	stream io.ReadWriteCloser
+	// prefix holds bytes consumed while probing that belong to the file.
+	// They are served before the underlying stream.
+	prefix []byte
 }
 
 func (f *remoteFile) Stat() (fs.FileInfo, error) {
@@ -842,6 +904,11 @@ func (f *remoteFile) Stat() (fs.FileInfo, error) {
 }
 
 func (f *remoteFile) Read(p []byte) (int, error) {
+	if len(f.prefix) > 0 {
+		n := copy(p, f.prefix)
+		f.prefix = f.prefix[n:]
+		return n, nil
+	}
 	return f.stream.Read(p)
 }
 

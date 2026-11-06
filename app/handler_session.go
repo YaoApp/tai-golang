@@ -159,13 +159,13 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			}
 			switch event {
 			case types.EventDisconnected:
-				si.SetStatus("disconnected", store)
+				si.SetStatus(StatusDisconnected, store)
 			case types.EventResumed:
-				si.SetStatus("running", store)
+				si.SetStatus(StatusRunning, store)
 			case types.EventRecoveryGap:
-				si.SetStatus("recovery_gap", store)
+				si.SetStatus(StatusRecoveryGap, store)
 			case types.EventResumeError:
-				si.SetStatus("resume_error", store)
+				si.SetStatus(StatusResumeError, store)
 			}
 		},
 	})
@@ -193,7 +193,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ID:            sessionID,
 		NodeID:        req.NodeID,
 		CreatedAt:     time.Now(),
-		Status:        "running",
+		Status:        StatusRunning,
 		WorkspaceID:   wsID,
 		WorkspaceName: wsName,
 		Session:       session,
@@ -201,18 +201,48 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.store.AddSession(info)
 
 	// Monitor session lifecycle in the background.
-	go func() {
-		<-session.Done()
-		info.SetStatus("closed", store)
-	}()
+	go h.watchSession(info, session)
 
 	writeJSON(w, map[string]any{
 		"id":            sessionID,
 		"nodeId":        req.NodeID,
-		"status":        "running",
+		"status":        string(StatusRunning),
 		"workspaceId":   wsID,
 		"workspaceName": wsName,
 	})
+}
+
+// watchSession waits for the session to end and skips the status update when
+// the instance has already been replaced.
+//
+// Two endings are distinguished: a deliberate Close sets StatusClosed first, so
+// this watcher leaves it alone; an unintended end (node crash, connection lost
+// for good) is recorded as StatusTerminated.
+//
+// The identity check is required: Resume creates a new SDK Session and swaps it
+// into info.Session, after which the old object's Done() closes. Without the
+// check the stale watcher would overwrite the freshly resumed running status
+// with terminated.
+//
+// @param info the session record
+// @param sess the instance snapshot this watcher is responsible for
+func (h *SessionHandler) watchSession(info *SessionInfo, sess types.Session) {
+	<-sess.Done()
+
+	info.mu.Lock()
+	stillCurrent := info.Session == sess
+	current := info.Status
+	info.mu.Unlock()
+
+	if !stillCurrent {
+		// Replaced by a Resume; this exit belongs to the old instance.
+		return
+	}
+	if current.Terminal() {
+		// Already final from a deliberate Close; do not overwrite.
+		return
+	}
+	info.SetStatus(StatusTerminated, h.store)
 }
 
 // Delete closes a session.
@@ -224,22 +254,38 @@ func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mark final before closing so watchSession does not record terminated.
+	info.SetStatus(StatusClosed, h.store)
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := info.Session.Close(ctx); err != nil {
-		log.Printf("close session %s: %v", id, err)
+	if sess := info.sess(); sess != nil {
+		if err := sess.Close(ctx); err != nil {
+			log.Printf("close session %s: %v", id, err)
+		}
 	}
 	h.store.RemoveSession(id)
-	writeJSON(w, map[string]string{"status": "closed"})
+	writeJSON(w, map[string]string{"status": string(StatusClosed)})
 }
 
 // Resume reconnects to an existing session after a disconnect.
+//
+// This is the fallback for when the SDK's own reconnect gives up: tryResume
+// reattaches automatically on a dropped transport, and only failure (reconnect
+// error, recovery buffer overflow, node restart) needs a manual trigger here.
 func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	info, ok := h.store.GetSession(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	prev := info.GetStatus()
+	if !prev.CanResume() {
+		writeError(w, http.StatusConflict,
+			"session status "+string(prev)+" is not resumable")
 		return
 	}
 
@@ -256,7 +302,10 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newSession, err := rn.ResumeSession(r.Context(), &types.ResumeSessionRequest{
+	// Intermediate state: the frontend shows a spinner and blocks double clicks.
+	info.SetStatus(StatusResuming, store)
+
+	newSession, err := rn.ResumeSession(context.Background(), &types.ResumeSessionRequest{
 		SessionID:   id,
 		Token:       opToken,
 		LastCtrlSeq: 0,
@@ -268,38 +317,48 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 			}
 			switch event {
 			case types.EventDisconnected:
-				si.SetStatus("disconnected", store)
+				si.SetStatus(StatusDisconnected, store)
 			case types.EventResumed:
-				si.SetStatus("running", store)
+				si.SetStatus(StatusRunning, store)
 			case types.EventRecoveryGap:
-				si.SetStatus("recovery_gap", store)
+				si.SetStatus(StatusRecoveryGap, store)
 			case types.EventResumeError:
-				si.SetStatus("resume_error", store)
+				si.SetStatus(StatusResumeError, store)
 			}
 		},
 	})
 	if err != nil {
+		// Roll back so the user can retry.
+		info.SetStatus(prev, store)
 		writeError(w, http.StatusInternalServerError, "resume session: "+err.Error())
 		return
 	}
 
-	// Replace the session object and reset status.
-	info.mu.Lock()
-	info.Session = newSession
-	info.Status = "running"
-	info.mu.Unlock()
+	// Swap the instance. When the record was deleted while ResumeSession was
+	// in flight, close the fresh instance instead of installing it; the
+	// replacement refusal makes this race-free.
+	old, deleted := info.replaceSession(newSession)
+	if deleted {
+		if cerr := newSession.Close(context.Background()); cerr != nil {
+			log.Printf("close orphaned resumed session %s: %v", id, cerr)
+		}
+		writeError(w, http.StatusGone, "session was closed during resume")
+		return
+	}
+	if old != nil {
+		go func() {
+			if cerr := old.Close(context.Background()); cerr != nil {
+				log.Printf("close replaced session %s: %v", id, cerr)
+			}
+		}()
+	}
 
-	store.broadcast(`{"event":"session_status","sessionId":"` + id + `","status":"running"}`)
-
-	// Monitor new session lifecycle.
-	go func() {
-		<-newSession.Done()
-		info.SetStatus("closed", store)
-	}()
+	info.SetStatus(StatusRunning, store)
+	go h.watchSession(info, newSession)
 
 	writeJSON(w, map[string]any{
 		"id":     id,
-		"status": "running",
+		"status": string(StatusRunning),
 	})
 }
 
@@ -376,7 +435,13 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer close(done)
 			for {
-				act, err := info.Session.RecvAction()
+				// Snapshot each round so a Resume swap is picked up; a nil
+				// instance means the session is being torn down, so stop.
+				sess := info.sess()
+				if sess == nil {
+					return
+				}
+				act, err := sess.RecvAction()
 				if err != nil {
 					return
 				}
@@ -406,10 +471,13 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for {
+		// Snapshot each iteration so a Resume swap is picked up here.
+		// select case expressions are evaluated on entry, so it must be read first.
+		sess := info.sess()
 		select {
 		case <-ctx.Done():
 			return
-		case <-info.Session.Done():
+		case <-sess.Done():
 			return
 		case cmd, ok := <-cmdCh:
 			if !ok {
@@ -422,7 +490,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 			case "prompt":
 				var um types.UserMessage
 				json.Unmarshal(cmd.Data, &um)
-				if err := info.Session.Prompt(&um); err != nil {
+				if err := sess.Prompt(&um); err != nil {
 					log.Printf("prompt: %v", err)
 					sendJSON(map[string]any{
 						"kind": "prompt_error",
@@ -434,7 +502,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				var um types.UserMessage
 				json.Unmarshal(cmd.Data, &um)
 				go func() {
-					disp, ferr := info.Session.Followup(&um)
+					disp, ferr := sess.Followup(&um)
 					if ferr != nil {
 						sendJSON(map[string]any{
 							"kind": "followup_error",
@@ -449,7 +517,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				}()
 
 			case "cancel":
-				if err := info.Session.Cancel(); err != nil {
+				if err := sess.Cancel(); err != nil {
 					log.Printf("cancel: %v", err)
 				}
 
@@ -457,7 +525,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				var um types.UserMessage
 				json.Unmarshal(cmd.Data, &um)
 				go func() {
-					if _, serr := info.Session.Steer(&um); serr != nil {
+					if _, serr := sess.Steer(&um); serr != nil {
 						log.Printf("steer: %v", serr)
 					}
 				}()
@@ -468,7 +536,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 					Response  types.PermissionResponse `json:"response"`
 				}
 				json.Unmarshal(cmd.Data, &rp)
-				info.Session.ResolvePermission(rp.RequestID, &rp.Response)
+				sess.ResolvePermission(rp.RequestID, &rp.Response)
 
 			case "resolve_elicitation":
 				var re struct {
@@ -476,12 +544,12 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 					Response types.ElicitationResponse `json:"response"`
 				}
 				json.Unmarshal(cmd.Data, &re)
-				info.Session.ResolveElicitation(re.ID, &re.Response)
+				sess.ResolveElicitation(re.ID, &re.Response)
 
 			case "update_queue":
 				var qa types.QueueAction
 				json.Unmarshal(cmd.Data, &qa)
-				if err := info.Session.UpdateQueue(&qa); err != nil {
+				if err := sess.UpdateQueue(&qa); err != nil {
 					log.Printf("update_queue: %v", err)
 				}
 
@@ -491,14 +559,14 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 					Value    types.ConfigOptionValue `json:"value"`
 				}
 				json.Unmarshal(cmd.Data, &co)
-				if err := info.Session.SetConfigOption(co.ConfigID, &co.Value); err != nil {
+				if err := sess.SetConfigOption(co.ConfigID, &co.Value); err != nil {
 					log.Printf("set_config_option: %v", err)
 				}
 
 			case "update_session":
 				var opts types.SessionUpdateOptions
 				json.Unmarshal(cmd.Data, &opts)
-				if err := info.Session.UpdateSession(r.Context(), &opts); err != nil {
+				if err := sess.UpdateSession(r.Context(), &opts); err != nil {
 					log.Printf("update_session: %v", err)
 				}
 
@@ -573,7 +641,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 
 					// StartRealtime blocks: sends realtime.start, waits for
 					// realtime.started via RecvAction, opens audio/render streams.
-					if err := info.Session.StartRealtime(&req); err != nil {
+					if err := sess.StartRealtime(&req); err != nil {
 						log.Printf("StartRealtime: %v", err)
 						sendJSON(map[string]any{
 							"kind": "realtime.error",
@@ -598,7 +666,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 			case "update_realtime":
 				var opts types.RealtimeUpdateOptions
 				json.Unmarshal(cmd.Data, &opts)
-				if err := info.Session.UpdateRealtime(&opts); err != nil {
+				if err := sess.UpdateRealtime(&opts); err != nil {
 					log.Printf("update_realtime: %v", err)
 				}
 
@@ -616,7 +684,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				// if the H2 audio stream Close hangs.
 				if wasActive {
 					stopDone := make(chan error, 1)
-					go func() { stopDone <- info.Session.StopRealtime() }()
+					go func() { stopDone <- sess.StopRealtime() }()
 					select {
 					case err := <-stopDone:
 						if err != nil {
@@ -643,24 +711,24 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 			// ---- Audio sub-commands (forwarded during active realtime) ----
 
 			case "audio_commit":
-				if err := info.Session.AudioCommit(); err != nil {
+				if err := sess.AudioCommit(); err != nil {
 					log.Printf("audio_commit: %v", err)
 				}
 			case "audio_clear":
-				if err := info.Session.AudioClear(); err != nil {
+				if err := sess.AudioClear(); err != nil {
 					log.Printf("audio_clear: %v", err)
 				}
 			case "audio_interrupt":
-				if err := info.Session.AudioInterrupt(); err != nil {
+				if err := sess.AudioInterrupt(); err != nil {
 					log.Printf("audio_interrupt: %v", err)
 				}
 			case "response_create":
-				if err := info.Session.ResponseCreate(); err != nil {
+				if err := sess.ResponseCreate(); err != nil {
 					log.Printf("response_create: %v", err)
 				}
 
 			case "close":
-				info.Session.Close(context.Background())
+				sess.Close(context.Background())
 				return
 			}
 		}
@@ -685,12 +753,18 @@ func (h *SessionHandler) WSAudio(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	audioCh := info.Session.RecvAudio()
+	sess := info.sess()
+	if sess == nil {
+		log.Printf("audio ws: session not ready")
+		return
+	}
+
+	audioCh := sess.RecvAudio()
 	if audioCh == nil {
 		// Brief grace period in case the audio WS upgrade races with
 		// StartRealtime setting up channels.
 		time.Sleep(500 * time.Millisecond)
-		audioCh = info.Session.RecvAudio()
+		audioCh = sess.RecvAudio()
 		if audioCh == nil {
 			log.Printf("audio ws: RecvAudio returned nil (realtime not active)")
 			return
@@ -739,7 +813,7 @@ func (h *SessionHandler) WSAudio(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if msgType == websocket.BinaryMessage && len(data) > 0 {
-			if err := info.Session.AudioAppend(data); err != nil {
+			if err := sess.AudioAppend(data); err != nil {
 				log.Printf("audio append: %v", err)
 				return
 			}
@@ -768,10 +842,17 @@ func (h *SessionHandler) WSRender(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ch := info.Session.RecvRender()
+	sess := info.sess()
+	if sess == nil {
+		log.Printf("render ws: session not ready")
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
+	}
+
+	ch := sess.RecvRender()
 	if ch == nil {
 		time.Sleep(500 * time.Millisecond)
-		ch = info.Session.RecvRender()
+		ch = sess.RecvRender()
 		if ch == nil {
 			log.Printf("render ws: RecvRender returned nil (realtime not active)")
 			conn.WriteJSON(map[string]string{"type": "_closed"})
@@ -802,7 +883,7 @@ func (h *SessionHandler) WSRender(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-closeCh:
 			return
-		case <-info.Session.Done():
+		case <-sess.Done():
 			conn.WriteJSON(map[string]string{"type": "_closed"})
 			return
 		}
@@ -827,10 +908,16 @@ func (h *SessionHandler) WSMotion(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ch := info.Session.RecvMotion()
+	sess := info.sess()
+	if sess == nil {
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
+	}
+
+	ch := sess.RecvMotion()
 	if ch == nil {
 		time.Sleep(500 * time.Millisecond)
-		ch = info.Session.RecvMotion()
+		ch = sess.RecvMotion()
 		if ch == nil {
 			conn.WriteJSON(map[string]string{"type": "_closed"})
 			return
@@ -864,7 +951,7 @@ func (h *SessionHandler) WSMotion(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-closeCh:
 			return
-		case <-info.Session.Done():
+		case <-sess.Done():
 			conn.WriteJSON(map[string]string{"type": "_closed"})
 			return
 		}
@@ -888,8 +975,14 @@ func (h *SessionHandler) WSData(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	sess := info.sess()
+	if sess == nil {
+		conn.WriteJSON(map[string]string{"kind": "_closed"})
+		return
+	}
+
 	for {
-		evt, err := info.Session.RecvEvent()
+		evt, err := sess.RecvEvent()
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("recv event: %v", err)

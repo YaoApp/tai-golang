@@ -1182,6 +1182,86 @@ func TestWorkspaceOpen(t *testing.T) {
 	}
 }
 
+// A failed open must return an error rather than treat the error frame as file
+// content.
+//
+// Regression test: Tai's handleOpen sends one "error" frame (length prefix +
+// protobuf) on failure and raw file bytes on success. openLight must tell them
+// apart from the head, otherwise callers read the error payload as content
+// (which shows up as garbled bytes).
+func TestWorkspaceOpenMissingFileReturnsError(t *testing.T) {
+	mb := setupMock(nil)
+	mb.rawHandler = func(kind string, data []byte) ([]byte, error) {
+		if kind != KindOpen {
+			return nil, nil
+		}
+		errPayload := &pb.Payload{
+			Namespace: NamespaceWorkspace,
+			Kind:      KindError,
+			Data:      []byte(`{"code":"OPEN_FAILED","message":"no such file"}`),
+		}
+		b, err := proto.Marshal(errPayload)
+		if err != nil {
+			return nil, err
+		}
+		size := len(b)
+		return append([]byte{byte(size >> 24), byte(size >> 16), byte(size >> 8), byte(size)}, b...), nil
+	}
+
+	ws := NewRemoteWorkspace(testNodeID, "ws_1", "main", types.Meta{Name: "proj"}, nil)
+	_, err := ws.Open("missing.md")
+	if err == nil {
+		t.Fatal("opening a missing file should fail; success means the error frame was read as content")
+	}
+}
+
+// A short file (fewer than 4 bytes) must not be mistaken for an error frame.
+func TestWorkspaceOpenShortFile(t *testing.T) {
+	mb := setupMock(nil)
+	mb.rawHandler = func(kind string, data []byte) ([]byte, error) {
+		if kind == KindOpen {
+			return []byte("ab"), nil // only 2 bytes, too short for a length prefix
+		}
+		return nil, nil
+	}
+
+	ws := NewRemoteWorkspace(testNodeID, "ws_1", "main", types.Meta{Name: "proj"}, nil)
+	f, err := ws.Open("tiny.txt")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+	content, _ := io.ReadAll(f)
+	if string(content) != "ab" {
+		t.Errorf("content=%q, want %q", content, "ab")
+	}
+}
+
+// A file that starts with a valid length prefix but is not an error frame must
+// still be readable.
+func TestWorkspaceOpenBinaryFileNotMistakenForError(t *testing.T) {
+	mb := setupMock(nil)
+	// 4-byte length prefix (pointing at the next 4 bytes) + 4 non-protobuf bytes.
+	content := append([]byte{0, 0, 0, 4}, []byte{0xff, 0xfe, 0xfd, 0xfc}...)
+	mb.rawHandler = func(kind string, data []byte) ([]byte, error) {
+		if kind == KindOpen {
+			return content, nil
+		}
+		return nil, nil
+	}
+
+	ws := NewRemoteWorkspace(testNodeID, "ws_1", "main", types.Meta{Name: "proj"}, nil)
+	f, err := ws.Open("binary.bin")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer f.Close()
+	got, _ := io.ReadAll(f)
+	if !bytes.Equal(got, content) {
+		t.Errorf("content=%v, want %v (head probing must not swallow data)", got, content)
+	}
+}
+
 func TestWorkspaceCreate(t *testing.T) {
 	mb := setupMock(nil)
 	respPayload := &pb.Payload{

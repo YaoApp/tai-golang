@@ -20,6 +20,8 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	sessionH := &SessionHandler{store: store, auth: authProvider}
 	wsH := NewWorkspaceHandler(store)
 	docsH := &DocsHandler{}
+	eventH := NewEventHandler(store)
+	ctxH := NewContextHandler()
 
 	// Auth endpoints
 	mux.HandleFunc("GET /api/auth/info", authH.Info)
@@ -28,7 +30,13 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 
 	// Node endpoints
 	mux.HandleFunc("GET /api/nodes", nodeH.List)
-	mux.HandleFunc("GET /api/nodes/events", nodeH.Events)
+
+	// Global event stream (WebSocket).
+	//
+	// Every global event (node.* / session.* / workspace.* / realtime.*) flows
+	// through this single connection, matching yao 1.0's /v1/events design.
+	// There is no page-specific SSE endpoint.
+	mux.HandleFunc("GET /ws/events", eventH.WSEvents)
 
 	// Session endpoints
 	mux.HandleFunc("GET /api/sessions", sessionH.List)
@@ -56,6 +64,20 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	mux.HandleFunc("POST /api/workspaces/{id}/branches/{name}/commit", wsH.CommitBranch)
 	mux.HandleFunc("POST /api/workspaces/{id}/branches/{name}/rollback", wsH.RollbackBranch)
 	mux.HandleFunc("POST /api/workspaces/{id}/merge", wsH.MergeWorkspace)
+
+	// Context endpoints
+	//
+	// Wrap the SDK Context API (ReadContext / SeedContext / MergeContext).
+	// Note: the Tai runtime does not read .context/, so these files never reach
+	// the agent prompt.
+	mux.HandleFunc("GET /api/workspaces/{id}/context", ctxH.GetContext)
+	mux.HandleFunc("PUT /api/workspaces/{id}/context/{scope}/{scopeID}/{file}", ctxH.PutContextFile)
+	mux.HandleFunc("POST /api/workspaces/{id}/context/{scope}/{scopeID}/seed", ctxH.SeedContext)
+	mux.HandleFunc("GET /api/workspaces/{id}/context/merged", ctxH.GetMergedContext)
+
+	// Skills endpoints (wrap SyncSkills + ReadManifest)
+	mux.HandleFunc("GET /api/workspaces/{id}/skills", ctxH.ListSkills)
+	mux.HandleFunc("POST /api/workspaces/{id}/skills", ctxH.UploadSkill)
 
 	// History endpoints
 	mux.HandleFunc("GET /api/workspaces/{id}/branches/{branch}/log", wsH.BranchLog)

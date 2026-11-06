@@ -22,26 +22,82 @@ type SessionInfo struct {
 	ID            string        `json:"id"`
 	NodeID        string        `json:"nodeId"`
 	CreatedAt     time.Time     `json:"createdAt"`
-	Status        string        `json:"status"`
+	Status        SessionStatus `json:"status"`
 	WorkspaceID   string        `json:"workspaceId,omitempty"`
 	WorkspaceName string        `json:"workspaceName,omitempty"`
 	Session       types.Session `json:"-"`
-	mu            sync.Mutex    // protects Status writes
+	mu            sync.Mutex    // protects Status, Session, and deleted
+	// deleted marks the record as removed from the store. It guards the
+	// Resume path: replaceSession refuses once the record is gone, so a resume
+	// that finishes after Delete cannot install an ownerless instance.
+	deleted bool
 }
 
 // GetStatus returns the current session status (thread-safe).
-func (si *SessionInfo) GetStatus() string {
+//
+// @returns the current status
+func (si *SessionInfo) GetStatus() SessionStatus {
 	si.mu.Lock()
 	defer si.mu.Unlock()
 	return si.Status
 }
 
-// SetStatus updates the session status and broadcasts the change.
-func (si *SessionInfo) SetStatus(status string, store *Store) {
+// sess returns a snapshot of the current session instance.
+//
+// Resume replaces the Session field while the WSCtrl/WSAudio/WSRender/
+// WSMotion goroutines keep reading it. Every read must go through here rather
+// than touching the field outside the lock. The result may be nil while the
+// session is still being created.
+//
+// @returns the current session instance
+func (si *SessionInfo) sess() types.Session {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	return si.Session
+}
+
+// replaceSession atomically swaps in a new session instance.
+//
+// Refuses when the record has been deleted, returning deleted=true so the
+// caller can close the instance it was about to install. This closes the
+// TOCTOU window between a Resume finishing and a concurrent Delete.
+//
+// @param next the new session instance
+// @returns the displaced instance (nil when none or when deleted), and whether
+// the record was already deleted
+func (si *SessionInfo) replaceSession(next types.Session) (old types.Session, deleted bool) {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	if si.deleted {
+		return nil, true
+	}
+	old = si.Session
+	si.Session = next
+	return old, false
+}
+
+// markDeleted flags the record as removed.
+//
+// Called by Store.RemoveSession before dropping the entry so an in-flight
+// Resume observes the deletion even if it already resolved the record.
+func (si *SessionInfo) markDeleted() {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	si.deleted = true
+}
+
+// SetStatus updates the session status and publishes a status event.
+//
+// @param status the new status
+// @param store used to publish the event
+func (si *SessionInfo) SetStatus(status SessionStatus, store *Store) {
 	si.mu.Lock()
 	si.Status = status
 	si.mu.Unlock()
-	store.broadcast(`{"event":"session_status","sessionId":"` + si.ID + `","status":"` + status + `"}`)
+	store.publish(EventSessionStatus, map[string]any{
+		"sessionId": si.ID,
+		"status":    string(status),
+	})
 }
 
 // Store holds in-memory state for the demo app.
@@ -50,9 +106,9 @@ type Store struct {
 	nodes    map[string]*NodeInfo
 	sessions map[string]*SessionInfo
 
-	// SSE subscribers for node events.
+	// Global event subscribers; each /ws/events connection owns one channel.
 	subMu sync.Mutex
-	subs  map[chan string]struct{}
+	subs  map[chan Event]struct{}
 }
 
 // NewStore creates an empty store.
@@ -60,11 +116,13 @@ func NewStore() *Store {
 	return &Store{
 		nodes:    make(map[string]*NodeInfo),
 		sessions: make(map[string]*SessionInfo),
-		subs:     make(map[chan string]struct{}),
+		subs:     make(map[chan Event]struct{}),
 	}
 }
 
-// AddNode registers a node and broadcasts to SSE subscribers.
+// AddNode registers a node and publishes a registration event.
+//
+// @param n the node that registered
 func (s *Store) AddNode(n types.RemoteNode) {
 	info := n.Info()
 	s.mu.Lock()
@@ -74,15 +132,17 @@ func (s *Store) AddNode(n types.RemoteNode) {
 		RegisteredAt: time.Now(),
 	}
 	s.mu.Unlock()
-	s.broadcast(`{"event":"node_registered","nodeId":"` + info.ID + `"}`)
+	s.publish(EventNodeRegistered, map[string]any{"nodeId": info.ID})
 }
 
-// RemoveNode removes a node and broadcasts to SSE subscribers.
+// RemoveNode removes a node and publishes a disconnect event.
+//
+// @param nodeID the node identifier
 func (s *Store) RemoveNode(nodeID string) {
 	s.mu.Lock()
 	delete(s.nodes, nodeID)
 	s.mu.Unlock()
-	s.broadcast(`{"event":"node_disconnected","nodeId":"` + nodeID + `"}`)
+	s.publish(EventNodeDisconnected, map[string]any{"nodeId": nodeID})
 }
 
 // Nodes returns all registered nodes.
@@ -111,11 +171,21 @@ func (s *Store) GetSession(id string) (*SessionInfo, bool) {
 	return si, ok
 }
 
-// RemoveSession deletes a session entry.
+// RemoveSession deletes a session entry and publishes a closed event.
+//
+// The record is flagged deleted before it leaves the map so an in-flight
+// Resume that already holds the pointer still sees the deletion.
+//
+// @param id the session identifier
 func (s *Store) RemoveSession(id string) {
 	s.mu.Lock()
+	info, ok := s.sessions[id]
 	delete(s.sessions, id)
 	s.mu.Unlock()
+	if ok {
+		info.markDeleted()
+	}
+	s.publish(EventSessionClosed, map[string]any{"sessionId": id})
 }
 
 // Sessions returns all sessions.
@@ -129,29 +199,55 @@ func (s *Store) Sessions() []*SessionInfo {
 	return out
 }
 
-// Subscribe returns a channel that receives SSE event strings.
-func (s *Store) Subscribe() chan string {
-	ch := make(chan string, 16)
+// SubscribeEvents returns a channel that receives global events.
+//
+// Called once per /ws/events connection. The channel is buffered; a slow
+// consumer has events dropped by publish rather than blocking the broadcast.
+//
+// @returns the event channel; the caller must call UnsubscribeEvents on disconnect
+func (s *Store) SubscribeEvents() chan Event {
+	ch := make(chan Event, 64)
 	s.subMu.Lock()
 	s.subs[ch] = struct{}{}
 	s.subMu.Unlock()
 	return ch
 }
 
-// Unsubscribe removes a subscriber channel.
-func (s *Store) Unsubscribe(ch chan string) {
+// UnsubscribeEvents removes a subscriber and closes its channel.
+//
+// The close happens under subMu: publish reads the subscriber map under the
+// same lock, so closing here guarantees no send is in flight to a closed
+// channel. Closing outside the lock would leave a window where publish still
+// holds the deleted channel and panics on send.
+//
+// @param ch the channel returned by SubscribeEvents
+func (s *Store) UnsubscribeEvents(ch chan Event) {
 	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if _, ok := s.subs[ch]; !ok {
+		// Already unsubscribed; closing twice would panic.
+		return
+	}
 	delete(s.subs, ch)
-	s.subMu.Unlock()
 	close(ch)
 }
 
-func (s *Store) broadcast(data string) {
+// publish broadcasts one event to every subscriber.
+//
+// Non-blocking: when a channel is full that subscriber misses this event so a
+// slow consumer cannot stall the others. Global events are state
+// notifications; clients re-read a snapshot after reconnecting, so dropping
+// one or two does not affect eventual consistency.
+//
+// @param typ the event type
+// @param data the event payload
+func (s *Store) publish(typ string, data map[string]any) {
+	ev := newEvent(typ, data)
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	for ch := range s.subs {
 		select {
-		case ch <- data:
+		case ch <- ev:
 		default:
 		}
 	}

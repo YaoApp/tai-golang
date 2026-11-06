@@ -3,6 +3,8 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../api';
 import type { BranchInfo, FileStatEntry, CommitEntry } from '../../api';
 import FilePreview from './components/FilePreview';
+import ContextPanel from './components/ContextPanel';
+import SkillsPanel from './components/SkillsPanel';
 
 export default function WorkspaceDetailPage() {
   const { id: wsId } = useParams<{ id: string }>();
@@ -16,7 +18,7 @@ export default function WorkspaceDetailPage() {
   const [commits, setCommits] = useState<CommitEntry[]>([]);
   const [previewPath, setPreviewPath] = useState('');
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'files' | 'history'>('files');
+  const [tab, setTab] = useState<'files' | 'history' | 'context' | 'skills'>('files');
 
   // Branch management
   const [showCreateBranch, setShowCreateBranch] = useState(false);
@@ -217,7 +219,28 @@ export default function WorkspaceDetailPage() {
       <div style={{ marginBottom: 12, borderBottom: '2px solid #ddd' }}>
         <button onClick={() => setTab('files')} style={tab === 'files' ? tabActive : tabInactive}>Files</button>
         <button onClick={() => setTab('history')} style={tab === 'history' ? tabActive : tabInactive}>History</button>
+        <button onClick={() => setTab('context')} style={tab === 'context' ? tabActive : tabInactive}>Context</button>
+        <button onClick={() => setTab('skills')} style={tab === 'skills' ? tabActive : tabInactive}>Skills</button>
       </div>
+
+      {tab === 'context' && (
+        <ContextPanel
+          nodeId={nodeId}
+          wsId={wsId ?? ''}
+          // The demo has no bot/home/board entities, so fixed placeholders and
+          // the workspace ID are used to give every scope a readable directory.
+          // Scope name is part of the path, so board and session do not collide
+          // even though they share the ID.
+          scopeIds={{
+            bot: 'demo',
+            home: 'demo',
+            board: wsId ?? '',
+            session: wsId ?? '',
+          }}
+        />
+      )}
+
+      {tab === 'skills' && <SkillsPanel nodeId={nodeId} wsId={wsId ?? ''} />}
 
       {tab === 'files' && (
         <div style={{ display: 'flex', gap: 16 }}>

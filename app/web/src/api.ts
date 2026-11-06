@@ -192,5 +192,74 @@ export const api = {
       previewUrl: (nodeId: string, wsId: string, branch: string, path: string) =>
         `/api/workspaces/${wsId}/branches/${branch}/files/preview?nodeId=${nodeId}&path=${encodeURIComponent(path)}`,
     },
+    /**
+     * Context API: the INSTRUCTION/MEMORY/PREFERENCE files of each scope.
+     *
+     * Note: the Tai runtime does not read .context/, so this content never
+     * reaches the agent prompt.
+     */
+    context: {
+      read: (nodeId: string, wsId: string, ids: ScopeIds) =>
+        request<{ scopes: ContextScopeView[] }>(
+          `/api/workspaces/${wsId}/context?nodeId=${nodeId}&ids=${encodeScopeIds(ids)}`,
+        ),
+      writeFile: (nodeId: string, wsId: string, scope: string, scopeID: string, file: string, content: string) =>
+        fetch(
+          `/api/workspaces/${wsId}/context/${scope}/${encodeURIComponent(scopeID)}/${file}?nodeId=${nodeId}`,
+          { method: 'PUT', body: content, headers: { 'Content-Type': 'text/plain' } },
+        ).then((r) => r.json()),
+      seed: (nodeId: string, wsId: string, scope: string, scopeID: string, files: Record<string, string>) =>
+        request<{ status: string }>(
+          `/api/workspaces/${wsId}/context/${scope}/${encodeURIComponent(scopeID)}/seed?nodeId=${nodeId}`,
+          { method: 'POST', body: JSON.stringify({ files }) },
+        ),
+      merged: (nodeId: string, wsId: string, ids: ScopeIds) =>
+        request<{ merged: string }>(
+          `/api/workspaces/${wsId}/context/merged?nodeId=${nodeId}&ids=${encodeScopeIds(ids)}`,
+        ),
+    },
+    /** Skills API: skill packages synced under .skills/. */
+    skills: {
+      list: (nodeId: string, wsId: string) =>
+        request<{ skills: SkillEntry[] }>(`/api/workspaces/${wsId}/skills?nodeId=${nodeId}`),
+      upload: (nodeId: string, wsId: string, key: string, file: File) => {
+        const form = new FormData();
+        form.append('key', key);
+        form.append('file', file);
+        return fetch(`/api/workspaces/${wsId}/skills?nodeId=${nodeId}`, {
+          method: 'POST',
+          body: form,
+        }).then((r) => r.json() as Promise<{ status: string; key: string; hash: string; pushed: number }>);
+      },
+    },
   },
 };
+
+/** Scope to ID mapping for Context requests. */
+export interface ScopeIds {
+  bot?: string;
+  home?: string;
+  board?: string;
+  session?: string;
+}
+
+/** Context file content for one scope. */
+export interface ContextScopeView {
+  scope: string;
+  id: string;
+  files: Record<string, string>;
+}
+
+/** A synced skill. */
+export interface SkillEntry {
+  key: string;
+  hash: string;
+}
+
+/** Serialize ScopeIds into the backend's "bot:id1,home:id2" form. */
+function encodeScopeIds(ids: ScopeIds): string {
+  return Object.entries(ids)
+    .filter(([, v]) => !!v)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(',');
+}

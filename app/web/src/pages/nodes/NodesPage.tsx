@@ -1,19 +1,14 @@
 import { useEffect } from 'react';
-import { api } from '../../api';
 import { useCurrentNode } from '../../hooks/useCurrentNode';
 import NodeCard from './components/NodeCard';
-import { useSSE } from '../../hooks/useSSE';
+import { eventBus } from '../../lib/events';
 
 export default function NodesPage() {
-  const [currentNode, setCurrentNode, nodes] = useCurrentNode();
-  const events = useSSE<{ event: string; nodeId: string }>('/api/nodes/events');
+  const [currentNode, setCurrentNode, nodes, refreshNodes] = useCurrentNode();
 
-  // Refresh node list when SSE events arrive (hook already fetches on mount).
-  useEffect(() => {
-    if (events.length > 0) {
-      api.nodes.list().catch(() => {});
-    }
-  }, [events.length]);
+  // Registration changes arrive on the global event stream; any node.* event
+  // triggers a list refresh.
+  useEffect(() => eventBus.on('node.', () => void refreshNodes()), [refreshNodes]);
 
   return (
     <div>
@@ -23,11 +18,6 @@ export default function NodesPage() {
         {currentNode && (
           <span style={{ marginLeft: 12, color: '#0066cc', fontWeight: 600 }}>
             Current: {currentNode}
-          </span>
-        )}
-        {events.length > 0 && (
-          <span style={{ color: '#28a745', marginLeft: 8 }}>
-            (SSE: {events.length} events)
           </span>
         )}
       </p>

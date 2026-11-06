@@ -126,6 +126,11 @@ func MergeContext(fsys fs.FS, entries []ContextEntry) (string, error) {
 }
 
 // readFileOrNil reads a file, returning nil if it does not exist.
+// readFileOrNil reads a file, returning nil if it does not exist.
+//
+// A remote Open failure returns *ErrorResponse (Code "OPEN_FAILED") rather than
+// fs.ErrNotExist. Treating any read error as "absent" keeps ReadContext callers
+// independent of whether the filesystem is local or remote.
 func readFileOrNil(fsys fs.FS, path string) []byte {
 	data, err := fs.ReadFile(fsys, path)
 	if err != nil {

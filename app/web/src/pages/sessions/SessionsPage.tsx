@@ -4,6 +4,7 @@ import { api } from '../../api';
 import type { SessionInfo, WorkspaceEntry } from '../../api';
 import type { SessionRequest } from '../../types';
 import { useCurrentNode } from '../../hooks/useCurrentNode';
+import { eventBus } from '../../lib/events';
 import SessionList from './components/SessionList';
 import SessionCreateForm from './components/SessionCreateForm';
 
@@ -20,6 +21,29 @@ export default function SessionsPage() {
   };
 
   useEffect(() => { refresh(); }, []);
+
+  // session.status patches just that row instead of refetching the list;
+  // session.closed means the session is gone, so drop the row.
+  // This page is manual-action first with event correction, not a live feed.
+  useEffect(() => {
+    const offStatus = eventBus.on('session.status', (d) => {
+      const id = d.sessionId as string | undefined;
+      const status = d.status as string | undefined;
+      if (!id || !status) return;
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status } : s)),
+      );
+    });
+    const offClosed = eventBus.on('session.closed', (d) => {
+      const id = d.sessionId as string | undefined;
+      if (!id) return;
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+    });
+    return () => {
+      offStatus();
+      offClosed();
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentNode) { setWorkspaces([]); return; }
@@ -127,7 +151,7 @@ export default function SessionsPage() {
                 </td>
                 <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
                 <td style={{ ...td, display: 'flex', gap: 4 }}>
-                  {(s.status === 'disconnected' || s.status === 'resume_error') && (
+                  {RESUMABLE.has(s.status) && (
                     <button onClick={() => handleResume(s.id)} style={resumeBtn}>Resume</button>
                   )}
                   <button onClick={() => handleDelete(s.id)} style={deleteBtn}>Close</button>
@@ -156,11 +180,17 @@ const deleteBtn: React.CSSProperties = {
 
 function statusColor(status: string): string {
   switch (status) {
+    case 'starting': return '#6c757d';
     case 'running': return '#28a745';
     case 'disconnected': return '#fd7e14';
-    case 'closed': return '#6c757d';
-    case 'resume_error': return '#dc3545';
+    case 'resuming': return '#0066cc';
     case 'recovery_gap': return '#dc3545';
+    case 'resume_error': return '#dc3545';
+    case 'closed': return '#6c757d';
+    case 'terminated': return '#8b0000';
     default: return '#333';
   }
 }
+
+/** Recoverable states that show a Resume button; mirrors SessionStatus.CanResume(). */
+const RESUMABLE = new Set(['disconnected', 'recovery_gap', 'resume_error']);
