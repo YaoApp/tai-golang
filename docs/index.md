@@ -9,6 +9,10 @@ Tai SDK (`tai-golang`) is the Go SDK for building applications that connect to a
 - [API Reference](api-reference.md) — Server, Session (17 methods), Types
 - [Workspace API](workspace.md) — Remote workspace file operations, branching, history, watch
 - [Session Protocol](session-protocol.md) — Handshake, ctrl/data frames, wire format
+- [Session File Inputs](session-inputs.md) — The three fixed directories and what each delivers
+- [Session Context](session-context.md) — Four scopes, the three context files, `_agents_md` delivery
+- [Session Skills](session-skills.md) — Skill packages, manifest sync, key conventions
+- [Session Attachments](session-attachments.md) — Attachment paths, `resource_link`, image blocks
 - [ACP Events](events.md) — Event types, JSON payloads, parsing guide
 - [Resource URI](uri.md) — Unified URI scheme, mount points, path resolution
 - [Demo Guide](demo-guide.md) — Using the QA demo application

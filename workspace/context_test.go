@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -163,16 +164,34 @@ func TestMergeContextEmpty(t *testing.T) {
 	}
 }
 
-// mockWorkspaceFS is a minimal in-memory WorkspaceFS for testing SeedContext.
+// mockWorkspaceFS is a minimal in-memory WorkspaceFS for testing the Context
+// and Skills helpers.
 type mockWorkspaceFS struct {
 	files map[string][]byte
 	dirs  map[string]bool
+	// manifest is returned by ReadManifest; archives records what WriteArchive
+	// received, keyed by destination directory.
+	manifest map[string]string
+	archives map[string]string
+	// failReadManifest and failWriteArchive force the corresponding error.
+	failReadManifest bool
+	failWriteArchive bool
+	// failMkdirAll, failCreate, failWrite and failClose force the matching
+	// SeedContext failure.
+	failMkdirAll bool
+	failCreate   bool
+	failWrite    bool
+	failClose    bool
+	// removed records RemoveAll destinations in order.
+	removed []string
 }
 
 func newMockFS() *mockWorkspaceFS {
 	return &mockWorkspaceFS{
-		files: make(map[string][]byte),
-		dirs:  make(map[string]bool),
+		files:    make(map[string][]byte),
+		dirs:     make(map[string]bool),
+		manifest: make(map[string]string),
+		archives: make(map[string]string),
 	}
 }
 
@@ -187,13 +206,28 @@ func (m *mockWorkspaceFS) Open(name string) (fs.File, error) {
 }
 
 func (m *mockWorkspaceFS) Create(name string) (io.WriteCloser, error) {
+	if m.failCreate {
+		return nil, fmt.Errorf("create failed")
+	}
 	return &mockWriter{fs: m, name: name}, nil
 }
 
-func (m *mockWorkspaceFS) Remove(name string) error    { delete(m.files, name); return nil }
-func (m *mockWorkspaceFS) RemoveAll(name string) error { return nil }
-func (m *mockWorkspaceFS) Rename(_, _ string) error    { return nil }
+func (m *mockWorkspaceFS) Remove(name string) error { delete(m.files, name); return nil }
+func (m *mockWorkspaceFS) RemoveAll(name string) error {
+	m.removed = append(m.removed, name)
+	for path := range m.files {
+		if strings.HasPrefix(path, name+"/") {
+			delete(m.files, path)
+		}
+	}
+	delete(m.dirs, name)
+	return nil
+}
+func (m *mockWorkspaceFS) Rename(_, _ string) error { return nil }
 func (m *mockWorkspaceFS) MkdirAll(name string, _ fs.FileMode) error {
+	if m.failMkdirAll {
+		return fmt.Errorf("mkdir failed")
+	}
 	m.dirs[name] = true
 	return nil
 }
@@ -207,11 +241,36 @@ func (m *mockWorkspaceFS) Exists(name string) (bool, error) {
 	}
 	return m.dirs[name], nil
 }
-func (m *mockWorkspaceFS) WriteArchive(_ string, _ io.Reader) error {
-	return fmt.Errorf("not implemented")
+
+// WriteArchive records the archive body it was given, mirroring the remote
+// handler's behaviour of extracting into dir and returning no error.
+func (m *mockWorkspaceFS) WriteArchive(dir string, r io.Reader) error {
+	if m.failWriteArchive {
+		return fmt.Errorf("write archive failed")
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.archives[dir] = string(data)
+	m.dirs[dir] = true
+	m.files[dir+"/SKILL.md"] = []byte("# extracted")
+	if m.manifest != nil {
+		m.manifest[strings.TrimPrefix(dir, ".skills/")] = "sha256:extracted"
+	}
+	return nil
 }
-func (m *mockWorkspaceFS) ReadManifest(_ string) (map[string]string, error) {
-	return nil, fmt.Errorf("not implemented")
+
+// ReadManifest returns the recorded manifest for dir, or an error when the
+// test asked for a failure or the directory has no manifest yet.
+func (m *mockWorkspaceFS) ReadManifest(dir string) (map[string]string, error) {
+	if m.failReadManifest {
+		return nil, fmt.Errorf("read manifest failed")
+	}
+	if m.manifest == nil {
+		return nil, fmt.Errorf("no manifest")
+	}
+	return m.manifest, nil
 }
 
 type mockWriter struct {
@@ -220,8 +279,16 @@ type mockWriter struct {
 	buf  bytes.Buffer
 }
 
-func (w *mockWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
+func (w *mockWriter) Write(p []byte) (int, error) {
+	if w.fs.failWrite {
+		return 0, fmt.Errorf("write failed")
+	}
+	return w.buf.Write(p)
+}
 func (w *mockWriter) Close() error {
+	if w.fs.failClose {
+		return fmt.Errorf("close failed")
+	}
 	w.fs.files[w.name] = w.buf.Bytes()
 	return nil
 }

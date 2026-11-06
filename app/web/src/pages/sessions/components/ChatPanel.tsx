@@ -202,7 +202,7 @@ export default function ChatPanel({
       if (!file) return;
       setUploading(true);
       try {
-        const path = `/.attachment/${Date.now()}_${file.name}`;
+        const path = `/.attachments/${Date.now()}_${file.name}`;
         await fetch(
           `/api/workspaces/${workspaceId}/branches/main/files/content?nodeId=${nodeId}&path=${encodeURIComponent(path)}`,
           { method: 'PUT', body: file },

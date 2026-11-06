@@ -2,10 +2,21 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import mermaid from 'mermaid';
+import MermaidDiagram from './MermaidDiagram';
 
 interface Props {
   content: string;
 }
+
+// Initialize once for the whole page. startOnLoad stays false so diagrams are
+// rendered explicitly by MermaidDiagram rather than scanned for at startup.
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: 'strict',
+  theme: 'default',
+  fontFamily: 'inherit',
+});
 
 const styles: Record<string, React.CSSProperties> = {
   wrapper: {
@@ -108,6 +119,10 @@ export default function MarkdownRenderer({ content }: Props) {
 
             if (match) {
               const lang = normalizeLanguage(match[1]);
+              // Mermaid blocks are diagrams, not source to highlight.
+              if (lang === 'mermaid') {
+                return <MermaidDiagram chart={code} />;
+              }
               return (
                 <SyntaxHighlighter
                   style={oneLight}

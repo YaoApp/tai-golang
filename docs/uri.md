@@ -68,28 +68,28 @@ session/prompt → ContentBlock:
 
 ## Attachments
 
-Attachments are simply files under `/.attachment/` in the workspace:
+Attachments are simply files under `/.attachments/` in the workspace:
 
 ```text
-/.attachment/screenshot.png                     → current workspace attachment
-/.attachment/data.csv                           → current workspace attachment
-workspace://ws-456/.attachment/report.pdf       → cross-workspace attachment
+/.attachments/screenshot.png                     → current workspace attachment
+/.attachments/data.csv                           → current workspace attachment
+workspace://ws-456/.attachments/report.pdf       → cross-workspace attachment
 /src/main.go                                    → regular source file
 ```
 
-The SDK writes attachment files to `/.attachment/` in the workspace before sending a Prompt. Reference them using bare paths or `workspace://` URIs.
+The SDK writes attachment files to `/.attachments/` in the workspace before sending a Prompt. Reference them using bare paths or `workspace://` URIs. For the full attachment contract — naming, delivery fields, and image handling — see [Session Attachments](session-attachments.md).
 
 ## Usage in ACP ContentBlock
 
 ```json
 { "type": "resource_link", "uri": "/src/main.go", "name": "main.go" }
 
-{ "type": "resource_link", "uri": "/.attachment/data.csv", "name": "data.csv" }
+{ "type": "resource_link", "uri": "/.attachments/data.csv", "name": "data.csv" }
 
 { "type": "resource_link", "uri": "workspace://ws-456/src/main.go", "name": "main.go" }
 
 { "type": "image", "data": "<base64>", "mimeType": "image/png",
-  "uri": "workspace://ws-456/.attachment/screenshot.png" }
+  "uri": "workspace://ws-456/.attachments/screenshot.png" }
 
 { "type": "resource_link", "uri": "/tmp/build-output.log", "name": "build-output.log" }
 
@@ -101,11 +101,11 @@ For image attachments requiring vision, the SDK reads the file and converts it t
 ## Resolution Chain
 
 ```text
-/.attachment/screenshot.png       (bare path, current workspace)
+/.attachments/screenshot.png       (bare path, current workspace)
   ├─ no reserved prefix → Workspace root
-  ├─ Runtime: WorkspacePath + "/.attachment/screenshot.png"
-  └─ Sandbox: /workspace/.attachment/screenshot.png (Docker)
-              <Branch.Path()>/.attachment/screenshot.png (Native)
+  ├─ Runtime: WorkspacePath + "/.attachments/screenshot.png"
+  └─ Sandbox: /workspace/.attachments/screenshot.png (Docker)
+              <Branch.Path()>/.attachments/screenshot.png (Native)
 
 workspace://ws-456/src/main.go    (cross-workspace URI)
   ├─ SDK: ws-id → lookup workspace path

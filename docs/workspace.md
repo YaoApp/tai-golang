@@ -670,6 +670,8 @@ for name, hash := range manifest {
 
 Four-level context scope model for managing hierarchical Agent Instructions composition.
 
+For the directory layout, scope semantics and `_agents_md` delivery, see [Session Context](session-context.md).
+
 ### Data Model
 
 ```go
@@ -754,6 +756,8 @@ merged, err := workspace.MergeContext(bfs, []workspace.ContextEntry{
 
 Manifest-based incremental skill synchronization.
 
+For the `.skills/` layout, key conventions and idempotency guarantees, see [Session Skills](session-skills.md).
+
 ### SkillPack
 
 ```go
@@ -795,7 +799,7 @@ pushed, err := workspace.SyncSkills(ws, packs)
 fmt.Printf("pushed %d skills\n", pushed)
 ```
 
-> **Note:** SyncSkills integration tests require a live transport connection and are deferred to the demo app phase. Only `SkillHash` unit tests exist currently.
+> **Note:** `SkillHash` and `SyncSkills` are unit-tested against an in-memory `WorkspaceFS`. End-to-end coverage through a live transport lives in the demo app.
 
 ## Branch Interface
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/yaoapp/tai-golang/types"
 )
@@ -28,10 +29,40 @@ func SkillHash(r io.Reader) (string, error) {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// validateSkillKey reports whether key names a single skill directory under
+// .skills/. The key is joined into a path and later removed recursively, so a
+// separator or parent reference would escape the skills directory.
+//
+// @param key manifest key, e.g. "bots/postman"
+// @returns an error naming the rejected key, or nil
+func validateSkillKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("skill key is empty")
+	}
+	if strings.HasPrefix(key, "/") || strings.Contains(key, `\`) {
+		return fmt.Errorf("skill key %q must be a relative slash path", key)
+	}
+	for _, part := range strings.Split(key, "/") {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("skill key %q must not contain empty, . or .. segments", key)
+		}
+	}
+	return nil
+}
+
 // SyncSkills synchronizes skill packs to the workspace branch under ".skills/".
 // It reads the current manifest, compares hashes, and only pushes packs that
 // differ. Returns the number of packs actually pushed.
+//
+// Every key is validated before any manifest read or write, so one bad key
+// fails the whole sync without touching the workspace.
 func SyncSkills(fsys types.WorkspaceFS, packs []SkillPack) (int, error) {
+	for _, pack := range packs {
+		if err := validateSkillKey(pack.Key); err != nil {
+			return 0, err
+		}
+	}
+
 	manifest, err := fsys.ReadManifest(".skills")
 	if err != nil {
 		// No manifest yet — treat as empty.
