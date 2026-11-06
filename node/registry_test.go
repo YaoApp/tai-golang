@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/yaoapp/tai-golang/auth"
@@ -479,10 +480,12 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	reg := testRegistry()
 	registerNode(t, reg, "n-os")
 
-	callCount := 0
+	// The transport backend runs its handler on another goroutine, so the
+	// counter needs atomic access.
+	var callCount atomic.Int32
 	transport.SetTestBackend(&mockTransportBackend{
 		handler: func(ff *pb.Payload) (io.ReadWriteCloser, error) {
-			callCount++
+			callCount.Add(1)
 			if ff.Kind == "open" {
 				// Return "opened" frame via codec format
 				opened := buildCodecFrame(types.NamespaceSession, "opened", nil)
@@ -510,8 +513,8 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	if sess.NodeID() != "n-os" {
 		t.Errorf("NodeID=%q, want n-os", sess.NodeID())
 	}
-	if callCount != 2 {
-		t.Errorf("expected 2 stream opens (ctrl+data), got %d", callCount)
+	if got := callCount.Load(); got != 2 {
+		t.Errorf("expected 2 stream opens (ctrl+data), got %d", got)
 	}
 	sess.Close(context.Background())
 }
@@ -797,10 +800,8 @@ func TestRemoteNodeOpenSessionDataStreamError(t *testing.T) {
 	reg := testRegistry()
 	registerNode(t, reg, "n-os-de")
 
-	callCount := 0
 	transport.SetTestBackend(&mockTransportBackend{
 		handler: func(ff *pb.Payload) (io.ReadWriteCloser, error) {
-			callCount++
 			if ff.Kind == "open" {
 				opened := buildCodecFrame(types.NamespaceSession, "opened", nil)
 				return &mockNodeStream{Reader: bytes.NewReader(opened), buf: &bytes.Buffer{}}, nil
