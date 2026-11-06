@@ -1277,4 +1277,5 @@ type ArchiveRequest struct {
 }
 ```
 
-See the design document for protocol details: [05-channels-workspace.md](https://github.com/yaoapp/tai/blob/main/docs/v2/05-channels-workspace.md)
+Workspace archives are extracted on the Tai node, not in the SDK. The archive
+directory name becomes the skill or resource root.

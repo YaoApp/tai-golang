@@ -100,13 +100,40 @@ test.describe('Docs Page', () => {
   test('clicking a doc loads its content', async ({ page }) => {
     await page.goto('/docs');
     await page.waitForTimeout(300);
-
-    // Click on "Quick Start"
-    await page.locator('text=Quick Start').click();
+    // Click "Quick Start" in the nav. The rendered markdown can also contain a
+    // Quick Start link, so scope the locator to the nav.
+    await page.locator('.doc-nav__item', { hasText: 'Quick Start' }).click();
     await page.waitForTimeout(500);
 
     // Should render quickstart content
     await expect(page.locator('main')).toContainText('Prerequisites');
+  });
+
+  // Each document needs its own shareable URL, and a reload must land on the
+  // same page rather than resetting to the index.
+  test('document routes are deep-linkable', async ({ page }) => {
+    await page.goto('/docs/architecture');
+
+    await expect(page).toHaveURL(/\/docs\/architecture$/);
+    await expect(page.locator('.prose h1')).toHaveText('Architecture');
+    await expect(page.locator('.doc-nav__item--active')).toHaveText('Architecture');
+  });
+
+  test('markdown links route instead of 404ing', async ({ page }) => {
+    await page.goto('/docs');
+    await page.waitForTimeout(300);
+
+    // The index page links to sibling docs as plain `quickstart.md`; inside the
+    // console those must resolve to the docs route, not /quickstart.md.
+    await page.locator('.prose a', { hasText: 'Quick Start' }).click();
+    await expect(page).toHaveURL(/\/docs\/quickstart$/);
+    await expect(page.locator('.prose h1')).toHaveText('Quick Start');
+  });
+
+  test('unknown document reports not found', async ({ page }) => {
+    await page.goto('/docs/does-not-exist');
+
+    await expect(page.locator('.notice--error')).toContainText('not found');
   });
 });
 
@@ -142,8 +169,10 @@ test.describe('Navigation', () => {
     await page.goto('/nodes');
 
     const nodesLink = page.locator('nav a', { hasText: 'Nodes' });
-    // Active link should have blue background
-    await expect(nodesLink).toHaveCSS('background-color', 'rgb(0, 102, 204)');
-    await expect(nodesLink).toHaveCSS('color', 'rgb(255, 255, 255)');
+    // The active item lifts its background and shows an accent left border
+    // instead of the old solid blue fill.
+    await expect(nodesLink).toHaveClass(/sidebar__link--active/);
+    await expect(nodesLink).toHaveCSS('background-color', 'rgb(23, 28, 38)');
+    await expect(nodesLink).toHaveCSS('color', 'rgb(230, 237, 243)');
   });
 });

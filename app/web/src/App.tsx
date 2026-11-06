@@ -29,6 +29,7 @@ export default function App() {
           <Route path="/workspaces" element={<WorkspacesPage />} />
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/docs" element={<DocsPage />} />
+          <Route path="/docs/:name" element={<DocsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

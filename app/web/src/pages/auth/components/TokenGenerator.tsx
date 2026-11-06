@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../../api';
+import Button from '../../../components/ui/Button';
 
 export default function TokenGenerator() {
   const [nodeId, setNodeId] = useState('demo-node');
@@ -21,55 +22,47 @@ export default function TokenGenerator() {
     : '';
 
   return (
-    <div style={{ marginTop: 20 }}>
-      <h3>Generate Node Token</h3>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input
-          value={nodeId}
-          onChange={(e) => setNodeId(e.target.value)}
-          placeholder="Node ID"
-          style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4, width: 200 }}
-        />
-        <button onClick={generate} style={btnStyle}>
-          Generate
-        </button>
-      </div>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      {token && (
-        <div style={{ marginTop: 12 }}>
-          <label style={{ fontWeight: 600 }}>Token:</label>
-          <pre style={preStyle}>{token}</pre>
-          <label style={{ fontWeight: 600, marginTop: 8, display: 'block' }}>
-            tai start command:
-          </label>
-          <pre
-            style={{ ...preStyle, cursor: 'pointer' }}
-            onClick={() => navigator.clipboard.writeText(taiCommand)}
-            title="Click to copy"
-          >
-            {taiCommand}
-          </pre>
+    <div>
+      <h3 className="section-title" style={{ fontSize: 'var(--text-xs)' }}>Generate Node Token</h3>
+      <div className="panel">
+        <div className="panel__body">
+          <div className="row row--wrap">
+            <input
+              value={nodeId}
+              onChange={(e) => setNodeId(e.target.value)}
+              placeholder="Node ID"
+              className="input mono"
+              style={{ width: 220 }}
+            />
+            <Button variant="primary" onClick={generate}>Generate</Button>
+            {token && <span className="badge badge--success">issued</span>}
+          </div>
+
+          {error && <div className="notice notice--error" style={{ marginTop: 'var(--space-3)' }}>{error}</div>}
+
+          {token && (
+            <div className="stack" style={{ gap: 'var(--space-1)', marginTop: 'var(--space-4)' }}>
+              <label className="field__label">Token:</label>
+              <pre className="code-block" style={{ margin: 0 }}>{token}</pre>
+
+              <label className="field__label" style={{ marginTop: 'var(--space-2)' }}>
+                tai start command:
+              </label>
+              <pre
+                className="code-block"
+                style={{ margin: 0, cursor: 'pointer' }}
+                onClick={() => void navigator.clipboard.writeText(taiCommand)}
+                title="Click to copy"
+              >
+                {taiCommand}
+              </pre>
+              <span className="faint" style={{ fontSize: 'var(--text-xs)' }}>
+                点击命令块复制
+              </span>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
-
-const btnStyle: React.CSSProperties = {
-  padding: '6px 16px',
-  border: 'none',
-  borderRadius: 4,
-  background: '#0066cc',
-  color: '#fff',
-  cursor: 'pointer',
-};
-
-const preStyle: React.CSSProperties = {
-  background: '#f1f3f5',
-  padding: '8px 12px',
-  borderRadius: 4,
-  fontSize: 12,
-  overflowX: 'auto',
-  wordBreak: 'break-all',
-  whiteSpace: 'pre-wrap',
-};

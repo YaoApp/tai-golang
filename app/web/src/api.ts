@@ -23,6 +23,11 @@ export interface AuthInfo {
 export interface NodeInfo {
   id: string;
   taiId: string;
+  /** Tai binary version reported in the node's Register message. */
+  version?: string;
+  os?: string;
+  arch?: string;
+  capabilities?: string[];
   registeredAt: string;
 }
 
@@ -122,8 +127,17 @@ export const api = {
   },
   docs: {
     list: () => request<DocEntry[]>('/api/docs'),
-    get: (name: string) =>
-      fetch(`/api/docs/${name}`).then((r) => r.text()),
+    get: async (name: string) => {
+      const res = await fetch(`${BASE}/api/docs/${name}`);
+      // Markdown is returned as text, so the JSON error path in request() does
+      // not apply; a missing document must still reject rather than render the
+      // error body as if it were content.
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      return res.text();
+    },
   },
   workspaces: {
     list: (nodeId: string) =>

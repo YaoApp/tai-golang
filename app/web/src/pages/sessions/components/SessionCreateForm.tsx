@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { SessionRequest, McpServer, ProvidersMatrix } from '../../../types';
 import type { WorkspaceEntry } from '../../../api';
+import Button from '../../../components/ui/Button';
+import Caret from '../../../components/ui/Caret';
 
 interface Props {
   nodes: { id: string }[];
@@ -8,6 +10,8 @@ interface Props {
   onNodeChange: (nodeId: string) => void;
   workspaces: WorkspaceEntry[];
   onSubmit: (nodeId: string, req: SessionRequest) => void;
+  /** Reports validation failures to the page so one error area covers both. */
+  onError: (message: string) => void;
   disabled?: boolean;
 }
 
@@ -20,7 +24,7 @@ const defaultLLM: ProvidersMatrix = {
   realtime: { provider_id: 'openai', model: 'gpt-realtime-mini' },
 };
 
-export default function SessionCreateForm({ nodes, currentNode, onNodeChange, workspaces, onSubmit, disabled }: Props) {
+export default function SessionCreateForm({ nodes, currentNode, onNodeChange, workspaces, onSubmit, onError, disabled }: Props) {
   const [runtime, setRuntime] = useState('tai');
   const [isolation, setIsolation] = useState('auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -40,7 +44,13 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
 
   const handleSubmit = () => {
     const nodeId = currentNode || nodes[0]?.id;
-    if (!nodeId) return;
+    if (!nodeId) {
+      // Surfacing this instead of returning silently: a dead button with no
+      // explanation is the most common confusion when the stack is down.
+      onError('No nodes available. Start a Tai node and wait for it to register.');
+      return;
+    }
+    onError('');
 
     const req: SessionRequest = { runtime, isolation };
     if (workspaceId) req.workspaceId = workspaceId;
@@ -76,80 +86,91 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
   };
 
   return (
-    <div style={formContainer}>
+    <div className="form-panel">
       {/* Required fields */}
-      <div style={row}>
+      <div className="form-grid">
         <Field label="Node">
-          <select value={currentNode} onChange={(e) => onNodeChange(e.target.value)} style={selectStyle}>
-            <option value="">Select node...</option>
+          <select className="select" value={currentNode} onChange={(e) => onNodeChange(e.target.value)}>
+            <option value="">Select node…</option>
             {nodes.map((n) => <option key={n.id} value={n.id}>{n.id}</option>)}
           </select>
         </Field>
         <Field label="Runtime">
-          <select value={runtime} onChange={(e) => setRuntime(e.target.value)} style={selectStyle}>
+          <select className="select" value={runtime} onChange={(e) => setRuntime(e.target.value)}>
             {RUNTIMES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </Field>
         <Field label="Isolation">
-          <select value={isolation} onChange={(e) => setIsolation(e.target.value)} style={selectStyle}>
+          <select className="select" value={isolation} onChange={(e) => setIsolation(e.target.value)}>
             {ISOLATIONS.map((i) => <option key={i} value={i}>{i}</option>)}
           </select>
         </Field>
-        <button onClick={handleSubmit} disabled={disabled || !currentNode} style={createBtn(!!currentNode && !disabled)}>
+        <Button
+          variant="primary"
+          onClick={handleSubmit}
+          disabled={disabled}
+          style={{ height: 32 }}
+        >
           Create Session
-        </button>
+        </Button>
       </div>
 
       {/* Advanced toggle */}
       <button
+        type="button"
         onClick={() => setShowAdvanced(!showAdvanced)}
-        style={{ ...toggleBtn, marginTop: 8 }}
+        className="advanced-toggle"
       >
-        {showAdvanced ? '▼' : '▶'} Advanced Options
+        <Caret direction={showAdvanced ? 'down' : 'right'} size={10} />
+        Advanced options
       </button>
 
       {showAdvanced && (
-        <div style={advancedBox}>
+        <div className="advanced-box">
           {/* LLM Provider Matrix */}
           <Section title="LLM Provider Matrix">
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Role</th>
-                  <th style={thStyle}>Provider</th>
-                  <th style={thStyle}>Model</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(['light', 'default', 'realtime'] as const).map((role) => (
-                  <tr key={role}>
-                    <td style={tdStyle}><strong>{role}</strong></td>
-                    <td style={tdStyle}>
-                      <input
-                        value={llm[role]?.provider_id ?? ''}
-                        onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, provider_id: e.target.value } })}
-                        placeholder={role === 'realtime' ? 'openai' : 'deepseek'}
-                        style={inputSmall}
-                      />
-                    </td>
-                    <td style={tdStyle}>
-                      <input
-                        value={llm[role]?.model ?? ''}
-                        onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, model: e.target.value } })}
-                        placeholder={role === 'realtime' ? 'gpt-realtime-mini' : 'deepseek-flash'}
-                        style={inputSmall}
-                      />
-                    </td>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 110 }}>Role</th>
+                    <th>Provider</th>
+                    <th>Model</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <p style={hint}>API Key 和 Base URL 通过启动环境变量注入，不在此输入。</p>
+                </thead>
+                <tbody>
+                  {(['light', 'default', 'realtime'] as const).map((role) => (
+                    <tr key={role}>
+                      <td className="table__cell--primary mono">{role}</td>
+                      <td>
+                        <input
+                          className="input mono"
+                          value={llm[role]?.provider_id ?? ''}
+                          onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, provider_id: e.target.value } })}
+                          placeholder={role === 'realtime' ? 'openai' : 'deepseek'}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input mono"
+                          value={llm[role]?.model ?? ''}
+                          onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, model: e.target.value } })}
+                          placeholder={role === 'realtime' ? 'gpt-realtime-mini' : 'deepseek-flash'}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="field__label" style={{ marginTop: 'var(--space-2)', textTransform: 'none', letterSpacing: 0 }}>
+              API Key 和 Base URL 通过启动环境变量注入，不在此输入。
+            </p>
           </Section>
 
           {/* Workspace */}
           <Section title="Workspace">
-            <select value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} style={selectStyle}>
+            <select className="select" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} style={{ width: '100%' }}>
               <option value="">Auto-create workspace</option>
               {workspaces.map((ws) => (
                 <option key={ws.id} value={ws.id}>{ws.name || ws.id.slice(0, 12)}</option>
@@ -160,10 +181,10 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
           {/* Agent Configuration */}
           <Section title="Agent Configuration">
             <Field label="AssistantID">
-              <input value={assistantId} onChange={(e) => setAssistantId(e.target.value)} placeholder="Optional" style={inputStyle} />
+              <input className="input" value={assistantId} onChange={(e) => setAssistantId(e.target.value)} placeholder="Optional" />
             </Field>
             <Field label="Cwd">
-              <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/workdir" style={inputStyle} />
+              <input className="input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/workdir" />
             </Field>
             <Field label="Additional Directories">
               <DynamicStringList items={additionalDirs} onChange={setAdditionalDirs} placeholder="/path" />
@@ -180,9 +201,9 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
                 onRemove={() => setMcpServers(mcpServers.filter((_, j) => j !== i))}
               />
             ))}
-            <button onClick={() => setMcpServers([...mcpServers, { type: 'stdio', name: '' }])} style={addBtn}>
+            <Button size="sm" variant="ghost" onClick={() => setMcpServers([...mcpServers, { type: 'stdio', name: '' }])}>
               + Add MCP Server
-            </button>
+            </Button>
           </Section>
 
           {/* Environment Variables */}
@@ -192,12 +213,12 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
 
           {/* Timeouts */}
           <Section title="Timeouts">
-            <div style={row}>
+            <div className="form-grid">
               <Field label="IdleTimeout (sec)">
-                <input type="number" value={idleTimeout} onChange={(e) => setIdleTimeout(e.target.value)} placeholder="(empty)" style={inputSmall} />
+                <input className="input mono" type="number" value={idleTimeout} onChange={(e) => setIdleTimeout(e.target.value)} placeholder="(empty)" />
               </Field>
               <Field label="MaxDuration (sec)">
-                <input type="number" value={maxDuration} onChange={(e) => setMaxDuration(e.target.value)} placeholder="(empty)" style={inputSmall} />
+                <input className="input mono" type="number" value={maxDuration} onChange={(e) => setMaxDuration(e.target.value)} placeholder="(empty)" />
               </Field>
             </div>
           </Section>
@@ -206,10 +227,11 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
           <Section title="Config / Metadata">
             <Field label="Config (JSON)">
               <textarea
+                className="textarea textarea--mono"
                 value={configJson}
                 onChange={(e) => setConfigJson(e.target.value)}
                 placeholder='{ "key": "value" }'
-                style={{ ...inputStyle, minHeight: 60, fontFamily: 'monospace', fontSize: 12 }}
+                style={{ minHeight: 60 }}
               />
             </Field>
             <Field label="Metadata">
@@ -226,8 +248,8 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
-      <span style={{ fontWeight: 600, color: '#555' }}>{label}</span>
+    <label className="field">
+      <span className="field__label">{label}</span>
       {children}
     </label>
   );
@@ -235,8 +257,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <h4 style={{ margin: '0 0 6px', fontSize: 13, color: '#333', borderBottom: '1px solid #eee', paddingBottom: 4 }}>{title}</h4>
+    <div className="adv-section">
+      <h4 className="adv-section__title">{title}</h4>
       {children}
     </div>
   );
@@ -244,134 +266,95 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function DynamicStringList({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) {
   return (
-    <div>
+    <div className="stack" style={{ gap: 'var(--space-1)' }}>
       {items.map((item, i) => (
-        <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        <div key={i} className="row">
           <input
+            className="input mono"
             value={item}
             onChange={(e) => { const next = [...items]; next[i] = e.target.value; onChange(next); }}
             placeholder={placeholder}
-            style={{ ...inputSmall, flex: 1 }}
+            style={{ flex: 1 }}
           />
-          <button onClick={() => onChange(items.filter((_, j) => j !== i))} style={removeBtn}>×</button>
+          <Button size="sm" variant="ghost" onClick={() => onChange(items.filter((_, j) => j !== i))}>×</Button>
         </div>
       ))}
-      <button onClick={() => onChange([...items, ''])} style={addBtn}>+ Add</button>
+      <Button size="sm" variant="ghost" onClick={() => onChange([...items, ''])} style={{ alignSelf: 'flex-start' }}>
+        + Add
+      </Button>
     </div>
   );
 }
 
 function KeyValueEditor({ items, onChange }: { items: { key: string; value: string }[]; onChange: (v: { key: string; value: string }[]) => void }) {
   return (
-    <div>
+    <div className="stack" style={{ gap: 'var(--space-1)' }}>
       {items.map((item, i) => (
-        <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        <div key={i} className="row">
           <input
+            className="input mono"
             value={item.key}
             onChange={(e) => { const next = [...items]; next[i] = { ...next[i], key: e.target.value }; onChange(next); }}
             placeholder="Key"
-            style={{ ...inputSmall, flex: 1 }}
+            style={{ flex: 1 }}
           />
           <input
+            className="input mono"
             value={item.value}
             onChange={(e) => { const next = [...items]; next[i] = { ...next[i], value: e.target.value }; onChange(next); }}
             placeholder="Value"
-            style={{ ...inputSmall, flex: 2 }}
+            style={{ flex: 2 }}
           />
-          <button onClick={() => onChange(items.filter((_, j) => j !== i))} style={removeBtn}>×</button>
+          <Button size="sm" variant="ghost" onClick={() => onChange(items.filter((_, j) => j !== i))}>×</Button>
         </div>
       ))}
-      <button onClick={() => onChange([...items, { key: '', value: '' }])} style={addBtn}>+ Add</button>
+      <Button size="sm" variant="ghost" onClick={() => onChange([...items, { key: '', value: '' }])} style={{ alignSelf: 'flex-start' }}>
+        + Add
+      </Button>
     </div>
   );
 }
 
 function McpServerEntry({ server, onChange, onRemove }: { server: McpServer; onChange: (s: McpServer) => void; onRemove: () => void }) {
   return (
-    <div style={{ border: '1px solid #ddd', borderRadius: 4, padding: 8, marginBottom: 8 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+    <div className="mcp-entry">
+      <div className="row" style={{ marginBottom: 'var(--space-2)' }}>
         <select
+          className="select mono"
           value={server.type}
           onChange={(e) => onChange({ ...server, type: e.target.value as 'stdio' | 'http' })}
-          style={selectSmall}
+          style={{ width: 84 }}
         >
           <option value="stdio">stdio</option>
           <option value="http">http</option>
         </select>
         <input
+          className="input mono"
           value={server.name}
           onChange={(e) => onChange({ ...server, name: e.target.value })}
           placeholder="Server name"
-          style={{ ...inputSmall, flex: 1 }}
+          style={{ flex: 1 }}
         />
-        <button onClick={onRemove} style={removeBtn}>×</button>
+        <Button size="sm" variant="ghost" onClick={onRemove}>×</Button>
       </div>
       {server.type === 'stdio' ? (
         <>
           <Field label="Command">
-            <input value={server.command ?? ''} onChange={(e) => onChange({ ...server, command: e.target.value })} style={inputSmall} />
+            <input className="input mono" value={server.command ?? ''} onChange={(e) => onChange({ ...server, command: e.target.value })} />
           </Field>
           <Field label="Args (comma-separated)">
             <input
+              className="input mono"
               value={(server.args ?? []).join(', ')}
               onChange={(e) => onChange({ ...server, args: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
-              style={inputSmall}
             />
           </Field>
         </>
       ) : (
         <Field label="URL">
-          <input value={server.url ?? ''} onChange={(e) => onChange({ ...server, url: e.target.value })} placeholder="http://..." style={inputSmall} />
+          <input className="input mono" value={server.url ?? ''} onChange={(e) => onChange({ ...server, url: e.target.value })} placeholder="http://…" />
         </Field>
       )}
     </div>
   );
 }
-
-// --- Styles ---
-
-const formContainer: React.CSSProperties = { marginBottom: 16 };
-
-const row: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' };
-
-const selectStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 };
-
-const selectSmall: React.CSSProperties = { ...selectStyle, padding: '4px 8px', fontSize: 12 };
-
-const inputStyle: React.CSSProperties = { padding: '6px 10px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13, width: '100%' };
-
-const inputSmall: React.CSSProperties = { padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 12 };
-
-const createBtn = (ok: boolean): React.CSSProperties => ({
-  padding: '6px 16px', border: 'none', borderRadius: 4,
-  background: ok ? '#0066cc' : '#ccc', color: '#fff',
-  cursor: ok ? 'pointer' : 'default', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap',
-});
-
-const toggleBtn: React.CSSProperties = {
-  background: 'none', border: 'none', cursor: 'pointer',
-  fontSize: 12, color: '#0066cc', padding: 0,
-};
-
-const advancedBox: React.CSSProperties = {
-  marginTop: 8, padding: 12, border: '1px solid #e0e0e0',
-  borderRadius: 6, background: '#f9f9f9',
-};
-
-const addBtn: React.CSSProperties = {
-  background: 'none', border: '1px dashed #aaa', borderRadius: 4,
-  padding: '4px 12px', cursor: 'pointer', fontSize: 11, color: '#666',
-};
-
-const removeBtn: React.CSSProperties = {
-  background: 'none', border: '1px solid #ddd', borderRadius: 3,
-  padding: '2px 6px', cursor: 'pointer', fontSize: 12, color: '#999',
-};
-
-const tableStyle: React.CSSProperties = { borderCollapse: 'collapse', width: '100%', fontSize: 12 };
-
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #ddd', fontWeight: 600, color: '#555' };
-
-const tdStyle: React.CSSProperties = { padding: '4px 8px', borderBottom: '1px solid #eee' };
-
-const hint: React.CSSProperties = { margin: '4px 0 0', fontSize: 11, color: '#888', fontStyle: 'italic' };

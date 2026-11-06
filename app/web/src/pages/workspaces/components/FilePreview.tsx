@@ -45,34 +45,41 @@ export default function FilePreview({ nodeId, wsId, branch, path }: Props) {
     }
   }, [nodeId, wsId, branch, path, previewType]);
 
-  if (loading) return <p style={{ color: '#666' }}>Loading...</p>;
+  if (loading) return <p className="faint">Loading…</p>;
 
   switch (previewType) {
     case 'text':
       return (
-        <pre style={{
-          background: '#f6f8fa', padding: 12, borderRadius: 6, overflow: 'auto',
-          maxHeight: 500, fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word', border: '1px solid #e1e4e8',
-        }}>
+        <pre
+          className="code-block mono"
+          style={{ maxHeight: 520, fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}
+        >
           {content}
         </pre>
       );
     case 'image':
-      return <img src={previewUrl} alt={path} style={{ maxWidth: '100%', borderRadius: 4 }} />;
+      return <img src={previewUrl} alt={path} className="preview-media" />;
     case 'video':
       return (
-        <video controls style={{ maxWidth: '100%', borderRadius: 4 }}>
+        <video controls className="preview-media">
           <source src={previewUrl} />
         </video>
       );
     case 'pdf':
-      return <iframe src={previewUrl} style={{ width: '100%', height: 600, border: '1px solid #ddd', borderRadius: 4 }} />;
+      return (
+        <iframe
+          src={previewUrl}
+          title={path}
+          className="preview-frame"
+          style={{ height: 600 }}
+        />
+      );
     default:
       return (
-        <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
-          <p>Binary file — cannot preview</p>
-          <a href={previewUrl} download style={{ color: '#0066cc' }}>Download</a>
+        <div className="empty">
+          <div className="empty__title">Binary file</div>
+          <div>This file type cannot be previewed.</div>
+          <a href={previewUrl} download>Download</a>
         </div>
       );
   }

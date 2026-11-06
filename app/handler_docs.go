@@ -12,16 +12,52 @@ import (
 // DocsHandler serves documentation files from the tai-golang/docs/ directory.
 type DocsHandler struct{}
 
+// docsDir locates the SDK documentation directory.
+//
+// The candidates are anchored to this program rather than to the working
+// directory: a Tai node checkout often sits next to tai-golang, so a plain
+// "docs" candidate resolves to that other repository's documentation and the
+// console silently shows the wrong manual. A directory only qualifies when it
+// contains docs.json, which marks it as the SDK's own doc tree.
 func docsDir() string {
-	// Resolve relative to the binary's working directory.
-	// In development: go run . runs from tai-golang/app/, so docs is at ../docs/.
-	candidates := []string{"../docs", "docs"}
+	var candidates []string
+
+	// Alongside the executable: dist/tai-demo -> ../docs, or app/tai-demo -> ../docs.
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "..", "docs"),
+			filepath.Join(dir, "docs"),
+		)
+	}
+
+	// Source layout: app/ -> ../docs. Covers `go run .` from tai-golang/app.
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(wd, "..", "docs"),
+			filepath.Join(wd, "docs"),
+		)
+	}
+
 	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.IsDir() {
+		if isSDKDocsDir(c) {
 			return c
 		}
 	}
 	return "../docs"
+}
+
+// isSDKDocsDir reports whether dir holds the SDK doc tree. docs.json is the
+// marker: it is the index the console renders, and only this repository ships
+// one alongside the SDK markdown files.
+func isSDKDocsDir(dir string) bool {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docs.json")); err != nil {
+		return false
+	}
+	return true
 }
 
 // docEntry represents a documentation file with its display title.

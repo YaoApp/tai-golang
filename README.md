@@ -1,5 +1,7 @@
 # tai-golang
 
+![Tai Console](./docs/images/console.png)
+
 Go SDK for the Tai Transport Protocol v2. This package implements the **server side** of the protocol, enabling any Go application to accept connections from Tai nodes, manage workspaces, run sessions, and execute agent workloads.
 
 Tai is a computer agent installed on every machine. This SDK handles the transport layer so your application doesn't need to implement the protocol details.
@@ -294,14 +296,23 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 Run the demo app to browse documentation with syntax highlighting:
 
 ```bash
-cd app && make build && DEEPSEEK_API_KEY=<key> ./tai-demo -port 3000
+cd app && make build
+
+# Text agent sessions and the docs browser
+DEEPSEEK_API_KEY=<key> ./tai-demo --port 3000
+
+# Add a provider key for Realtime voice; the built-in preset uses OpenAI
+DEEPSEEK_API_KEY=<key> OPENAI_API_KEY=<key> ./tai-demo --port 3000
 ```
+
+The demo injects whichever keys are present into each session's environment, so
+set only the providers you intend to use. See [Demo App Guide](docs/demo-guide.md).
 
 ## Implemented
 
 - **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
 - **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
-- **Session (28 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, RecvAudio, RecvMotion, RecvRender, SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
+- **Session (29 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, ResponseCreate, RecvAudio, RecvMotion, RecvRender, SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
 - **Realtime Audio**: QUIC datagram (H3) + bidi stream fallback (H2), EncodeAudioFrame/DecodeAudioFrame, DatagramConn interface, H2 stale frame detection
 - **Render (Avatar Motion)**: MotionFrame 87-byte wire format (Pack/Unpack), motion datagram encode/decode (95 bytes), RecvMotion (QUIC datagram), RecvRender (render stream), RenderEvent type, MotionConfig (provider/profile/fps)
 - **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal

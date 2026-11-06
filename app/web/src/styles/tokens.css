@@ -1,0 +1,82 @@
+/*
+ * Design tokens for the Tai developer console.
+ *
+ * One dark theme, no switching. Values are layered rather than a single
+ * background so that panels, cards, and insets stay distinguishable in a
+ * dense debugging surface where everything is a rectangle next to another
+ * rectangle.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Surfaces: base < inset < surface < raised ---- */
+  --bg-base: #0b0e14;
+  --bg-inset: #0d1117;
+  --bg-surface: #12161f;
+  --bg-raised: #171c26;
+  --bg-hover: #1d2432;
+  --bg-active: #232c3d;
+
+  /* ---- Borders, three weights of emphasis ---- */
+  --border-subtle: #202631;
+  --border-default: #2b3240;
+  --border-strong: #3d4655;
+
+  /* ---- Text, three levels of prominence ---- */
+  --text-primary: #e6edf3;
+  --text-secondary: #9aa7b8;
+  --text-tertiary: #6b7787;
+  --text-inverse: #0b0e14;
+
+  /* ---- Semantic accents ---- */
+  --accent: #4d9eff;
+  --accent-hover: #6fb0ff;
+  --accent-muted: #1b3a5c;
+  --success: #3fb950;
+  --warning: #d29922;
+  --danger: #f85149;
+
+  /* Tinted backgrounds for badges and banners. Low saturation so a screen
+     full of them does not read as a traffic light. */
+  --accent-bg: rgba(77, 158, 255, 0.12);
+  --success-bg: rgba(63, 185, 80, 0.12);
+  --warning-bg: rgba(210, 153, 34, 0.12);
+  --danger-bg: rgba(248, 81, 73, 0.12);
+  --neutral-bg: rgba(154, 167, 184, 0.1);
+
+  /* ---- Spacing scale: every gap and padding comes from here ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ---- Radii ---- */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* ---- Type ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* ---- Depth ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  /* ---- Layout ---- */
+  --sidebar-width: 200px;
+  --focus-ring: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--accent);
+}

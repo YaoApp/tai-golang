@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api';
 import type { AuthInfo } from '../../api';
 import TokenGenerator from './components/TokenGenerator';
+import PageHeader from '../../components/ui/PageHeader';
+import Panel from '../../components/ui/Panel';
 
 export default function AuthPage() {
   const [info, setInfo] = useState<AuthInfo | null>(null);
@@ -12,42 +14,35 @@ export default function AuthPage() {
   }, []);
 
   return (
-    <div>
-      <h1>Auth</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+    <div style={{ maxWidth: 900 }}>
+      <PageHeader title="Auth" subtitle="Server identity and node token issuance" />
+
+      {error && <div className="notice notice--error">{error}</div>}
+
       {info && (
-        <table style={tableStyle}>
-          <tbody>
-            <tr><td style={tdLabel}>Transport Port</td><td>{info.transportPort}</td></tr>
-            <tr><td style={tdLabel}>Protocols</td><td>{info.protocols?.join(', ')}</td></tr>
-            <tr><td style={tdLabel}>Version</td><td>{info.version}</td></tr>
-            <tr><td style={tdLabel}>Public Key ID</td><td style={{ fontSize: 12 }}>{info.publicKeyId}</td></tr>
-            <tr>
-              <td style={tdLabel}>Public Key</td>
-              <td>
-                <pre style={{ fontSize: 11, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <Panel title="Server info">
+            <dl className="kv">
+              <dt>Transport Port</dt>
+              <dd className="mono">{info.transportPort}</dd>
+              <dt>Protocols</dt>
+              <dd className="mono">{info.protocols?.join(', ')}</dd>
+              <dt>Protocol Version</dt>
+              <dd className="mono">{info.version}</dd>
+              <dt>Public Key ID</dt>
+              <dd className="mono">{info.publicKeyId}</dd>
+              <dt>Public Key</dt>
+              <dd>
+                <pre className="code-block" style={{ margin: 0 }}>
                   {info.publicKey}
                 </pre>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </dd>
+            </dl>
+          </Panel>
+        </div>
       )}
+
       <TokenGenerator />
     </div>
   );
 }
-
-const tableStyle: React.CSSProperties = {
-  borderCollapse: 'collapse',
-  width: '100%',
-  maxWidth: 700,
-};
-
-const tdLabel: React.CSSProperties = {
-  fontWeight: 600,
-  padding: '6px 12px 6px 0',
-  verticalAlign: 'top',
-  whiteSpace: 'nowrap',
-  width: 140,
-};

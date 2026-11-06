@@ -1,0 +1,236 @@
+/*
+ * Global reset and base element styles.
+ *
+ * Everything visual that is shared across more than one component belongs
+ * here or in components.css; per-component layout stays in the component so
+ * one file does not become the whole app's stylesheet.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  /* Reset the native chrome globally: every button in this app is either
+     styled by `.btn` or by a component class that supplies its own surface.
+     Leaving the default here is what makes `<button>` rows look like 2010
+     form controls. */
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* Single-line controls share one height so a button placed beside them lines
+   up exactly. Textareas are excluded: they size to content. */
+input:not([type='checkbox']):not([type='radio']),
+select {
+  height: 35px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  cursor: not-allowed;
+}
+
+select {
+  cursor: pointer;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+code {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 0.92em;
+  border: 1px solid var(--border-subtle);
+}
+
+pre {
+  margin: 0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+::selection {
+  background: rgba(77, 158, 255, 0.3);
+}
+
+/* Keyboard focus only; mouse clicks should not draw a ring. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/*
+ * Scrollbars.
+ *
+ * Only the ::-webkit-scrollbar rules are used. Setting the standard
+ * `scrollbar-width` / `scrollbar-color` makes Chrome ignore the prefixed rules
+ * entirely, which would trade the custom width, rounded thumb, and hover state
+ * for the platform default. Firefox has no equivalent for those details, so it
+ * keeps its own thin dark bar via the fallback block below.
+ *
+ * Bars are overlays: they appear only while a container actually overflows, and
+ * the track stays transparent so no gutter is drawn on a dark surface.
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
+ * Reserve the bar's width in the containers that switch between short and long
+ * content. Without this, opening a long document or a tall tool output shifts
+ * every neighbouring element sideways by the bar's width.
+ *
+ * Horizontal scrollers (code blocks, wide tables) are excluded: reserving space
+ * there would leave a permanent gap under short lines.
+ */
+.app__main,
+.sidebar,
+.doc-nav,
+.docs-content,
+.chat__messages,
+.evt__json,
+.tool__output,
+.term__output,
+.dialog__body,
+.popover,
+.preview-frame {
+  scrollbar-gutter: stable;
+}
+
+/* Firefox: the prefixed rules above are not implemented, so it gets the nearest
+   equivalent the standard properties allow. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+  }
+}

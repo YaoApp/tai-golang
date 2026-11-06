@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../../api';
 import type { SkillEntry } from '../../../api';
+import Button from '../../../components/ui/Button';
 
 interface Props {
   nodeId: string;
@@ -63,122 +64,55 @@ export default function SkillsPanel({ nodeId, wsId }: Props) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={notice}>
+    <div className="stack" style={{ gap: 'var(--space-3)' }}>
+      <div className="notice notice--info">
         skill 包同步到工作区 <code>.skills/</code> 目录，由 SDK 的 SyncSkills 按
         hash 幂等处理。
       </div>
 
-      {error && <div style={errorBox}>{error}</div>}
-      {message && <div style={okBox}>{message}</div>}
+      {error && <div className="notice notice--error">{error}</div>}
+      {message && <div className="notice notice--info">{message}</div>}
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="row row--wrap">
         <input
+          className="input mono"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           placeholder="skill key（如 bots/postman）"
-          style={{ ...input, width: 220 }}
+          style={{ width: 220 }}
         />
-        <input ref={fileRef} type="file" accept=".tar.gz,.tgz,.zip" style={{ fontSize: 12 }} />
-        <button onClick={() => void upload()} disabled={busy} style={btn}>
-          Upload
-        </button>
-        <button onClick={() => void load()} disabled={busy} style={btn}>
-          Refresh
-        </button>
+        <input ref={fileRef} type="file" accept=".tar.gz,.tgz,.zip" style={{ fontSize: 'var(--text-sm)' }} />
+        <Button size="sm" variant="primary" onClick={() => void upload()} disabled={busy}>Upload</Button>
+        <Button size="sm" onClick={() => void load()} disabled={busy}>Refresh</Button>
       </div>
 
       <div>
-        <div style={sectionTitle}>Synced skills ({skills.length})</div>
+        <div className="section-title" style={{ margin: '0 0 var(--space-2)' }}>
+          Synced skills ({skills.length})
+        </div>
         {skills.length === 0 ? (
-          <p style={{ color: '#999', fontSize: 12 }}>No skills synced yet.</p>
+          <p className="faint" style={{ fontSize: 'var(--text-sm)' }}>No skills synced yet.</p>
         ) : (
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={th}>Key</th>
-                <th style={th}>Hash</th>
-              </tr>
-            </thead>
-            <tbody>
-              {skills.map((s) => (
-                <tr key={s.key}>
-                  <td style={td}>{s.key}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', color: '#666' }}>
-                    {s.hash.slice(0, 22)}…
-                  </td>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Hash</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {skills.map((s) => (
+                  <tr key={s.key}>
+                    <td className="table__cell--primary mono">{s.key}</td>
+                    <td className="table__cell--mono">{s.hash.slice(0, 22)}…</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   );
 }
-
-// ---------- styles ----------
-
-const notice: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#eef4ff',
-  border: '1px solid #cfe0ff',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#1c4b9c',
-};
-
-const errorBox: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#fdecea',
-  border: '1px solid #f5c6cb',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#a71d2a',
-};
-
-const okBox: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#e8f5e9',
-  border: '1px solid #c8e6c9',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#1b5e20',
-};
-
-const sectionTitle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#444',
-  marginBottom: 6,
-};
-
-const input: React.CSSProperties = {
-  padding: '4px 8px',
-  fontSize: 12,
-  border: '1px solid #ddd',
-  borderRadius: 4,
-  boxSizing: 'border-box',
-};
-
-const th: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '4px 8px',
-  borderBottom: '1px solid #e0e0e0',
-  color: '#666',
-  fontWeight: 600,
-};
-
-const td: React.CSSProperties = {
-  padding: '4px 8px',
-  borderBottom: '1px solid #f0f0f0',
-};
-
-const btn: React.CSSProperties = {
-  padding: '4px 10px',
-  fontSize: 12,
-  border: '1px solid #ccc',
-  borderRadius: 4,
-  background: '#fff',
-  cursor: 'pointer',
-};

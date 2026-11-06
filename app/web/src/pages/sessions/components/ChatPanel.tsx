@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { WSMessage } from '../../../hooks/useWebSocket';
+import Caret from '../../../components/ui/Caret';
 import type {
   DisplayItem, MessageItem, ToolCallItem, PlanItem, TerminalItem,
   CompactionItem, SubagentItem, StateUpdatePayload, NoticePayload,
@@ -17,6 +18,8 @@ import TerminalCard from './TerminalCard';
 import PermissionDialog from './PermissionDialog';
 import ElicitationDialog from './ElicitationDialog';
 import SubtitlePanel from './SubtitlePanel';
+import Button from '../../../components/ui/Button';
+import StatusDot from '../../../components/ui/StatusDot';
 
 interface Props {
   sessionId: string;
@@ -262,39 +265,52 @@ export default function ChatPanel({
   const isRunning = agentState?.state === 'running';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={headerBar}>
-        <span>ctrl: <Dot ok={ctrlConnected} /></span>
-        <span>data: <Dot ok={dataConnected} /></span>
-        <span style={{ color: '#888' }}>Events: {dataMessages.length}</span>
+    <div className="chat">
+      {/* Status bar */}
+      <div className="chat__status">
+        <span className="chat__conn">
+          <span className={`chat__dot${ctrlConnected ? ' chat__dot--on' : ''}`} />
+          <span className="faint">ctrl</span>
+        </span>
+        <span className="chat__conn">
+          <span className={`chat__dot${dataConnected ? ' chat__dot--on' : ''}`} />
+          <span className="faint">data</span>
+        </span>
+        <span className="badge mono">{dataMessages.length} events</span>
         {agentState && (
-          <span style={{ fontWeight: 600, color: stateColor(agentState.state) }}>
+          <span className={`chat__state chat__state--${agentState.state}`}>
             {agentState.state === 'running' && '⟳ '}
             {agentState.state === 'requires_action' && '⚠ '}
             {agentState.state}
           </span>
         )}
+        <span className="spacer" />
         {latestUsage && (
-          <span style={{ color: '#888', fontSize: 11 }}>
-            Tokens: {latestUsage.used}/{latestUsage.size}
-            {latestUsage.cost && ` ($${latestUsage.cost.amount.toFixed(4)})`}
+          <span className="badge mono" title="tokens used / window">
+            {latestUsage.used}/{latestUsage.size}
+            {latestUsage.cost && ` · $${latestUsage.cost.amount.toFixed(4)}`}
           </span>
         )}
       </div>
 
-      {/* Dual-column layout */}
-      <div style={dualPane}>
-        {/* Left: Text Chat (upper) + Subtitle (lower) */}
-        <div style={leftColumn}>
-          <div style={leftUpperPane}>
-            {displayItems.map((item, i) => (
-              <DisplayItemRenderer key={i} item={item} />
-            ))}
+      {/* Dual-column: conversation | raw event streams */}
+      <div className="chat__body">
+        <div className="chat__left">
+          <div className="chat__messages">
+            {displayItems.length === 0 ? (
+              <div className="chat__empty">
+                <div className="chat__empty-title">No messages yet</div>
+                <div>Type below to send a prompt. Events appear in the panels on the right.</div>
+              </div>
+            ) : (
+              displayItems.map((item, i) => (
+                <DisplayItemRenderer key={i} item={item} />
+              ))
+            )}
             <div ref={chatEndRef} />
           </div>
           {subtitleVisible && (
-            <div style={leftLowerPane}>
+            <div className="chat__subtitle">
               <SubtitlePanel
                 renderMessages={renderMessages}
                 realtimeActive={realtimeActive}
@@ -306,39 +322,47 @@ export default function ChatPanel({
           )}
         </div>
 
-        {/* Right: Raw event panels (ctrl/data + render/audio) */}
-        <div style={rightPane}>
-          <div style={ctrlSection}>
-            <div style={sectionHeader}>
-              Ctrl <span style={countBadge}>{ctrlMessages.length}</span>
+        <div className="chat__right">
+          <div className="panel chat__stream">
+            <div className="panel__header">
+              Ctrl <span className="badge">{ctrlMessages.length}</span>
             </div>
-            <div style={sectionBody}>
-              {ctrlMessages.map((m, i) => (
-                <RawEventLine key={i} msg={m} channel="ctrl" />
-              ))}
+            <div className="panel__body" style={{ padding: 'var(--space-1) var(--space-2)' }}>
+              {ctrlMessages.length === 0 ? (
+                <div className="chat__empty">No ctrl events</div>
+              ) : (
+                ctrlMessages.map((m, i) => (
+                  <RawEventLine key={i} msg={m} channel="ctrl" />
+                ))
+              )}
               <div ref={ctrlEndRef} />
             </div>
           </div>
 
-          <div style={dataSection}>
-            <div style={sectionHeader}>
-              Data <span style={countBadge}>{dataMessages.length}</span>
+          <div className="panel chat__stream">
+            <div className="panel__header">
+              Data <span className="badge">{dataMessages.length}</span>
             </div>
-            <div style={sectionBody}>
-              {dataMessages.map((m, i) => (
-                <RawEventLine key={i} msg={m} channel="data" />
-              ))}
+            <div className="panel__body" style={{ padding: 'var(--space-1) var(--space-2)' }}>
+              {dataMessages.length === 0 ? (
+                <div className="chat__empty">No data events</div>
+              ) : (
+                dataMessages.map((m, i) => (
+                  <RawEventLine key={i} msg={m} channel="data" />
+                ))
+              )}
               <div ref={dataEndRef} />
             </div>
           </div>
 
           {renderPanelVisible && (
-            <div style={renderSection}>
-              <div style={sectionHeader}>
-                Render <span style={countBadge}>{renderMessages.length}</span>
-                <button onClick={() => setRenderPanelVisible(false)} style={panelCloseBtn}>×</button>
+            <div className="panel chat__stream">
+              <div className="panel__header">
+                Render <span className="badge">{renderMessages.length}</span>
+                <span className="spacer" />
+                <Button size="sm" variant="ghost" onClick={() => setRenderPanelVisible(false)}>×</Button>
               </div>
-              <div style={sectionBody}>
+              <div className="panel__body" style={{ padding: 'var(--space-1) var(--space-2)' }}>
                 {renderMessages.map((m, i) => (
                   <RawEventLine key={i} msg={m} channel="render" />
                 ))}
@@ -348,76 +372,85 @@ export default function ChatPanel({
           )}
 
           {audioPanelVisible && (
-            <div style={audioSection}>
-              <div style={sectionHeader}>
-                Audio <span style={countBadge}>
-                  {audioStats.inFrames + audioStats.outFrames}
-                </span>
-                <button onClick={() => setAudioPanelVisible(false)} style={panelCloseBtn}>×</button>
+            <div className="panel chat__stream">
+              <div className="panel__header">
+                Audio <span className="badge">{audioStats.inFrames + audioStats.outFrames}</span>
+                <span className="spacer" />
+                <Button size="sm" variant="ghost" onClick={() => setAudioPanelVisible(false)}>×</Button>
               </div>
-              <div style={sectionBody}>
-                <div style={{ fontSize: 11, color: '#555', lineHeight: 1.8 }}>
-                  <div>⬇ Received: {audioStats.inFrames} frames ({formatBytes(audioStats.inBytes)})</div>
-                  <div>⬆ Sent: {audioStats.outFrames} frames ({formatBytes(audioStats.outBytes)})</div>
-                  <div>Sample Rate: 24000 Hz / PCM16 / Mono</div>
-                  {realtimeActive && <div style={{ color: '#28a745' }}>● Streaming</div>}
-                </div>
+              <div className="panel__body">
+                <dl className="kv" style={{ gridTemplateColumns: '76px 1fr', gap: '2px var(--space-2)' }}>
+                  <dt>Received</dt>
+                  <dd className="mono">{audioStats.inFrames} frames · {formatBytes(audioStats.inBytes)}</dd>
+                  <dt>Sent</dt>
+                  <dd className="mono">{audioStats.outFrames} frames · {formatBytes(audioStats.outBytes)}</dd>
+                  <dt>Format</dt>
+                  <dd className="mono">24 kHz · PCM16 · mono</dd>
+                </dl>
+                {realtimeActive && <StatusDot status="running" label="Streaming" />}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Attachment bar */}
-      {attachments.length > 0 && (
-        <div style={attachBar}>
-          {attachments.map((a, i) => (
-            <span key={i} style={attachChip}>
-              📎 {a.name}
-              <button onClick={() => setAttachments(attachments.filter((_, j) => j !== i))} style={chipRemove}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Input */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <button
-          onClick={handleFileSelect}
-          disabled={!ctrlConnected || !workspaceId || uploading}
-          style={attachBtnStyle(ctrlConnected && !!workspaceId)}
-          title={workspaceId ? 'Attach file' : 'No workspace (create session with workspace first)'}
-        >
-          {uploading ? '...' : '+'}
-        </button>
-        <select
-          value={sendMode}
-          onChange={(e) => setSendMode(e.target.value as SendMode)}
-          style={modeSelect}
-          title="Send mode"
-        >
-          <option value="prompt">Prompt</option>
-          <option value="followup">Followup</option>
-          <option value="steer">Steer</option>
-        </select>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-          }}
-          placeholder={`Type a ${sendMode}...`}
-          style={inputStyle}
-          disabled={!ctrlConnected}
-        />
-        <button onClick={handleSend} disabled={!ctrlConnected} style={sendBtn(ctrlConnected)}>
-          Send
-        </button>
-        {isRunning && (
-          <button onClick={() => onSend({ kind: 'cancel', receivedAt: Date.now() })} style={cancelBtn}>
-            Cancel
-          </button>
+      {/* Composer */}
+      <div className="composer">
+        {attachments.length > 0 && (
+          <div className="composer__attachments">
+            {attachments.map((a, i) => (
+              <span key={i} className="badge badge--accent">
+                {a.name}
+                <button
+                  type="button"
+                  className="composer__chip-remove"
+                  onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
         )}
+
+        <div className="composer__row">
+          <Button
+            variant="ghost"
+            onClick={handleFileSelect}
+            disabled={!ctrlConnected || !workspaceId || uploading}
+            title={workspaceId ? 'Attach file' : 'No workspace (create session with workspace first)'}
+          >
+            {uploading ? '…' : '+'}
+          </Button>
+          <select
+            value={sendMode}
+            onChange={(e) => setSendMode(e.target.value as SendMode)}
+            className="select"
+            style={{ width: 92 }}
+            title="Send mode"
+          >
+            <option value="prompt">Prompt</option>
+            <option value="followup">Followup</option>
+            <option value="steer">Steer</option>
+          </select>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
+            placeholder={`Type a ${sendMode}…`}
+            className="input"
+            style={{ flex: 1 }}
+            disabled={!ctrlConnected}
+          />
+          <Button variant="primary" onClick={handleSend} disabled={!ctrlConnected}>Send</Button>
+          {isRunning && (
+            <Button variant="danger" onClick={() => onSend({ kind: 'cancel', receivedAt: Date.now() })}>
+              Cancel
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Permission / Elicitation dialogs */}
@@ -473,23 +506,22 @@ function DisplayItemRenderer({ item }: { item: DisplayItem }) {
 
 // --- Raw event line with timestamp + collapsible JSON ---
 
-function RawEventLine({ msg, channel }: { msg: WSMessage; channel: 'ctrl' | 'data' | 'render' }) {
+function RawEventLine({ msg }: { msg: WSMessage; channel: 'ctrl' | 'data' | 'render' }) {
   const [expanded, setExpanded] = useState(false);
-  const ts = formatTime(msg.receivedAt);
   const isOut = msg.direction === 'out';
-  const badgeBg = isOut ? '#d4edda' : channel === 'ctrl' ? '#fff3cd' : '#e8f0fe';
 
   return (
-    <div style={rawLine}>
-      <div style={rawLineHeader} onClick={() => setExpanded(!expanded)}>
-        <span style={rawTs}>{ts}</span>
-        {isOut && <span style={{ ...kindBadge, background: '#c3e6cb', color: '#155724', fontSize: 9 }}>→</span>}
-        {!isOut && <span style={{ ...kindBadge, background: '#bee5eb', color: '#0c5460', fontSize: 9 }}>←</span>}
-        <span style={{ ...kindBadge, background: badgeBg }}>{msg.kind}</span>
-        <span style={rawToggle}>{expanded ? '▾' : '▸'}</span>
-      </div>
+    <div className="evt">
+      <button type="button" className="evt__head" onClick={() => setExpanded(!expanded)}>
+        <span className="evt__ts mono">{formatTime(msg.receivedAt)}</span>
+        <span className={`evt__dir evt__dir--${isOut ? 'out' : 'in'}`}>{isOut ? '→' : '←'}</span>
+        <span className="evt__kind mono truncate">{msg.kind}</span>
+        <span className="evt__toggle">
+          <Caret direction={expanded ? 'down' : 'right'} size={10} />
+        </span>
+      </button>
       {expanded && msg.data !== undefined && (
-        <pre style={rawJson}>{JSON.stringify(msg.data, null, 2)}</pre>
+        <pre className="evt__json mono">{JSON.stringify(msg.data, null, 2)}</pre>
       )}
     </div>
   );
@@ -499,26 +531,22 @@ function RawEventLine({ msg, channel }: { msg: WSMessage; channel: 'ctrl' | 'dat
 
 function StateIndicator({ state, stopReason, error }: { state: string; stopReason?: string; error?: { code: number; message: string } }) {
   return (
-    <div style={{ textAlign: 'center', fontSize: 11, margin: '4px 0', color: stateColor(state) }}>
+    <div className={`chat__inline-state chat__state--${state}`}>
       {state === 'running' && '⟳ '}
       {state === 'requires_action' && '⚠ '}
-      State: {state}
-      {stopReason && ` (${stopReason})`}
-      {error && ` — ${error.message}`}
+      {state}
+      {stopReason && <span className="faint"> ({stopReason})</span>}
+      {error && <span style={{ color: 'var(--danger)' }}> — {error.message}</span>}
     </div>
   );
 }
 
 function NoticeBar({ severity, title }: { severity: string; title: string }) {
-  const colors: Record<string, { bg: string; fg: string; border: string }> = {
-    info: { bg: '#e8f4f8', fg: '#0c5460', border: '#bee5eb' },
-    warning: { bg: '#fff3cd', fg: '#856404', border: '#ffeeba' },
-    error: { bg: '#f8d7da', fg: '#721c24', border: '#f5c6cb' },
-  };
-  const c = colors[severity] || colors.info;
+  const tone = severity === 'error' ? 'error' : severity === 'warning' ? 'warning' : 'info';
   return (
-    <div style={{ margin: '6px 0', padding: '6px 12px', borderRadius: 4, background: c.bg, color: c.fg, border: `1px solid ${c.border}`, fontSize: 12 }}>
-      [{severity}] {title}
+    <div className={`notice notice--${tone}`} style={{ margin: 'var(--space-2) 0' }}>
+      <span className="mono" style={{ fontSize: 'var(--text-xs)' }}>[{severity}]</span>
+      <span>{title}</span>
     </div>
   );
 }
@@ -526,26 +554,27 @@ function NoticeBar({ severity, title }: { severity: string; title: string }) {
 function CompactionIndicator({ item }: { item: CompactionItem }) {
   const summary = item.summary.join('');
   return (
-    <div style={{ margin: '6px 0', padding: '6px 12px', borderRadius: 4, background: '#f0f0f0', fontSize: 11, color: '#666' }}>
-      🗜️ Compaction: <strong>{item.status}</strong>
-      {summary && <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{summary}</div>}
+    <div className="chat__inline-note">
+      <span className="mono">compaction</span> <strong>{item.status}</strong>
+      {summary && <div style={{ marginTop: 'var(--space-1)', whiteSpace: 'pre-wrap' }}>{summary}</div>}
     </div>
   );
 }
 
 function SubagentCard({ item }: { item: SubagentItem }) {
   return (
-    <div style={{ margin: '6px 0', padding: '6px 12px', borderRadius: 4, background: '#eef', border: '1px solid #ddf', fontSize: 12 }}>
-      🤖 Subagent: <strong>{item.title || item.sessionId}</strong>
-      {item.status && <span style={{ marginLeft: 8, color: '#666' }}>[{item.status}]</span>}
+    <div className="chat__inline-note">
+      <span className="mono">subagent</span>{' '}
+      <strong>{item.title || item.sessionId}</strong>
+      {item.status && <span className="badge" style={{ marginLeft: 'var(--space-2)' }}>{item.status}</span>}
     </div>
   );
 }
 
 function ConfigOptionLine({ data }: { data: ConfigOptionPayload }) {
   return (
-    <div style={{ textAlign: 'center', fontSize: 11, margin: '4px 0', color: '#888' }}>
-      ⚙ Config: {data.name || data.configId} = {String(data.currentValue)}
+    <div className="chat__inline-state faint">
+      <span className="mono">{data.name || data.configId}</span> = {String(data.currentValue)}
     </div>
   );
 }
@@ -553,13 +582,12 @@ function ConfigOptionLine({ data }: { data: ConfigOptionPayload }) {
 function SessionMessageLine({ data }: { data: SessionMessagePayload }) {
   const text = data.content?.map((c) => c.text).filter(Boolean).join('') || '';
   return (
-    <div style={{ margin: '6px 0', padding: '6px 12px', borderRadius: 4, background: '#eef', border: '1px solid #ddf', fontSize: 12 }}>
-      💬 Session Message from <strong>{data.senderSessionId.slice(0, 8)}</strong>: {text}
+    <div className="chat__inline-note">
+      <span className="mono">session message</span>{' '}
+      <strong>{data.senderSessionId.slice(0, 8)}</strong>: {text}
     </div>
   );
 }
-
-// --- Event processing ---
 
 function buildDisplayItems(dataMessages: WSMessage[], pendingLocalMessages: LocalUserMessage[] = []): DisplayItem[] {
   const messages = new Map<string, MessageItem>();
@@ -919,168 +947,17 @@ function buildDisplayItems(dataMessages: WSMessage[], pendingLocalMessages: Loca
 
 // --- Helpers ---
 
-function Dot({ ok }: { ok: boolean }) {
-  return (
-    <span style={{
-      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-      background: ok ? '#28a745' : '#dc3545', marginRight: 4,
-    }} />
-  );
-}
-
-function stateColor(state: string): string {
-  switch (state) {
-    case 'running': return '#0066cc';
-    case 'idle': return '#28a745';
-    case 'requires_action': return '#fd7e14';
-    default: return '#888';
-  }
-}
-
-function formatTime(ts: number): string {
-  if (!ts) return '--:--:--';
-  const d = new Date(ts);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  const s = String(d.getSeconds()).padStart(2, '0');
-  const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${h}:${m}:${s}.${ms}`;
-}
-
-// --- Styles ---
-
-const headerBar: React.CSSProperties = {
-  display: 'flex', gap: 12, marginBottom: 8, fontSize: 12, alignItems: 'center', flexWrap: 'wrap',
-};
-
-const dualPane: React.CSSProperties = {
-  display: 'flex', flex: 1, gap: 8, minHeight: 0,
-};
-
-const leftColumn: React.CSSProperties = {
-  flex: 3, display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0,
-};
-
-const leftUpperPane: React.CSSProperties = {
-  flex: 3, overflow: 'auto', padding: 12,
-  border: '1px solid #eee', borderRadius: 4, background: '#fafafa',
-};
-
-const leftLowerPane: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 80,
-};
-
-const rightPane: React.CSSProperties = {
-  flex: 2, display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0,
-};
-
-const ctrlSection: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
-  border: '1px solid #eee', borderRadius: 4, background: '#fffcf0',
-};
-
-const dataSection: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
-  border: '1px solid #eee', borderRadius: 4, background: '#f8faff',
-};
-
-const renderSection: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
-  border: '1px solid #eee', borderRadius: 4, background: '#f0fff4',
-};
-
-const audioSection: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
-  border: '1px solid #eee', borderRadius: 4, background: '#fff5f5',
-};
-
-const sectionHeader: React.CSSProperties = {
-  padding: '4px 8px', fontSize: 11, fontWeight: 700, borderBottom: '1px solid #eee',
-  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4,
-};
-
-const sectionBody: React.CSSProperties = {
-  flex: 1, overflow: 'auto', padding: '4px 8px',
-};
-
-const countBadge: React.CSSProperties = {
-  display: 'inline-block', padding: '1px 5px', borderRadius: 8,
-  background: '#ddd', fontSize: 10, fontWeight: 400, marginLeft: 4,
-};
-
-const panelCloseBtn: React.CSSProperties = {
-  marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
-  color: '#999', fontSize: 13, padding: '0 2px', lineHeight: 1,
-};
-
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const rawLine: React.CSSProperties = {
-  marginBottom: 2, paddingBottom: 2, borderBottom: '1px solid #f0f0f0',
-};
-
-const rawLineHeader: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-  padding: '2px 0', fontSize: 11,
-};
-
-const rawTs: React.CSSProperties = {
-  fontFamily: 'monospace', fontSize: 10, color: '#999', flexShrink: 0,
-};
-
-const rawToggle: React.CSSProperties = {
-  marginLeft: 'auto', color: '#bbb', fontSize: 10,
-};
-
-const rawJson: React.CSSProperties = {
-  margin: '2px 0 4px 16px', fontSize: 10, whiteSpace: 'pre-wrap',
-  wordBreak: 'break-all', color: '#555', background: '#f5f5f5',
-  padding: '4px 6px', borderRadius: 3, maxHeight: 200, overflow: 'auto',
-};
-
-const kindBadge: React.CSSProperties = {
-  display: 'inline-block', padding: '1px 5px', borderRadius: 3,
-  background: '#e8f0fe', fontSize: 10, fontWeight: 600,
-};
-
-const attachBar: React.CSSProperties = {
-  display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap',
-};
-
-const attachChip: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 4,
-  padding: '2px 8px', background: '#e8f0fe', borderRadius: 12, fontSize: 11,
-};
-
-const chipRemove: React.CSSProperties = {
-  background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontSize: 12, padding: 0,
-};
-
-const inputStyle: React.CSSProperties = {
-  flex: 1, padding: '8px 12px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13,
-};
-
-const modeSelect: React.CSSProperties = {
-  padding: '6px 4px', borderRadius: 4, border: '1px solid #ccc', fontSize: 11, width: 80,
-};
-
-const attachBtnStyle = (ok: boolean): React.CSSProperties => ({
-  padding: '8px', border: '1px solid #ccc', borderRadius: 4,
-  background: '#fff', cursor: ok ? 'pointer' : 'default', fontSize: 16,
-  opacity: ok ? 1 : 0.5,
-});
-
-const sendBtn = (ok: boolean): React.CSSProperties => ({
-  padding: '8px 16px', border: 'none', borderRadius: 4,
-  background: ok ? '#0066cc' : '#ccc', color: '#fff',
-  cursor: ok ? 'pointer' : 'default', fontWeight: 600, fontSize: 13,
-});
-
-const cancelBtn: React.CSSProperties = {
-  padding: '8px 12px', border: '1px solid #dc3545', borderRadius: 4,
-  background: 'transparent', color: '#dc3545', cursor: 'pointer', fontSize: 13,
-};
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const s = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${h}:${m}:${s}.${ms}`;
+}

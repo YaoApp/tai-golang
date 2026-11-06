@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { useCurrentNode } from '../../hooks/useCurrentNode';
 import NodeCard from './components/NodeCard';
 import { eventBus } from '../../lib/events';
+import Button from '../../components/ui/Button';
+import EmptyState from '../../components/ui/EmptyState';
+import PageHeader from '../../components/ui/PageHeader';
 
 export default function NodesPage() {
   const [currentNode, setCurrentNode, nodes, refreshNodes] = useCurrentNode();
@@ -10,47 +13,53 @@ export default function NodesPage() {
   // triggers a list refresh.
   useEffect(() => eventBus.on('node.', () => void refreshNodes()), [refreshNodes]);
 
+  // The empty-state copy is asserted by the browser tests; keep it literal.
+  const isEmpty = nodes.length === 0;
+
   return (
     <div>
-      <h1>Nodes</h1>
-      <p style={{ color: '#666', fontSize: 14 }}>
-        Registered nodes: {nodes.length}
-        {currentNode && (
-          <span style={{ marginLeft: 12, color: '#0066cc', fontWeight: 600 }}>
-            Current: {currentNode}
+      <PageHeader
+        title="Nodes"
+        subtitle={
+          <span>
+            Registered nodes: {nodes.length}
+            {currentNode && (
+              <>
+                {' · current '}
+                <span className="mono" style={{ color: 'var(--accent)' }}>{currentNode}</span>
+              </>
+            )}
           </span>
-        )}
-      </p>
-      {nodes.length === 0 && (
-        <p style={{ color: '#999' }}>
-          No nodes registered. Use the Auth page to generate a token, then run{' '}
-          <code>tai start</code>.
-        </p>
-      )}
-      {nodes.map((n) => (
-        <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <div style={{ flex: 1 }}>
-            <NodeCard node={n} />
-          </div>
-          <button
-            onClick={() => setCurrentNode(n.id)}
-            disabled={currentNode === n.id}
-            style={{
-              padding: '6px 14px',
-              border: currentNode === n.id ? '2px solid #0066cc' : '1px solid #ccc',
-              borderRadius: 6,
-              background: currentNode === n.id ? '#e8f0fe' : '#fff',
-              color: currentNode === n.id ? '#0066cc' : '#333',
-              cursor: currentNode === n.id ? 'default' : 'pointer',
-              fontWeight: currentNode === n.id ? 600 : 400,
-              fontSize: 13,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {currentNode === n.id ? '✓ Current' : 'Set as Current'}
-          </button>
+        }
+        actions={<Button onClick={() => void refreshNodes()}>Refresh</Button>}
+      />
+
+      {isEmpty ? (
+        <EmptyState
+          title="No nodes registered"
+          hint={
+            <>
+              Use the Auth page to generate a token, then run <code>tai start</code>.
+            </>
+          }
+        />
+      ) : (
+        <div className="node-list">
+          {nodes.map((n) => (
+            <div key={n.id} className="node-list__row">
+              <NodeCard node={n} active={currentNode === n.id} />
+              <Button
+                variant={currentNode === n.id ? 'ghost' : 'default'}
+                size="sm"
+                disabled={currentNode === n.id}
+                onClick={() => setCurrentNode(n.id)}
+              >
+                {currentNode === n.id ? 'Current' : 'Set as current'}
+              </Button>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

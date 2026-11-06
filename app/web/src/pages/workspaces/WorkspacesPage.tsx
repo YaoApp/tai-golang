@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
 import type { WorkspaceEntry } from '../../api';
 import { useCurrentNode } from '../../hooks/useCurrentNode';
+import Button from '../../components/ui/Button';
+import DataTable, { type Column } from '../../components/ui/DataTable';
+import Field from '../../components/ui/Field';
+import PageHeader from '../../components/ui/PageHeader';
 
 export default function WorkspacesPage() {
   const [currentNode, setCurrentNode, nodes] = useCurrentNode();
@@ -47,90 +51,102 @@ export default function WorkspacesPage() {
     }
   };
 
+  const columns: Column<WorkspaceEntry>[] = [
+    {
+      key: 'id',
+      header: 'ID',
+      mono: true,
+      render: (ws) => (
+        <a
+          href={`/workspaces/${ws.id}?nodeId=${currentNode}`}
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(`/workspaces/${ws.id}?nodeId=${currentNode}`);
+          }}
+          title={ws.id}
+        >
+          {ws.id.slice(0, 12)}…
+        </a>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      primary: true,
+      render: (ws) => ws.name || <span className="faint">—</span>,
+    },
+    {
+      key: 'owner',
+      header: 'Owner',
+      render: (ws) => ws.owner || <span className="faint">—</span>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 100,
+      render: (ws) => (
+        <Button size="sm" variant="danger" onClick={() => void handleDelete(ws.id)}>Delete</Button>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <h1>Workspaces</h1>
+      <PageHeader title="Workspaces" subtitle="Remote filesystem and Git branches" />
 
-      <div style={{ marginBottom: 16 }}>
-        <label>Node: </label>
-        <select
-          value={currentNode}
-          onChange={(e) => setCurrentNode(e.target.value)}
-          style={{ padding: '4px 8px', minWidth: 200 }}
-        >
-          <option value="">Select a node...</option>
-          {nodes.map((n) => (
-            <option key={n.id} value={n.id}>{n.id}</option>
-          ))}
-        </select>
+      <div className="toolbar">
+        <Field label="Node">
+          <select
+            className="select"
+            value={currentNode}
+            onChange={(e) => setCurrentNode(e.target.value)}
+            style={{ minWidth: 200 }}
+          >
+            <option value="">Select a node…</option>
+            {nodes.map((n) => (
+              <option key={n.id} value={n.id}>{n.id}</option>
+            ))}
+          </select>
+        </Field>
+        <span className="spacer" />
+        {currentNode && (
+          <Button variant="primary" size="sm" onClick={() => setShowCreate(!showCreate)}>
+            + Create workspace
+          </Button>
+        )}
       </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <div className="notice notice--error" style={{ marginBottom: 'var(--space-3)' }}>{error}</div>}
 
-      {currentNode && (
-        <>
-          <div style={{ marginBottom: 12 }}>
-            <button onClick={() => setShowCreate(!showCreate)} style={btnStyle}>
-              + Create Workspace
-            </button>
-          </div>
+      {showCreate && (
+        <div className="inline-form">
+          <input
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            placeholder="my-project"
+            className="input"
+            style={{ width: 260 }}
+          />
+          <Button size="sm" variant="primary" onClick={handleCreate}>Create</Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowCreate(false)}>Cancel</Button>
+        </div>
+      )}
 
-          {showCreate && (
-            <div style={{ marginBottom: 16, padding: 12, border: '1px solid #ddd', borderRadius: 6 }}>
-              <div style={{ marginBottom: 8 }}>
-                <label>Name: </label>
-                <input value={createName} onChange={(e) => setCreateName(e.target.value)}
-                  placeholder="my-project" style={inputStyle} />
-              </div>
-              <button onClick={handleCreate} style={btnStyle}>Create</button>
-              <button onClick={() => setShowCreate(false)} style={{ ...btnStyle, marginLeft: 8, background: '#6c757d' }}>Cancel</button>
-            </div>
-          )}
-
-          {loading ? (
-            <p>Loading workspaces...</p>
-          ) : workspaces.length === 0 ? (
-            <p style={{ color: '#666' }}>No workspaces found.</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
-                  <th style={thStyle}>ID</th>
-                  <th style={thStyle}>Name</th>
-                  <th style={thStyle}>Owner</th>
-                  <th style={thStyle}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workspaces.map((ws) => (
-                  <tr key={ws.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={tdStyle}>
-                      <a href="#" onClick={(e) => { e.preventDefault(); navigate(`/workspaces/${ws.id}?nodeId=${currentNode}`); }}
-                        style={{ color: '#0066cc' }}>{ws.id.slice(0, 12)}...</a>
-                    </td>
-                    <td style={tdStyle}>{ws.name || '—'}</td>
-                    <td style={tdStyle}>{ws.owner || '—'}</td>
-                    <td style={tdStyle}>
-                      <button onClick={() => handleDelete(ws.id)}
-                        style={{ ...btnStyle, background: '#dc3545', fontSize: 12, padding: '2px 8px' }}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </>
+      {!currentNode ? (
+        <div className="empty">
+          <div className="empty__title">No node selected</div>
+          <div>Pick a node above to list its workspaces.</div>
+        </div>
+      ) : loading ? (
+        <div className="empty">Loading workspaces…</div>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={workspaces}
+          rowKey={(ws) => ws.id}
+          empty="No workspaces found."
+        />
       )}
     </div>
   );
 }
-
-const btnStyle: React.CSSProperties = {
-  padding: '6px 14px', background: '#0066cc', color: '#fff',
-  border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 14,
-};
-const inputStyle: React.CSSProperties = {
-  padding: '4px 8px', border: '1px solid #ccc', borderRadius: 4, width: 300,
-};
-const thStyle: React.CSSProperties = { padding: '8px 12px' };
-const tdStyle: React.CSSProperties = { padding: '8px 12px' };

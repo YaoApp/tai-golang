@@ -135,6 +135,14 @@ func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
 	return a.keyID, pemBytes
 }
 
+// ProtocolVersion is the transport protocol revision advertised in well-known
+// discovery. It is not the SDK's software version: the SDK is a library and
+// carries no release number, while this value identifies the wire protocol a
+// client must speak. Bump it only when the protocol changes incompatibly.
+//
+// Pre-release builds append a build stamp, e.g. "2.0.0-nightly.20261106".
+const ProtocolVersion = "2.0.0"
+
 // WellKnownInfo returns default transport metadata.
 func (a *defaultAuth) WellKnownInfo() *types.WellKnownResponse {
 	a.mu.RLock()
@@ -151,7 +159,7 @@ func (a *defaultAuth) WellKnownInfo() *types.WellKnownResponse {
 		TransportPort: port,
 		Protocols:     protocols,
 		TLS:           a.tlsInfo,
-		Version:       "0.1.0",
+		Version:       ProtocolVersion,
 	}
 }
 

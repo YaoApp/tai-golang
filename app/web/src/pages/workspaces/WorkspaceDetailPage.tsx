@@ -5,6 +5,9 @@ import type { BranchInfo, FileStatEntry, CommitEntry } from '../../api';
 import FilePreview from './components/FilePreview';
 import ContextPanel from './components/ContextPanel';
 import SkillsPanel from './components/SkillsPanel';
+import Button from '../../components/ui/Button';
+
+type Tab = 'files' | 'history' | 'context' | 'skills';
 
 export default function WorkspaceDetailPage() {
   const { id: wsId } = useParams<{ id: string }>();
@@ -18,7 +21,7 @@ export default function WorkspaceDetailPage() {
   const [commits, setCommits] = useState<CommitEntry[]>([]);
   const [previewPath, setPreviewPath] = useState('');
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'files' | 'history' | 'context' | 'skills'>('files');
+  const [tab, setTab] = useState<Tab>('files');
 
   // Branch management
   const [showCreateBranch, setShowCreateBranch] = useState(false);
@@ -165,62 +168,90 @@ export default function WorkspaceDetailPage() {
 
   return (
     <div>
-      <h1>Workspace: {wsId?.slice(0, 12)}...</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <div className="page-header">
+        <div className="page-header__title">
+          <h1 className="mono" style={{ fontSize: 'var(--text-xl)' }}>
+            {wsId?.slice(0, 12)}…
+          </h1>
+          <span className="page-header__subtitle mono">workspace</span>
+        </div>
+      </div>
 
-      {/* Branch selector */}
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <label>Branch:</label>
-        <select value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setCurrentPath('.'); setPreviewPath(''); }}
-          style={{ padding: '4px 8px' }}>
-          {branches.map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
-        </select>
-        <button onClick={() => setShowCreateBranch(true)} style={btnSmall}>+ Branch</button>
+      {error && <div className="notice notice--error" style={{ marginBottom: 'var(--space-3)' }}>{error}</div>}
+
+      {/* Branch + commit toolbar */}
+      <div className="toolbar">
+        <div className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span className="field__label">Branch</span>
+          <select
+            className="select mono"
+            value={selectedBranch}
+            onChange={(e) => { setSelectedBranch(e.target.value); setCurrentPath('.'); setPreviewPath(''); }}
+          >
+            {branches.map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
+          </select>
+        </div>
+        <Button size="sm" onClick={() => setShowCreateBranch(true)}>+ Branch</Button>
         {selectedBranch !== 'main' && (
-          <button onClick={() => handleDeleteBranch(selectedBranch)} style={{ ...btnSmall, background: '#dc3545' }}>Delete</button>
+          <Button size="sm" variant="danger" onClick={() => handleDeleteBranch(selectedBranch)}>Delete</Button>
         )}
-        <button onClick={() => setShowMerge(true)} style={btnSmall}>Merge</button>
+        <Button size="sm" onClick={() => setShowMerge(true)}>Merge</Button>
+
+        <span className="spacer" />
+
+        <input
+          className="input"
+          value={commitMsg}
+          onChange={(e) => setCommitMsg(e.target.value)}
+          placeholder="Commit message…"
+          style={{ flex: 1, maxWidth: 360 }}
+          onKeyDown={(e) => e.key === 'Enter' && handleCommit()}
+        />
+        <Button size="sm" variant="primary" disabled={!commitMsg} onClick={handleCommit}>Commit</Button>
       </div>
 
       {showCreateBranch && (
-        <div style={panelStyle}>
-          <input value={newBranchName} onChange={(e) => setNewBranchName(e.target.value)}
-            placeholder="branch-name" style={inputStyle} />
-          <button onClick={handleCreateBranch} style={{ ...btnSmall, marginLeft: 8 }}>Create</button>
-          <button onClick={() => setShowCreateBranch(false)} style={{ ...btnSmall, marginLeft: 4, background: '#6c757d' }}>Cancel</button>
+        <div className="inline-form">
+          <input
+            value={newBranchName}
+            onChange={(e) => setNewBranchName(e.target.value)}
+            placeholder="branch-name"
+            className="input mono"
+            style={{ width: 220 }}
+          />
+          <Button size="sm" variant="primary" onClick={handleCreateBranch}>Create</Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowCreateBranch(false)}>Cancel</Button>
         </div>
       )}
 
       {showMerge && (
-        <div style={panelStyle}>
-          <label>From: </label>
-          <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} style={{ padding: '4px 8px' }}>
-            <option value="">Select...</option>
+        <div className="inline-form">
+          <span className="field__label">From</span>
+          <select className="select mono" value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)}>
+            <option value="">Select…</option>
             {branches.filter((b) => b.name !== mergeInto).map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
           </select>
-          <label style={{ marginLeft: 8 }}>Into: </label>
-          <select value={mergeInto} onChange={(e) => setMergeInto(e.target.value)} style={{ padding: '4px 8px' }}>
+          <span className="field__label" style={{ marginLeft: 'var(--space-2)' }}>Into</span>
+          <select className="select mono" value={mergeInto} onChange={(e) => setMergeInto(e.target.value)}>
             {branches.map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
           </select>
-          <button onClick={handleMerge} style={{ ...btnSmall, marginLeft: 8 }}>Merge</button>
-          <button onClick={() => setShowMerge(false)} style={{ ...btnSmall, marginLeft: 4, background: '#6c757d' }}>Cancel</button>
+          <Button size="sm" variant="primary" onClick={handleMerge}>Merge</Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowMerge(false)}>Cancel</Button>
         </div>
       )}
 
-      {/* Commit bar */}
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)}
-          placeholder="Commit message..." style={{ ...inputStyle, flex: 1 }}
-          onKeyDown={(e) => e.key === 'Enter' && handleCommit()} />
-        <button onClick={handleCommit} disabled={!commitMsg} style={btnSmall}>Commit</button>
-      </div>
-
       {/* Tabs */}
-      <div style={{ marginBottom: 12, borderBottom: '2px solid #ddd' }}>
-        <button onClick={() => setTab('files')} style={tab === 'files' ? tabActive : tabInactive}>Files</button>
-        <button onClick={() => setTab('history')} style={tab === 'history' ? tabActive : tabInactive}>History</button>
-        <button onClick={() => setTab('context')} style={tab === 'context' ? tabActive : tabInactive}>Context</button>
-        <button onClick={() => setTab('skills')} style={tab === 'skills' ? tabActive : tabInactive}>Skills</button>
+      <div className="tabs">
+        {(['files', 'history', 'context', 'skills'] as Tab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`tabs__item${tab === t ? ' tabs__item--active' : ''}`}
+          >
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
       </div>
 
       {tab === 'context' && (
@@ -243,104 +274,134 @@ export default function WorkspaceDetailPage() {
       {tab === 'skills' && <SkillsPanel nodeId={nodeId} wsId={wsId ?? ''} />}
 
       {tab === 'files' && (
-        <div style={{ display: 'flex', gap: 16 }}>
-          <div style={{ flex: 1 }}>
+        <div className="files-layout">
+          <div className="files-layout__main">
             {/* Breadcrumb */}
-            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button onClick={() => { setCurrentPath('.'); setPreviewPath(''); }} style={linkBtn}>root</button>
+            <div className="breadcrumb">
+              <button
+                type="button"
+                className="breadcrumb__link"
+                onClick={() => { setCurrentPath('.'); setPreviewPath(''); }}
+              >
+                root
+              </button>
               {currentPath !== '.' && currentPath.split('/').map((part, i, arr) => (
-                <span key={i}>
-                  <span style={{ color: '#999' }}>/</span>
-                  <button onClick={() => setCurrentPath(arr.slice(0, i + 1).join('/'))} style={linkBtn}>{part}</button>
+                <span key={i} className="breadcrumb__seg">
+                  <span className="faint">/</span>
+                  <button
+                    type="button"
+                    className="breadcrumb__link"
+                    onClick={() => setCurrentPath(arr.slice(0, i + 1).join('/'))}
+                  >
+                    {part}
+                  </button>
                 </span>
               ))}
             </div>
 
             {/* Actions */}
-            <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
-              {currentPath !== '.' && <button onClick={goUp} style={btnSmall}>⬆ Up</button>}
-              <button onClick={handleMkdir} style={btnSmall}>📁 New Folder</button>
-              <label style={{ ...btnSmall, display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                📤 Upload
+            <div className="row row--wrap" style={{ marginBottom: 'var(--space-2)' }}>
+              {currentPath !== '.' && <Button size="sm" onClick={goUp}>Up</Button>}
+              <Button size="sm" onClick={handleMkdir}>New folder</Button>
+              <label className="btn btn--sm" style={{ cursor: 'pointer' }}>
+                Upload
                 <input type="file" onChange={handleUpload} style={{ display: 'none' }} />
               </label>
-              {uploading && <span style={{ color: '#666' }}>Uploading...</span>}
+              {uploading && <span className="faint">Uploading…</span>}
             </div>
 
             {/* File table */}
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
-                  <th style={thStyle}>Name</th>
-                  <th style={thStyle}>Size</th>
-                  <th style={thStyle}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <tr key={entry.name} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={tdStyle}>
-                      <a href="#" onClick={(e) => { e.preventDefault(); navigateTo(entry.name, entry.isDir); }}
-                        style={{ color: '#0066cc', textDecoration: 'none' }}>
-                        {entry.isDir ? '📁 ' : '📄 '}{entry.name}
-                      </a>
-                    </td>
-                    <td style={tdStyle}>{entry.isDir ? '—' : formatSize(entry.size || 0)}</td>
-                    <td style={tdStyle}>
-                      <button onClick={() => handleRename(entry.name)} style={actionBtn}>Rename</button>
-                      <button onClick={() => handleDeleteFile(entry.name, entry.isDir)}
-                        style={{ ...actionBtn, color: '#dc3545' }}>Delete</button>
-                    </td>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th style={{ width: 100 }}>Size</th>
+                    <th style={{ width: 160 }} />
                   </tr>
-                ))}
-                {entries.length === 0 && (
-                  <tr><td colSpan={3} style={{ ...tdStyle, color: '#999', textAlign: 'center' }}>Empty directory</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => (
+                    <tr key={entry.name}>
+                      <td>
+                        <button
+                          type="button"
+                          className="file-link"
+                          onClick={() => navigateTo(entry.name, entry.isDir)}
+                        >
+                          <span className="file-link__icon">{entry.isDir ? 'DIR' : 'FILE'}</span>
+                          <span className="mono">{entry.name}</span>
+                        </button>
+                      </td>
+                      <td className="table__cell--mono">{entry.isDir ? '—' : formatSize(entry.size || 0)}</td>
+                      <td>
+                        <div className="row" style={{ gap: 'var(--space-1)' }}>
+                          <Button size="sm" variant="ghost" onClick={() => handleRename(entry.name)}>Rename</Button>
+                          <Button size="sm" variant="danger" onClick={() => handleDeleteFile(entry.name, entry.isDir)}>Delete</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {entries.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="faint" style={{ textAlign: 'center' }}>Empty directory</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Preview panel */}
           {previewPath && wsId && (
-            <div style={{ width: 400, borderLeft: '1px solid #ddd', paddingLeft: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <strong>{previewPath.split('/').pop()}</strong>
-                <button onClick={() => setPreviewPath('')} style={actionBtn}>✕</button>
+            <div className="files-layout__preview">
+              <div className="panel">
+                <div className="panel__header">
+                  <span className="truncate mono" style={{ textTransform: 'none' }}>
+                    {previewPath.split('/').pop()}
+                  </span>
+                  <span className="spacer" />
+                  <Button size="sm" variant="ghost" onClick={() => setPreviewPath('')}>Close</Button>
+                </div>
+                <div className="panel__body">
+                  <FilePreview nodeId={nodeId} wsId={wsId} branch={selectedBranch} path={previewPath} />
+                </div>
               </div>
-              <FilePreview nodeId={nodeId} wsId={wsId} branch={selectedBranch} path={previewPath} />
             </div>
           )}
         </div>
       )}
 
       {tab === 'history' && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
-              <th style={thStyle}>ID</th>
-              <th style={thStyle}>Branch</th>
-              <th style={thStyle}>Message</th>
-              <th style={thStyle}>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {commits.map((c) => (
-              <tr key={c.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12 }}>{c.id?.slice(0, 8)}</td>
-                <td style={tdStyle}>
-                  <span style={{ background: '#e8f0fe', padding: '2px 6px', borderRadius: 4, fontSize: 12 }}>{c.branch}</span>
-                </td>
-                <td style={tdStyle}>{c.message}</td>
-                <td style={{ ...tdStyle, color: '#666', fontSize: 12 }}>
-                  {c.time ? new Date(c.time * 1000).toLocaleString() : '—'}
-                </td>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ width: 90 }}>ID</th>
+                <th style={{ width: 120 }}>Branch</th>
+                <th>Message</th>
+                <th style={{ width: 180 }}>Time</th>
               </tr>
-            ))}
-            {commits.length === 0 && (
-              <tr><td colSpan={4} style={{ ...tdStyle, color: '#999', textAlign: 'center' }}>No commits yet</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {commits.map((c) => (
+                <tr key={c.id}>
+                  <td className="table__cell--mono">{c.id?.slice(0, 8)}</td>
+                  <td><span className="badge badge--accent">{c.branch}</span></td>
+                  <td className="table__cell--primary">{c.message}</td>
+                  <td className="table__cell--mono">
+                    {c.time ? new Date(c.time * 1000).toLocaleString() : '—'}
+                  </td>
+                </tr>
+              ))}
+              {commits.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="faint" style={{ textAlign: 'center' }}>No commits yet</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -351,16 +412,3 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-const btnSmall: React.CSSProperties = {
-  padding: '4px 10px', background: '#0066cc', color: '#fff',
-  border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12,
-};
-const inputStyle: React.CSSProperties = { padding: '4px 8px', border: '1px solid #ccc', borderRadius: 4 };
-const panelStyle: React.CSSProperties = { marginBottom: 12, padding: 8, border: '1px solid #ddd', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 4 };
-const thStyle: React.CSSProperties = { padding: '8px 12px' };
-const tdStyle: React.CSSProperties = { padding: '8px 12px' };
-const tabActive: React.CSSProperties = { padding: '8px 16px', border: 'none', borderBottom: '2px solid #0066cc', background: 'none', cursor: 'pointer', fontWeight: 600, color: '#0066cc' };
-const tabInactive: React.CSSProperties = { padding: '8px 16px', border: 'none', borderBottom: '2px solid transparent', background: 'none', cursor: 'pointer', color: '#666' };
-const actionBtn: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#0066cc', fontSize: 12, marginRight: 8 };
-const linkBtn: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#0066cc', fontSize: 14, padding: 0 };

@@ -10,34 +10,6 @@ interface Props {
   chart: string;
 }
 
-const containerStyle: React.CSSProperties = {
-  margin: '16px 0',
-  padding: '16px',
-  background: '#fff',
-  border: '1px solid #d0d7de',
-  borderRadius: 8,
-  overflowX: 'auto' as const,
-};
-
-const errorStyle: React.CSSProperties = {
-  ...containerStyle,
-  borderColor: '#f5c2c7',
-  background: '#fff5f5',
-  color: '#b42318',
-  fontSize: 13,
-};
-
-const codeStyle: React.CSSProperties = {
-  margin: '8px 0 0',
-  padding: 12,
-  background: '#f6f8fa',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#1a1a2e',
-  overflowX: 'auto' as const,
-  fontFamily: '"SF Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace',
-};
-
 export default function MermaidDiagram({ chart }: Props) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
@@ -68,20 +40,20 @@ export default function MermaidDiagram({ chart }: Props) {
 
   if (error) {
     return (
-      <div style={errorStyle}>
+      <div className="diagram diagram--error">
         <div>Diagram could not be rendered: {error}</div>
-        <pre style={codeStyle}>{chart}</pre>
+        <pre className="code-block">{chart}</pre>
       </div>
     );
   }
 
   if (!svg) {
-    return <div style={{ ...containerStyle, color: '#999' }}>Rendering diagram…</div>;
+    return <div className="diagram faint">Rendering diagram…</div>;
   }
 
   return (
     <div
-      style={containerStyle}
+      className="diagram"
       // The SVG comes from mermaid's own renderer on the same page, not from
       // user input, so injecting it is safe.
       dangerouslySetInnerHTML={{ __html: svg }}

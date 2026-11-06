@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WSMessage } from '../../../hooks/useWebSocket';
+import Button from '../../../components/ui/Button';
 
 export interface AudioStats {
   inFrames: number;
@@ -13,7 +14,7 @@ interface Props {
   ctrlConnected: boolean;
   ctrlMessages: WSMessage[];
   onSendCtrl: (msg: WSMessage) => void;
-  onRealtimeChange: (active: boolean) => void;
+  onRealtimeChange: (active: boolean, motionEnabled?: boolean) => void;
   onAnalysers: (mic: AnalyserNode | null, play: AnalyserNode | null) => void;
   onAudioStats: (stats: AudioStats) => void;
 }
@@ -160,7 +161,7 @@ export default function RealtimeOverlay({
       switch (msg.kind) {
         case 'realtime.started':
           if (startTimerRef.current) { clearTimeout(startTimerRef.current); startTimerRef.current = null; }
-          setError(null); setStatus('running'); onRealtimeChange(true); connectAudio();
+          setError(null); setStatus('running'); onRealtimeChange(true, motionEnabled); connectAudio();
           break;
         case 'realtime.stopped':
           if (startTimerRef.current) { clearTimeout(startTimerRef.current); startTimerRef.current = null; }
@@ -182,14 +183,14 @@ export default function RealtimeOverlay({
         }
       }
     }
-  }, [ctrlMessages.length, cleanupAudio, connectAudio, onRealtimeChange]);
+  }, [ctrlMessages.length, cleanupAudio, connectAudio, onRealtimeChange, motionEnabled]);
 
   const startRealtime = useCallback(() => {
     setStatus('starting'); setError(null);
     onSendCtrl({
       kind: 'start_realtime',
       data: {
-        providers: { primary: { provider, model } },
+        providers: { primary: { provider_id: provider, model } },
         audio: { input_format: 'pcm16', output_format: 'pcm16', sample_rate: 24000, channels: 1, voice },
         motion: motionEnabled ? { enabled: true, provider: motionPreset, fps: 30 } : undefined,
       },
@@ -218,69 +219,72 @@ export default function RealtimeOverlay({
   }, [cleanupAudio]);
 
   return (
-    <div>
+    <div className="rt-panel">
       {error && (
-        <div style={errorBanner}>
-          <span>⚠️ {error}</span>
-          <button onClick={() => setError(null)} style={dismissBtn}>×</button>
+        <div className="notice notice--error" style={{ marginBottom: 'var(--space-2)' }}>
+          <span style={{ flex: 1 }}>{error}</span>
+          <Button size="sm" variant="ghost" onClick={() => setError(null)}>×</Button>
         </div>
       )}
 
       {status === 'stopped' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={labelS}>Provider: <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inputS}>
-              <option value="openai">OpenAI</option><option value="qwen">Qwen</option>
-            </select></label>
-            <label style={labelS}>Model: <input value={model} onChange={(e) => setModel(e.target.value)} style={{ ...inputS, width: 160 }} /></label>
-            <label style={labelS}>Voice: <select value={voice} onChange={(e) => setVoice(e.target.value)} style={inputS}>
-              {['alloy','echo','shimmer','ash','coral','sage'].map((v) => <option key={v} value={v}>{v}</option>)}
-            </select></label>
+        <div className="stack" style={{ gap: 'var(--space-2)' }}>
+          <div className="row row--wrap">
+            <label className="rt-field">
+              <span className="field__label">Provider</span>
+              <select className="select" value={provider} onChange={(e) => setProvider(e.target.value)}>
+                <option value="openai">OpenAI</option>
+                <option value="qwen">Qwen</option>
+              </select>
+            </label>
+            <label className="rt-field" style={{ flex: 1 }}>
+              <span className="field__label">Model</span>
+              <input className="input mono" value={model} onChange={(e) => setModel(e.target.value)} />
+            </label>
+            <label className="rt-field">
+              <span className="field__label">Voice</span>
+              <select className="select" value={voice} onChange={(e) => setVoice(e.target.value)}>
+                {['alloy', 'echo', 'shimmer', 'ash', 'coral', 'sage'].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label style={{ ...labelS, cursor: 'pointer' }}>
-              <input type="checkbox" checked={motionEnabled} onChange={(e) => setMotionEnabled(e.target.checked)} /> Motion
+
+          <div className="row row--wrap">
+            <label className="rt-check">
+              <input type="checkbox" checked={motionEnabled} onChange={(e) => setMotionEnabled(e.target.checked)} />
+              Motion
             </label>
             {motionEnabled && (
-              <select value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)} style={inputS}>
+              <select className="select" value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)}>
                 <option value="fast">fast</option>
                 <option value="balanced">balanced</option>
               </select>
             )}
           </div>
-          <button onClick={startRealtime} disabled={!ctrlConnected} style={startBtn(ctrlConnected)}>Start Realtime</button>
+
+          <Button variant="primary" onClick={startRealtime} disabled={!ctrlConnected}>
+            Start Realtime
+          </Button>
         </div>
       )}
 
       {status === 'running' && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ color: '#28a745', fontWeight: 600, fontSize: 13 }}>● Connected</span>
-          <button onClick={() => onSendCtrl({ kind: 'audio_commit', receivedAt: Date.now() })} style={actionBtn}>Commit</button>
-          <button onClick={() => onSendCtrl({ kind: 'audio_interrupt', receivedAt: Date.now() })} style={actionBtn}>Interrupt</button>
-          <button onClick={stopRealtime} style={stopBtn}>Stop</button>
+        <div className="row row--wrap">
+          <span className="rt-running">
+            <span className="chat__dot chat__dot--on" />
+            Connected
+          </span>
+          <Button size="sm" onClick={() => onSendCtrl({ kind: 'audio_commit', receivedAt: Date.now() })}>Commit</Button>
+          <Button size="sm" onClick={() => onSendCtrl({ kind: 'audio_interrupt', receivedAt: Date.now() })}>Interrupt</Button>
+          <Button size="sm" variant="danger" onClick={stopRealtime}>Stop</Button>
         </div>
       )}
 
       {(status === 'starting' || status === 'stopping') && (
-        <span style={{ color: '#666', fontSize: 13 }}>
-          {status === 'starting' ? '⏳ Connecting...' : '⏳ Stopping...'}
+        <span className="faint" style={{ fontSize: 'var(--text-sm)' }}>
+          {status === 'starting' ? 'Connecting…' : 'Stopping…'}
         </span>
       )}
     </div>
   );
 }
-
-const errorBanner: React.CSSProperties = {
-  background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6,
-  padding: '6px 10px', marginBottom: 8, fontSize: 12, color: '#991b1b',
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-};
-const dismissBtn: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontSize: 16, padding: 0 };
-const labelS: React.CSSProperties = { fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 };
-const inputS: React.CSSProperties = { padding: '3px 6px', border: '1px solid #ccc', borderRadius: 4, fontSize: 12 };
-const startBtn = (ok: boolean): React.CSSProperties => ({
-  padding: '7px 14px', border: 'none', borderRadius: 4, fontSize: 13, fontWeight: 600,
-  background: ok ? '#28a745' : '#ccc', color: '#fff', cursor: ok ? 'pointer' : 'default', alignSelf: 'flex-start',
-});
-const actionBtn: React.CSSProperties = { padding: '5px 10px', border: '1px solid #666', borderRadius: 4, background: 'transparent', color: '#333', cursor: 'pointer', fontSize: 12 };
-const stopBtn: React.CSSProperties = { padding: '5px 10px', border: '1px solid #dc3545', borderRadius: 4, background: 'transparent', color: '#dc3545', cursor: 'pointer', fontSize: 12 };

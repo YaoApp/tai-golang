@@ -1,21 +1,38 @@
 import type { NodeInfo } from '../../../api';
 
-export default function NodeCard({ node }: { node: NodeInfo }) {
+interface Props {
+  node: NodeInfo;
+  active?: boolean;
+}
+
+/**
+ * Registered node summary. Kept as a plain surface card so it can sit inside a
+ * list row without competing with the row's own controls.
+ *
+ * @param active marks the node currently targeted by the console
+ */
+export default function NodeCard({ node, active }: Props) {
+  const platform = [node.os, node.arch].filter(Boolean).join('/');
+
   return (
-    <div style={{
-      border: '1px solid #ddd',
-      borderRadius: 8,
-      padding: '12px 16px',
-      marginBottom: 8,
-      background: '#fff',
-    }}>
-      <div style={{ fontWeight: 600, fontSize: 15 }}>{node.id}</div>
-      <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
-        tai_id: {node.taiId || '—'}
+    <div className={`node-card${active ? ' node-card--active' : ''}`}>
+      <div className="node-card__head">
+        <span className="node-card__name mono">{node.id}</span>
+        {node.version && <span className="badge mono">tai {node.version}</span>}
+        {active && <span className="badge badge--accent">current</span>}
       </div>
-      <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-        Registered: {new Date(node.registeredAt).toLocaleString()}
-      </div>
+      <dl className="node-card__meta">
+        <dt>tai_id</dt>
+        <dd className="mono">{node.taiId || '—'}</dd>
+        {platform && (
+          <>
+            <dt>platform</dt>
+            <dd className="mono">{platform}</dd>
+          </>
+        )}
+        <dt>registered</dt>
+        <dd className="mono">{new Date(node.registeredAt).toLocaleString()}</dd>
+      </dl>
     </div>
   );
 }

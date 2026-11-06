@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import FaceSvg from './FaceSvg';
+import Button from '../../../components/ui/Button';
 
 // MotionFrame mirrors the Go MotionFrame JSON.
 export interface MotionFrame {
@@ -155,114 +156,91 @@ export default function MotionPanel({ frameRef, visible, onClose }: Props) {
   if (minimized) {
     return (
       <div
-        style={{ ...floatBase, left: pos.x, top: pos.y, width: 'auto', cursor: 'pointer', padding: '4px 12px' }}
+        className="motion motion--mini"
+        style={{ left: pos.x, top: pos.y }}
         onClick={() => setMinimized(false)}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>
-          Motion <span ref={stateRef} style={{ color: '#4caf50' }}>●</span>
+        <span className="motion__mini-label">
+          Motion <span className="chat__dot chat__dot--on" />
         </span>
       </div>
     );
   }
 
   return (
-    <div style={{ ...floatBase, left: pos.x, top: pos.y, width: 320 }}>
+    <div className="motion" style={{ left: pos.x, top: pos.y }}>
       {/* Title bar — draggable */}
-      <div style={titleBar} onMouseDown={onMouseDown}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#333' }}>
-          ≡ Motion <span ref={fpsLabelRef} style={{ color: '#999', fontWeight: 400, fontSize: 10 }}>0 fps</span>
+      <div className="motion__title" onMouseDown={onMouseDown}>
+        <span className="motion__title-text">
+          Motion
+          <span ref={fpsLabelRef} className="motion__fps mono">0 fps</span>
         </span>
-        <span>
-          <button onClick={() => setMinimized(true)} style={ctrlBtn}>_</button>
-          <button onClick={onClose} style={ctrlBtn}>×</button>
+        <span className="row" style={{ gap: 2 }}>
+          <Button size="sm" variant="ghost" onClick={() => setMinimized(true)}>_</Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>×</Button>
         </span>
       </div>
 
-      {/* 程序化 SVG 卡通脸 */}
-      <div style={{ height: 200, background: '#eef3fb', borderRadius: 6, overflow: 'hidden' }}>
+      {/* Procedural SVG face. The face palette is the avatar's own rendering
+          semantics, not console chrome, so it keeps its colors. */}
+      <div className="motion__face">
         <FaceSvg frameRef={frameRef} />
       </div>
 
       {/* Status row */}
-      <div style={{ display: 'flex', gap: 12, padding: '6px 0', fontSize: 11, alignItems: 'center' }}>
-        <span>State: <span ref={stateRef} style={{ fontWeight: 600 }}>Idle</span></span>
-        <span ref={emotionRef}>😐 Neutral</span>
-        <span ref={headRef} style={{ color: '#888', fontSize: 10, fontFamily: 'monospace' }}>Y0 P0 R0</span>
+      <div className="motion__status">
+        <span>State: <span ref={stateRef} className="motion__value">Idle</span></span>
+        <span ref={emotionRef}>Neutral</span>
+        <span ref={headRef} className="motion__hud mono" style={{ marginLeft: 'auto' }}>Y0 P0 R0</span>
       </div>
 
       {/* Intensity bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#666', marginBottom: 4 }}>
-        <span>Intensity</span>
-        <div style={{ flex: 1, height: 4, background: '#eee', borderRadius: 2, overflow: 'hidden' }}>
-          <div ref={intensityBarRef} style={{ height: '100%', background: '#ff9800', width: '0%', transition: 'width 0.05s' }} />
+      <div className="motion__meter">
+        <span className="motion__meter-label">Intensity</span>
+        <div className="motion__track">
+          <div ref={intensityBarRef} className="motion__fill motion__fill--warning" style={{ width: '0%' }} />
         </div>
       </div>
 
       {/* Viseme row */}
-      <div style={{ fontSize: 10, color: '#888', fontFamily: 'monospace', marginBottom: 6 }}>
+      <div className="motion__hud mono">
         Viseme: <span ref={visemeRef}>aa:0 ih:0 ee:0 oh:0 ou:0</span>
       </div>
 
       {/* Blendshape bars */}
-      <div style={{ maxHeight: expanded ? 320 : 160, overflowY: 'auto', fontSize: 10 }}>
+      <div className="motion__bars" style={{ maxHeight: expanded ? 320 : 160 }}>
         {indices.map((idx, j) => (
-          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-            <span style={{ width: expanded ? 130 : 80, textAlign: 'right', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 9 }}>
+          <div key={idx} className="motion__bar-row">
+            <span className="motion__bar-name mono" style={{ width: expanded ? 130 : 80 }}>
               {ARKIT_NAMES[idx]}
             </span>
-            <div style={{ flex: 1, height: 6, background: '#f0f0f0', borderRadius: 3, overflow: 'hidden' }}>
-              <div ref={(el) => { barRefs.current[j] = el; }} style={{ height: '100%', background: barColor(idx), width: '0%' }} />
+            <div className="motion__track">
+              <div
+                ref={(el) => { barRefs.current[j] = el; }}
+                className="motion__fill"
+                style={{ background: barColor(idx), width: '0%' }}
+              />
             </div>
-            <span ref={(el) => { valRefs.current[j] = el; }} style={{ width: 24, textAlign: 'right', color: '#999', fontFamily: 'monospace' }}>0</span>
+            <span
+              ref={(el) => { valRefs.current[j] = el; }}
+              className="motion__bar-value mono"
+            >
+              0
+            </span>
           </div>
         ))}
       </div>
 
-      <button onClick={() => setExpanded(!expanded)} style={{ ...ctrlBtn, width: '100%', marginTop: 4, fontSize: 10 }}>
-        {expanded ? '▲ Collapse' : `▼ All 52 blendshapes`}
-      </button>
+      <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)} style={{ width: '100%' }}>
+        {expanded ? 'Collapse' : 'All 52 blendshapes'}
+      </Button>
     </div>
   );
 }
 
 function barColor(idx: number): string {
-  if (idx <= 26 || idx === 51) return '#2196f3'; // mouth/jaw
-  if (idx <= 31) return '#ff9800'; // brow
-  if (idx <= 45) return '#4caf50'; // eye
-  return '#9c27b0'; // cheek/nose
+  if (idx <= 26 || idx === 51) return '#4d9eff'; // mouth/jaw
+  if (idx <= 31) return '#d29922'; // brow
+  if (idx <= 45) return '#3fb950'; // eye
+  return '#bc8cff'; // cheek/nose
 }
-
-// ---------- Styles ----------
-
-const floatBase: React.CSSProperties = {
-  position: 'fixed',
-  background: '#fff',
-  border: '1px solid #ddd',
-  borderRadius: 10,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-  padding: 10,
-  zIndex: 9999,
-  userSelect: 'none',
-};
-
-const titleBar: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  cursor: 'grab',
-  padding: '2px 0 6px',
-  borderBottom: '1px solid #eee',
-  marginBottom: 6,
-};
-
-const ctrlBtn: React.CSSProperties = {
-  background: 'none',
-  border: '1px solid #ddd',
-  borderRadius: 4,
-  cursor: 'pointer',
-  fontSize: 12,
-  padding: '0 6px',
-  marginLeft: 4,
-  color: '#666',
-  lineHeight: '20px',
-};

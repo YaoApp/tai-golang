@@ -1,0 +1,590 @@
+/*
+ * Nodes, workspaces, and docs pages.
+ */
+
+/* ------------------------------------------------------------------ Nodes */
+
+.node-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.node-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.node-list__row > .node-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-card {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color 0.12s ease;
+}
+
+.node-card:hover {
+  border-color: var(--border-default);
+}
+
+.node-card--active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.node-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.node-card__name {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.node-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.node-card__meta dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.node-card__meta dd {
+  margin: 0 var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------- Workspaces */
+
+.files-layout {
+  display: flex;
+  gap: var(--space-3);
+  min-height: 0;
+  flex: 1;
+}
+
+.files-layout__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.files-layout__preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  width: 100%;
+  text-align: left;
+}
+
+.file-link:hover {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+.file-link__icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.preview-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+}
+
+.preview-frame pre {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin: 0;
+}
+
+.preview-media {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  margin: auto;
+}
+
+/* ------------------------------------------------------------------ Scope */
+
+.scope {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+}
+
+.scope__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.scope__summary:hover {
+  color: var(--text-primary);
+}
+
+.scope__file {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.scope__file label {
+  display: block;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.scope__file textarea {
+  min-height: 64px;
+}
+
+/* ------------------------------------------------------------------- Tabs */
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-3);
+}
+
+.tabs__item {
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  margin-bottom: -1px;
+}
+
+.tabs__item:hover {
+  color: var(--text-secondary);
+}
+
+.tabs__item--active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- Docs */
+
+.docs-layout {
+  display: flex;
+  gap: var(--space-5);
+  min-height: 0;
+  flex: 1;
+}
+
+.doc-nav {
+  width: 220px;
+  flex-shrink: 0;
+  padding-right: var(--space-3);
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+}
+
+.doc-nav__title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.doc-nav__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.doc-nav__item {
+  /* Reset the native button chrome; these are rows, not buttons. */
+  appearance: none;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.doc-nav__item:hover {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+.doc-nav__item--active {
+  background: var(--accent-bg);
+  border-left-color: var(--accent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.docs-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* --------------------------------------------------------------- Markdown */
+
+/*
+ * Compact markdown used inside assistant chat bubbles. The docs page has its
+ * own `.prose` scale; chat needs tighter vertical rhythm so a long answer does
+ * not push the conversation apart.
+ */
+.markdown {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: var(--space-2) 0;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-5);
+}
+
+.markdown li {
+  margin: 2px 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: var(--space-3) 0;
+}
+
+.markdown blockquote {
+  margin: var(--space-2) 0;
+  padding: var(--space-1) var(--space-3);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-secondary);
+}
+
+.markdown code {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+}
+
+.markdown pre {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.markdown table {
+  width: 100%;
+  margin: var(--space-2) 0;
+  font-size: var(--text-xs);
+  border: 1px solid var(--border-subtle);
+}
+
+.markdown th {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border-default);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.markdown td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.markdown tr:last-child td {
+  border-bottom: none;
+}
+
+.prose {
+  /* Fill the content column. These are technical docs whose value is in wide
+     tables and code blocks, so a reading-measure cap costs more than it gives;
+     the only limit is a generous ceiling for ultrawide displays. */
+  max-width: 1600px;
+  margin: 0;
+  padding-bottom: var(--space-6);
+  font-size: var(--text-md);
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+.prose h1 {
+  font-size: var(--text-2xl);
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-primary);
+}
+
+.prose h2 {
+  font-size: var(--text-xl);
+  margin: var(--space-6) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.prose h3 {
+  font-size: var(--text-lg);
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--text-primary);
+}
+
+.prose h4 {
+  font-size: var(--text-md);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--text-primary);
+}
+
+.prose p {
+  margin: var(--space-2) 0;
+}
+
+.prose ul,
+.prose ol {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-5);
+}
+
+.prose li {
+  margin: var(--space-1) 0;
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: var(--space-5) 0;
+}
+
+.prose blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-bg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+}
+
+.prose table {
+  width: 100%;
+  margin: var(--space-3) 0;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.prose th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-default);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.prose td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.prose tr:last-child td {
+  border-bottom: none;
+}
+
+.prose code {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 0.88em;
+  color: var(--text-primary);
+}
+
+/*
+ * Code blocks inside docs.
+ *
+ * react-syntax-highlighter sets an inline `background` and `white-space: pre`
+ * on the inner <code>. With the default `display: inline`, that background is
+ * painted once per line box: every line gets its own grey strip whose width
+ * follows the text, instead of one block behind the whole listing. Making the
+ * <code> a block and neutralising its background leaves the surface to <pre>,
+ * which is the element that owns the block's border and radius.
+ */
+.prose pre code {
+  display: block;
+  /* The library writes this background as an inline style, so a plain rule
+     loses to it; `!important` is the only way to remove it and let <pre> own
+     the surface. */
+  background: none !important;
+  border: none;
+  padding: 0;
+}
+
+.prose img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+/* ----------------------------------------------------------------- Diagram */
+
+.diagram {
+  display: flex;
+  justify-content: center;
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.diagram--error {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  justify-content: flex-start;
+}
+
+/* ---------------------------------------------------------------- Breadcrumb */
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.breadcrumb__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.breadcrumb__link {
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.breadcrumb__link:hover {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------ Fixed-height */
+
+.page--fixed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: hidden;
+}

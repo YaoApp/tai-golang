@@ -1,5 +1,6 @@
 import { useEffect, useRef, useMemo } from 'react';
 import type { WSMessage } from '../../../hooks/useWebSocket';
+import Button from '../../../components/ui/Button';
 
 interface Props {
   renderMessages: WSMessage[];
@@ -89,49 +90,42 @@ export default function SubtitlePanel({ renderMessages, realtimeActive, micAnaly
   }, [entries.length]);
 
   return (
-    <div style={panelStyle}>
-      <div style={headerStyle}>
-        <span style={{ fontWeight: 600, fontSize: 12 }}>Subtitles</span>
-        {realtimeActive && <span style={{ color: '#28a745', fontSize: 11 }}>● Live</span>}
-        <button onClick={onClose} style={closeBtn}>×</button>
+    <div className="subtitle panel">
+      <div className="panel__header">
+        <span>Subtitles</span>
+        {realtimeActive && <span className="badge badge--success">● Live</span>}
+        <span className="spacer" />
+        <Button size="sm" variant="ghost" onClick={onClose}>×</Button>
       </div>
 
       {/* Waveform overlay when realtime is active */}
       {realtimeActive && (micAnalyser || playAnalyser) && (
-        <div style={waveformBar}>
-          <WaveformMini analyser={micAnalyser} color="#0066cc" label="IN" />
-          <WaveformMini analyser={playAnalyser} color="#28a745" label="OUT" />
+        <div className="subtitle__waveforms">
+          <WaveformMini analyser={micAnalyser} color="#4d9eff" label="IN" />
+          <WaveformMini analyser={playAnalyser} color="#3fb950" label="OUT" />
         </div>
       )}
 
       {/* Subtitle entries */}
-      <div style={bodyStyle}>
+      <div className="panel__body" style={{ padding: 'var(--space-2)' }}>
         {entries.length === 0 && (
-          <div style={{ color: '#999', fontSize: 12, textAlign: 'center', padding: 16 }}>
-            {realtimeActive ? 'Waiting for speech...' : 'No subtitles yet'}
+          <div className="faint" style={{ fontSize: 'var(--text-sm)', textAlign: 'center', padding: 'var(--space-4)' }}>
+            {realtimeActive ? 'Waiting for speech…' : 'No subtitles yet'}
           </div>
         )}
         {entries.map((e) => (
-          <div key={e.id} style={{ marginBottom: 6 }}>
-            <div style={{
-              display: 'flex', justifyContent: e.role === 'user' ? 'flex-end' : 'flex-start',
-            }}>
-              <div style={{
-                maxWidth: '85%', padding: '4px 10px', borderRadius: 8, fontSize: 12, lineHeight: 1.5,
-                background: e.role === 'user' ? '#0066cc' : '#f0f0f0',
-                color: e.role === 'user' ? '#fff' : '#333',
-              }}>
-                {e.chunks.join('')}
-                {!e.complete && <span style={{ opacity: 0.5 }}>▍</span>}
-              </div>
+          <div key={e.id} className={`subtitle__entry subtitle__entry--${e.role}`}>
+            <div className="subtitle__bubble">
+              {e.chunks.join('')}
+              {!e.complete && <span style={{ opacity: 0.5 }}>▍</span>}
             </div>
             {e.durationMs !== undefined && (
-              <div style={{ fontSize: 10, color: '#999', textAlign: e.role === 'user' ? 'right' : 'left', marginTop: 1 }}>
+              <div className="subtitle__meta mono">
                 {(e.durationMs / 1000).toFixed(1)}s
               </div>
             )}
             {e.emotion && (
-              <div style={{ fontSize: 10, color: '#888', textAlign: 'left', marginTop: 1 }}>
+              <div className="subtitle__meta mono">
                 {e.emotion.emotion} ({e.emotion.state}) [{e.emotion.intensity}]
               </div>
             )}
@@ -176,29 +170,9 @@ function WaveformMini({ analyser, color, label }: { analyser: AnalyserNode | nul
 
   if (!analyser) return null;
   return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ fontSize: 9, color, fontWeight: 600, width: 24 }}>{label}</span>
-      <canvas ref={canvasRef} width={300} height={24} style={{ width: '100%', height: 24, borderRadius: 3, background: 'rgba(0,0,0,0.03)' }} />
+    <div className="subtitle__wave">
+      <span className="subtitle__wave-label mono" style={{ color }}>{label}</span>
+      <canvas ref={canvasRef} width={300} height={24} className="subtitle__canvas" />
     </div>
   );
 }
-
-const panelStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', minHeight: 0,
-  border: '1px solid #e0e0e0', borderRadius: 4, background: '#fafafa',
-};
-const headerStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
-  borderBottom: '1px solid #eee', flexShrink: 0,
-};
-const closeBtn: React.CSSProperties = {
-  marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
-  color: '#999', fontSize: 14, padding: '0 2px',
-};
-const waveformBar: React.CSSProperties = {
-  display: 'flex', gap: 8, padding: '4px 8px', borderBottom: '1px solid #eee',
-  background: 'rgba(0,0,0,0.02)', flexShrink: 0,
-};
-const bodyStyle: React.CSSProperties = {
-  flex: 1, overflow: 'auto', padding: '6px 8px',
-};

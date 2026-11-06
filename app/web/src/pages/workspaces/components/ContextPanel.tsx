@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../api';
 import type { ContextScopeView, ScopeIds } from '../../../api';
+import Button from '../../../components/ui/Button';
 
 interface Props {
   nodeId: string;
@@ -84,24 +85,24 @@ export default function ContextPanel({ nodeId, wsId, scopeIds }: Props) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={notice}>
+    <div className="stack" style={{ gap: 'var(--space-3)' }}>
+      <div className="notice notice--warning">
         这些文件由 SDK 的 Context API 管理。当前 Tai runtime 尚未把它们注入
         Agent 的 AGENTS.md，编辑内容不会影响对话行为。
       </div>
 
-      {error && <div style={errorBox}>{error}</div>}
+      {error && <div className="notice notice--error">{error}</div>}
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => void load()} style={btn} disabled={busy}>Refresh</button>
-        <button onClick={() => void showMerged()} style={btn}>Preview Merged</button>
+      <div className="row">
+        <Button size="sm" onClick={() => void load()} disabled={busy}>Refresh</Button>
+        <Button size="sm" onClick={() => void showMerged()}>Preview Merged</Button>
       </div>
 
       {merged && (
         <div>
-          <div style={sectionTitle}>Merged (bot → home → board → session)</div>
-          <pre style={pre}>{merged}</pre>
-          <button onClick={() => setMerged('')} style={btn}>Hide</button>
+          <div className="section-title" style={{ margin: 0 }}>Merged (bot → home → board → session)</div>
+          <pre className="code-block" style={{ maxHeight: 260 }}>{merged}</pre>
+          <Button size="sm" variant="ghost" onClick={() => setMerged('')}>Hide</Button>
         </div>
       )}
 
@@ -109,30 +110,31 @@ export default function ContextPanel({ nodeId, wsId, scopeIds }: Props) {
         const id = scopeIds[scope as keyof ScopeIds] ?? '';
         const view = views.find((v) => v.scope === scope);
         return (
-          <details key={scope} open={!!view} style={scopeBox}>
-            <summary style={summary}>
-              <b>{scope}</b>
-              {id ? <span style={idLabel}>{id}</span> : <span style={missingLabel}>未指定 ID</span>}
+          <details key={scope} open={!!view} className="scope">
+            <summary className="scope__summary">
+              <b className="mono">{scope}</b>
+              {id ? <span className="badge mono">{id}</span> : <span className="badge badge--warning">未指定 ID</span>}
             </summary>
             {FILES.map((file) => {
               const key = `${scope}/${id}/${file}`;
               return (
-                <div key={file} style={{ marginTop: 8 }}>
-                  <div style={fileLabel}>{file}</div>
+                <div key={file} style={{ marginTop: 'var(--space-2)' }}>
+                  <div className="scope__file mono">{file}</div>
                   <textarea
+                    className="textarea textarea--mono"
                     value={drafts[key] ?? ''}
                     onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
                     placeholder={id ? `尚未创建 ${file}` : '先在上层指定该 scope 的 ID'}
                     disabled={!id}
-                    style={textarea}
+                    style={{ marginBottom: 'var(--space-1)' }}
                   />
-                  <button
+                  <Button
+                    size="sm"
                     onClick={() => void save(scope, id, file)}
                     disabled={!id || busy}
-                    style={btn}
                   >
                     Save {file}
-                  </button>
+                  </Button>
                 </div>
               );
             })}
@@ -142,95 +144,3 @@ export default function ContextPanel({ nodeId, wsId, scopeIds }: Props) {
     </div>
   );
 }
-
-// ---------- styles ----------
-
-const notice: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#fff8e1',
-  border: '1px solid #ffe0a3',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#7a5c00',
-};
-
-const errorBox: React.CSSProperties = {
-  padding: '8px 12px',
-  background: '#fdecea',
-  border: '1px solid #f5c6cb',
-  borderRadius: 6,
-  fontSize: 12,
-  color: '#a71d2a',
-};
-
-const scopeBox: React.CSSProperties = {
-  border: '1px solid #e0e0e0',
-  borderRadius: 6,
-  padding: '8px 12px',
-};
-
-const summary: React.CSSProperties = {
-  cursor: 'pointer',
-  fontSize: 13,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-};
-
-const idLabel: React.CSSProperties = {
-  fontSize: 11,
-  color: '#666',
-  fontFamily: 'monospace',
-};
-
-const missingLabel: React.CSSProperties = {
-  fontSize: 11,
-  color: '#999',
-};
-
-const sectionTitle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#444',
-  marginBottom: 4,
-};
-
-const fileLabel: React.CSSProperties = {
-  fontSize: 11,
-  color: '#666',
-  marginBottom: 2,
-  fontFamily: 'monospace',
-};
-
-const textarea: React.CSSProperties = {
-  width: '100%',
-  minHeight: 72,
-  fontFamily: 'monospace',
-  fontSize: 12,
-  padding: 6,
-  border: '1px solid #ddd',
-  borderRadius: 4,
-  marginBottom: 4,
-  boxSizing: 'border-box',
-};
-
-const pre: React.CSSProperties = {
-  background: '#f7f7f7',
-  border: '1px solid #e0e0e0',
-  borderRadius: 6,
-  padding: 10,
-  fontSize: 11,
-  maxHeight: 260,
-  overflow: 'auto',
-  whiteSpace: 'pre-wrap',
-  marginBottom: 4,
-};
-
-const btn: React.CSSProperties = {
-  padding: '4px 10px',
-  fontSize: 12,
-  border: '1px solid #ccc',
-  borderRadius: 4,
-  background: '#fff',
-  cursor: 'pointer',
-};

@@ -14,6 +14,10 @@ import (
 type NodeInfo struct {
 	ID           string    `json:"id"`
 	TaiID        string    `json:"taiId"`
+	Version      string    `json:"version,omitempty"`
+	OS           string    `json:"os,omitempty"`
+	Arch         string    `json:"arch,omitempty"`
+	Capabilities []string  `json:"capabilities,omitempty"`
 	RegisteredAt time.Time `json:"registeredAt"`
 }
 
@@ -122,6 +126,10 @@ func NewStore() *Store {
 
 // AddNode registers a node and publishes a registration event.
 //
+// The stored fields mirror what the node sent in its Register message, so the
+// console can show the running Tai binary version and platform without asking
+// the node again.
+//
 // @param n the node that registered
 func (s *Store) AddNode(n types.RemoteNode) {
 	info := n.Info()
@@ -129,6 +137,10 @@ func (s *Store) AddNode(n types.RemoteNode) {
 	s.nodes[info.ID] = &NodeInfo{
 		ID:           info.ID,
 		TaiID:        info.TaiID,
+		Version:      info.Version,
+		OS:           info.OS,
+		Arch:         info.Arch,
+		Capabilities: info.Capabilities,
 		RegisteredAt: time.Now(),
 	}
 	s.mu.Unlock()

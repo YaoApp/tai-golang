@@ -7,6 +7,10 @@ import { useCurrentNode } from '../../hooks/useCurrentNode';
 import { eventBus } from '../../lib/events';
 import SessionList from './components/SessionList';
 import SessionCreateForm from './components/SessionCreateForm';
+import Button from '../../components/ui/Button';
+import DataTable, { type Column } from '../../components/ui/DataTable';
+import PageHeader from '../../components/ui/PageHeader';
+import StatusDot from '../../components/ui/StatusDot';
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -79,117 +83,110 @@ export default function SessionsPage() {
     }
   };
 
-  return (
-    <div style={{ display: 'flex', gap: 20 }}>
-      <div>
-        <SessionList
-          sessions={sessions}
-          selected={null}
-          onSelect={(id) => navigate(`/sessions/${id}`)}
-        />
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h1 style={{ margin: 0 }}>Sessions</h1>
-          <button
-            onClick={refresh}
-            style={{ padding: '6px 12px', border: '1px solid #ccc', borderRadius: 4, background: '#fff', cursor: 'pointer' }}
+  const columns: Column<SessionInfo>[] = [
+    {
+      key: 'id',
+      header: 'Session',
+      primary: true,
+      render: (s) => (
+        <a
+          href={`/sessions/${s.id}`}
+          className="mono"
+          onClick={(e) => { e.preventDefault(); navigate(`/sessions/${s.id}`); }}
+        >
+          {s.id}
+        </a>
+      ),
+    },
+    {
+      key: 'node',
+      header: 'Node',
+      mono: true,
+      render: (s) => s.nodeId,
+    },
+    {
+      key: 'workspace',
+      header: 'Workspace',
+      render: (s) =>
+        s.workspaceId ? (
+          <a
+            href={`/workspaces/${s.workspaceId}?nodeId=${s.nodeId}`}
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(`/workspaces/${s.workspaceId}?nodeId=${s.nodeId}`);
+            }}
+            title={s.workspaceId}
           >
-            Refresh
-          </button>
+            {s.workspaceName || s.workspaceId.slice(0, 12)}
+          </a>
+        ) : (
+          <span className="faint">auto</span>
+        ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (s) => <StatusDot status={s.status} />,
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      mono: true,
+      render: (s) => new Date(s.createdAt).toLocaleTimeString(),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 150,
+      render: (s) => (
+        <div className="row" style={{ gap: 'var(--space-1)' }}>
+          {RESUMABLE.has(s.status) && (
+            <Button size="sm" onClick={() => void handleResume(s.id)}>Resume</Button>
+          )}
+          <Button size="sm" variant="danger" onClick={() => void handleDelete(s.id)}>Close</Button>
         </div>
+      ),
+    },
+  ];
 
-        {/* Create Form */}
+  return (
+    <div className="sessions-layout">
+      <SessionList
+        sessions={sessions}
+        selected={null}
+        onSelect={(id) => navigate(`/sessions/${id}`)}
+      />
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <PageHeader
+          title="Sessions"
+          actions={<Button onClick={refresh}>Refresh</Button>}
+        />
+
         <SessionCreateForm
           nodes={nodes}
           currentNode={currentNode}
           onNodeChange={setCurrentNode}
           workspaces={workspaces}
           onSubmit={handleCreate}
+          onError={setError}
           disabled={creating}
         />
 
-        {error && <p style={{ color: 'red', margin: '8px 0' }}>{error}</p>}
+        {error && <div className="notice notice--error" style={{ marginTop: 'var(--space-3)' }}>{error}</div>}
 
-        {/* Session table */}
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, marginTop: 8 }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #ddd' }}>
-              <th style={th}>ID</th>
-              <th style={th}>Node</th>
-              <th style={th}>Workspace</th>
-              <th style={th}>Status</th>
-              <th style={th}>Created</th>
-              <th style={th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={td}>
-                  <a href="#" onClick={(e) => { e.preventDefault(); navigate(`/sessions/${s.id}`); }} style={{ color: '#0066cc' }}>
-                    {s.id}
-                  </a>
-                </td>
-                <td style={td}>{s.nodeId}</td>
-                <td style={td}>
-                  {s.workspaceId ? (
-                    <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); navigate(`/workspaces/${s.workspaceId}?nodeId=${s.nodeId}`); }}
-                      style={{ color: '#0066cc' }}
-                      title={s.workspaceId}
-                    >
-                      {s.workspaceName || s.workspaceId.slice(0, 12)}
-                    </a>
-                  ) : (
-                    <span style={{ color: '#999' }}>auto</span>
-                  )}
-                </td>
-                <td style={td}>
-                  <span style={{ color: statusColor(s.status), fontWeight: 600 }}>{s.status}</span>
-                </td>
-                <td style={td}>{new Date(s.createdAt).toLocaleTimeString()}</td>
-                <td style={{ ...td, display: 'flex', gap: 4 }}>
-                  {RESUMABLE.has(s.status) && (
-                    <button onClick={() => handleResume(s.id)} style={resumeBtn}>Resume</button>
-                  )}
-                  <button onClick={() => handleDelete(s.id)} style={deleteBtn}>Close</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="section-title" style={{ marginTop: 'var(--space-4)' }}>
+          Active sessions
+        </div>
+        <DataTable
+          columns={columns}
+          rows={sessions}
+          rowKey={(s) => s.id}
+          empty="No sessions yet — create one above."
+        />
       </div>
     </div>
   );
-}
-
-const th: React.CSSProperties = { textAlign: 'left', padding: '6px 8px' };
-const td: React.CSSProperties = { padding: '6px 8px' };
-
-const resumeBtn: React.CSSProperties = {
-  padding: '2px 8px', border: '1px solid #28a745', borderRadius: 3,
-  background: 'transparent', color: '#28a745', cursor: 'pointer', fontSize: 12,
-};
-
-const deleteBtn: React.CSSProperties = {
-  padding: '2px 8px', border: '1px solid #dc3545', borderRadius: 3,
-  background: 'transparent', color: '#dc3545', cursor: 'pointer', fontSize: 12,
-};
-
-function statusColor(status: string): string {
-  switch (status) {
-    case 'starting': return '#6c757d';
-    case 'running': return '#28a745';
-    case 'disconnected': return '#fd7e14';
-    case 'resuming': return '#0066cc';
-    case 'recovery_gap': return '#dc3545';
-    case 'resume_error': return '#dc3545';
-    case 'closed': return '#6c757d';
-    case 'terminated': return '#8b0000';
-    default: return '#333';
-  }
 }
 
 /** Recoverable states that show a Resume button; mirrors SessionStatus.CanResume(). */

@@ -1,82 +1,101 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import mermaid from 'mermaid';
 import MermaidDiagram from './MermaidDiagram';
 
 interface Props {
   content: string;
+  /** Handles in-app navigation for links to other docs, by file name. */
+  onNavigate?: (docName: string) => void;
+}
+
+/**
+ * Resolves a markdown link target to another document in this doc set.
+ *
+ * The markdown files use plain relative links (`quickstart.md`) so they render
+ * correctly on GitHub. Inside the console those would resolve against the
+ * current page URL and 404, so they are routed through the docs view instead.
+ *
+ * @param href the link target as written in markdown
+ * @returns the target doc file name, or null when the link is not an internal doc
+ */
+function toInternalDoc(href: string): string | null {
+  if (!href || href.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  const path = href.split('#')[0];
+  // Only sibling markdown files are part of this doc set; anything with a
+  // directory component is an external resource.
+  if (!path.endsWith('.md') || path.includes('/')) return null;
+  return path;
+}
+
+/**
+ * Builds the slug react-markdown's heading ids use, so in-page anchors resolve.
+ *
+ * @param text the heading text
+ * @returns a lowercase, hyphenated slug
+ */
+function headingSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fff\s-]/g, '')
+    .replace(/\s+/g, '-');
+}
+
+/**
+ * Concatenates the text content of a React node tree.
+ *
+ * Heading children can contain inline code or emphasis, so the slug has to be
+ * built from the rendered text rather than a single string.
+ *
+ * @param node a React child node
+ * @returns its plain text
+ */
+function flattenText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(flattenText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return flattenText((node as { props: { children?: React.ReactNode } }).props.children);
+  }
+  return '';
 }
 
 // Initialize once for the whole page. startOnLoad stays false so diagrams are
 // rendered explicitly by MermaidDiagram rather than scanned for at startup.
+// The dark theme matches the console; the light one renders unreadable text on
+// this background.
 mermaid.initialize({
   startOnLoad: false,
   securityLevel: 'strict',
-  theme: 'default',
+  theme: 'dark',
   fontFamily: 'inherit',
+  darkMode: true,
+  themeVariables: {
+    background: '#12161f',
+    primaryColor: '#171c26',
+    primaryTextColor: '#e6edf3',
+    primaryBorderColor: '#2b3240',
+    lineColor: '#3d4655',
+    secondaryColor: '#12283f',
+    tertiaryColor: '#0d1117',
+  },
 });
 
-const styles: Record<string, React.CSSProperties> = {
-  wrapper: {
-    maxWidth: 860,
-    lineHeight: 1.7,
-    fontSize: 15,
-    color: '#1a1a2e',
-  },
-  h1: { fontSize: 28, fontWeight: 700, margin: '0 0 20px', borderBottom: '2px solid #e5e7eb', paddingBottom: 10 },
-  h2: { fontSize: 22, fontWeight: 600, margin: '32px 0 12px', borderBottom: '1px solid #e5e7eb', paddingBottom: 8 },
-  h3: { fontSize: 18, fontWeight: 600, margin: '24px 0 8px' },
-  h4: { fontSize: 16, fontWeight: 600, margin: '20px 0 6px' },
-  p: { margin: '8px 0' },
-  a: { color: '#2563eb', textDecoration: 'none' },
-  table: {
-    borderCollapse: 'collapse' as const,
-    width: '100%',
-    margin: '16px 0',
-    fontSize: 14,
-  },
-  th: {
-    textAlign: 'left' as const,
-    padding: '10px 14px',
-    borderBottom: '2px solid #d1d5db',
-    background: '#f8fafc',
-    fontWeight: 600,
-    whiteSpace: 'nowrap' as const,
-  },
-  td: {
-    padding: '8px 14px',
-    borderBottom: '1px solid #e5e7eb',
-    verticalAlign: 'top' as const,
-  },
-  codeInline: {
-    background: '#eff1f3',
-    padding: '2px 6px',
-    borderRadius: 4,
-    fontSize: '0.9em',
-    fontWeight: 400,
-    fontFamily: '"SF Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace',
-    color: '#0550ae',
-  },
-  ul: { margin: '8px 0', paddingLeft: 24 },
-  ol: { margin: '8px 0', paddingLeft: 24 },
-  li: { margin: '4px 0' },
-  hr: { border: 'none', borderTop: '1px solid #e5e7eb', margin: '24px 0' },
-  blockquote: {
-    margin: '12px 0',
-    padding: '8px 16px',
-    borderLeft: '4px solid #3b82f6',
-    background: '#eff6ff',
-    color: '#1e40af',
-  },
+const codeBlockStyle: React.CSSProperties = {
+  margin: 'var(--space-3) 0',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--border-subtle)',
+  background: 'var(--bg-inset)',
+  fontSize: 12,
 };
 
-const codeBlockStyle: React.CSSProperties = {
-  margin: '12px 0',
-  borderRadius: 8,
-  border: '1px solid #d0d7de',
-  fontSize: 13,
+const lineNumberStyle: React.CSSProperties = {
+  color: 'var(--text-tertiary)',
+  fontSize: 11,
+  minWidth: '2.5em',
 };
 
 const langMap: Record<string, string> = {
@@ -92,26 +111,43 @@ function normalizeLanguage(raw: string): string {
   return langMap[raw] || raw;
 }
 
-export default function MarkdownRenderer({ content }: Props) {
+export default function MarkdownRenderer({ content, onNavigate }: Props) {
   return (
-    <div style={styles.wrapper}>
+    <div className="prose">
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: ({ children }) => <h1 style={styles.h1}>{children}</h1>,
-          h2: ({ children }) => <h2 style={styles.h2}>{children}</h2>,
-          h3: ({ children }) => <h3 style={styles.h3}>{children}</h3>,
-          h4: ({ children }) => <h4 style={styles.h4}>{children}</h4>,
-          p: ({ children }) => <p style={styles.p}>{children}</p>,
-          a: ({ children, href }) => <a style={styles.a} href={href}>{children}</a>,
-          table: ({ children }) => <table style={styles.table}>{children}</table>,
-          th: ({ children }) => <th style={styles.th}>{children}</th>,
-          td: ({ children }) => <td style={styles.td}>{children}</td>,
-          ul: ({ children }) => <ul style={styles.ul}>{children}</ul>,
-          ol: ({ children }) => <ol style={styles.ol}>{children}</ol>,
-          li: ({ children }) => <li style={styles.li}>{children}</li>,
-          hr: () => <hr style={styles.hr} />,
-          blockquote: ({ children }) => <blockquote style={styles.blockquote}>{children}</blockquote>,
+          a: ({ href, children }) => {
+            const doc = href ? toInternalDoc(href) : null;
+            if (doc && onNavigate) {
+              return (
+                <a
+                  href={`/docs/${doc.replace(/\.md$/, '')}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigate(doc);
+                  }}
+                >
+                  {children}
+                </a>
+              );
+            }
+            // External links open in a new tab so the console stays put.
+            const external = href && /^[a-z][a-z0-9+.-]*:/i.test(href);
+            return (
+              <a
+                href={href}
+                {...(external ? { target: '_blank', rel: 'noreferrer noopener' } : {})}
+              >
+                {children}
+              </a>
+            );
+          },
+          // Heading ids make the documents' in-page anchors (#open, #history)
+          // resolve; react-markdown does not emit them by default.
+          h2: ({ children }) => <h2 id={headingSlug(flattenText(children))}>{children}</h2>,
+          h3: ({ children }) => <h3 id={headingSlug(flattenText(children))}>{children}</h3>,
+          h4: ({ children }) => <h4 id={headingSlug(flattenText(children))}>{children}</h4>,
           code: ({ className, children }) => {
             const match = className?.match(/language-(\w+)/);
             const code = String(children).replace(/\n$/, '');
@@ -125,11 +161,11 @@ export default function MarkdownRenderer({ content }: Props) {
               }
               return (
                 <SyntaxHighlighter
-                  style={oneLight}
+                  style={oneDark}
                   language={lang}
                   customStyle={codeBlockStyle}
                   showLineNumbers={code.split('\n').length > 3}
-                  lineNumberStyle={{ color: '#a0aec0', fontSize: 12, minWidth: '2.5em' }}
+                  lineNumberStyle={lineNumberStyle}
                 >
                   {code}
                 </SyntaxHighlighter>
@@ -139,7 +175,7 @@ export default function MarkdownRenderer({ content }: Props) {
             if (isMultiline) {
               return (
                 <SyntaxHighlighter
-                  style={oneLight}
+                  style={oneDark}
                   language="text"
                   customStyle={codeBlockStyle}
                   showLineNumbers={false}
@@ -149,7 +185,7 @@ export default function MarkdownRenderer({ content }: Props) {
               );
             }
 
-            return <code style={styles.codeInline}>{children}</code>;
+            return <code>{children}</code>;
           },
           pre: ({ children }) => <>{children}</>,
         }}

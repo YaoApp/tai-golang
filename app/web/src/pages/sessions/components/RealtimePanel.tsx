@@ -1,12 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { WSMessage } from '../../../hooks/useWebSocket';
+import Button from '../../../components/ui/Button';
 
 interface Props {
   sessionId: string;
   ctrlConnected: boolean;
   ctrlMessages: WSMessage[];
   onSendCtrl: (msg: WSMessage) => void;
-  onRealtimeChange: (active: boolean) => void;
+  onRealtimeChange: (active: boolean, motionEnabled?: boolean) => void;
 }
 
 type RealtimeStatus = 'stopped' | 'starting' | 'running' | 'stopping';
@@ -191,7 +192,7 @@ export default function RealtimePanel({
           if (startTimerRef.current) { clearTimeout(startTimerRef.current); startTimerRef.current = null; }
           setError(null);
           setStatus('running');
-          onRealtimeChange(true);
+          onRealtimeChange(true, motionEnabled);
           connectAudio();
           break;
 
@@ -225,7 +226,7 @@ export default function RealtimePanel({
         }
       }
     }
-  }, [ctrlMessages.length, cleanupAudio, connectAudio, onRealtimeChange]);
+  }, [ctrlMessages.length, cleanupAudio, connectAudio, onRealtimeChange, motionEnabled]);
 
   const startRealtime = useCallback(() => {
     setStatus('starting');
@@ -234,7 +235,10 @@ export default function RealtimePanel({
       kind: 'start_realtime',
       data: {
         providers: {
-          primary: { provider, model, api_key: apiKey || undefined },
+          // Wire names follow the Go struct tags in types.Provider; sending
+          // `provider` here leaves ProviderID empty and the node rejects the
+          // start with "requires provider and model".
+          primary: { provider_id: provider, model, api_key: apiKey || undefined },
         },
         audio: {
           input_format: 'pcm16',
@@ -275,34 +279,33 @@ export default function RealtimePanel({
   }, [cleanupAudio]);
 
   return (
-    <div style={panelStyle}>
-      <h3 style={{ margin: '0 0 12px', fontSize: 14 }}>Realtime Audio</h3>
+    <div className="rt-panel" style={{ marginBottom: 'var(--space-4)' }}>
+      <div className="section-title" style={{ margin: '0 0 var(--space-3)' }}>Realtime Audio</div>
 
       {error && (
-        <div style={errorBanner}>
-          <span>⚠️</span>
+        <div className="notice notice--error" style={{ marginBottom: 'var(--space-3)' }}>
           <span style={{ flex: 1, wordBreak: 'break-word' }}>{error}</span>
-          <button onClick={() => setError(null)} style={dismissBtn}>×</button>
+          <Button size="sm" variant="ghost" onClick={() => setError(null)}>×</Button>
         </div>
       )}
 
       {status === 'stopped' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={labelStyle}>
-              Provider:
-              <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inputStyle}>
+        <div className="stack" style={{ gap: 'var(--space-2)' }}>
+          <div className="row row--wrap">
+            <label className="rt-field">
+              <span className="field__label">Provider</span>
+              <select className="select" value={provider} onChange={(e) => setProvider(e.target.value)}>
                 <option value="openai">OpenAI</option>
                 <option value="qwen">Qwen</option>
               </select>
             </label>
-            <label style={labelStyle}>
-              Model:
-              <input value={model} onChange={(e) => setModel(e.target.value)} style={{ ...inputStyle, width: 200 }} />
+            <label className="rt-field" style={{ flex: 1 }}>
+              <span className="field__label">Model</span>
+              <input className="input mono" value={model} onChange={(e) => setModel(e.target.value)} />
             </label>
-            <label style={labelStyle}>
-              Voice:
-              <select value={voice} onChange={(e) => setVoice(e.target.value)} style={inputStyle}>
+            <label className="rt-field">
+              <span className="field__label">Voice</span>
+              <select className="select" value={voice} onChange={(e) => setVoice(e.target.value)}>
                 <option value="alloy">Alloy</option>
                 <option value="echo">Echo</option>
                 <option value="shimmer">Shimmer</option>
@@ -312,59 +315,65 @@ export default function RealtimePanel({
               </select>
             </label>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label style={labelStyle}>
-              API Key:
+
+          <div className="row row--wrap">
+            <label className="rt-field" style={{ flex: 1 }}>
+              <span className="field__label">API Key</span>
               <input
+                className="input mono"
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Optional (uses server env)"
-                style={{ ...inputStyle, width: 240 }}
               />
             </label>
-            <label style={{ ...labelStyle, cursor: 'pointer' }}>
+            <label className="rt-check">
               <input type="checkbox" checked={motionEnabled} onChange={(e) => setMotionEnabled(e.target.checked)} />
-              {' '}Motion
+              Motion
             </label>
             {motionEnabled && (
-              <select value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)} style={inputStyle}>
+              <select className="select" value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)}>
                 <option value="fast">fast</option>
                 <option value="balanced">balanced</option>
               </select>
             )}
           </div>
-          <button onClick={startRealtime} disabled={!ctrlConnected} style={startBtnS(ctrlConnected)}>
+
+          <Button variant="primary" onClick={startRealtime} disabled={!ctrlConnected} style={{ alignSelf: 'flex-start' }}>
             Start Realtime
-          </button>
+          </Button>
         </div>
       )}
 
       {status === 'running' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ color: '#28a745', fontWeight: 600, fontSize: 13 }}>● Connected</span>
-            {micAnalyser && <span style={{ color: '#0066cc', fontSize: 12 }}>🎤 Mic active</span>}
-            <button onClick={() => onSendCtrl({ kind: 'audio_commit', receivedAt: Date.now() })} style={actionBtn}>Commit</button>
-            <button onClick={() => onSendCtrl({ kind: 'audio_interrupt', receivedAt: Date.now() })} style={actionBtn}>Interrupt</button>
-            <button onClick={stopRealtime} style={stopBtnS}>Stop</button>
+        <div className="stack" style={{ gap: 'var(--space-2)' }}>
+          <div className="row row--wrap">
+            <span className="rt-running">
+              <span className="chat__dot chat__dot--on" />
+              Connected
+            </span>
+            {micAnalyser && <span className="badge badge--accent">mic active</span>}
+            <Button size="sm" onClick={() => onSendCtrl({ kind: 'audio_commit', receivedAt: Date.now() })}>Commit</Button>
+            <Button size="sm" onClick={() => onSendCtrl({ kind: 'audio_interrupt', receivedAt: Date.now() })}>Interrupt</Button>
+            <Button size="sm" variant="danger" onClick={stopRealtime}>Stop</Button>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 11, color: '#0066cc', fontWeight: 500 }}>🎤 Input</span>
-              <Waveform analyser={micAnalyser} color="#0066cc" />
+
+          <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="field__label" style={{ color: 'var(--accent)' }}>Input</span>
+              <Waveform analyser={micAnalyser} color="#4d9eff" />
             </div>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 11, color: '#28a745', fontWeight: 500 }}>🔊 Output</span>
-              <Waveform analyser={playAnalyser} color="#28a745" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="field__label" style={{ color: 'var(--success)' }}>Output</span>
+              <Waveform analyser={playAnalyser} color="#3fb950" />
             </div>
           </div>
         </div>
       )}
 
       {(status === 'starting' || status === 'stopping') && (
-        <span style={{ color: '#666', fontSize: 13 }}>
-          {status === 'starting' ? '⏳ Connecting to realtime provider...' : '⏳ Stopping...'}
+        <span className="faint" style={{ fontSize: 'var(--text-sm)' }}>
+          {status === 'starting' ? 'Connecting to realtime provider…' : 'Stopping…'}
         </span>
       )}
     </div>
@@ -390,7 +399,7 @@ function Waveform({ analyser, color }: { analyser: AnalyserNode | null; color: s
 
       const w = canvas.width;
       const h = canvas.height;
-      ctx.fillStyle = '#f0f4f8';
+      ctx.fillStyle = '#0b0e14';
       ctx.fillRect(0, 0, w, h);
 
       ctx.lineWidth = 2;
@@ -412,53 +421,6 @@ function Waveform({ analyser, color }: { analyser: AnalyserNode | null; color: s
 
   if (!analyser) return null;
   return (
-    <canvas
-      ref={canvasRef}
-      width={600}
-      height={48}
-      style={{ width: '100%', height: 48, borderRadius: 4, background: '#f0f4f8' }}
-    />
+    <canvas ref={canvasRef} width={600} height={48} className="rt-wave" />
   );
 }
-
-/* ---- styles ---- */
-
-const panelStyle: React.CSSProperties = {
-  border: '1px solid #e0e0e0', borderRadius: 8, padding: 16,
-  marginBottom: 16, background: '#f9f9f9',
-};
-
-const errorBanner: React.CSSProperties = {
-  background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6,
-  padding: '8px 12px', marginBottom: 12, fontSize: 12, color: '#991b1b',
-  display: 'flex', alignItems: 'flex-start', gap: 8,
-};
-
-const dismissBtn: React.CSSProperties = {
-  background: 'none', border: 'none', cursor: 'pointer',
-  color: '#991b1b', fontSize: 18, lineHeight: '1', padding: 0,
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12, display: 'flex', alignItems: 'center', gap: 4,
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: '4px 8px', border: '1px solid #ccc', borderRadius: 4, fontSize: 12,
-};
-
-const startBtnS = (ok: boolean): React.CSSProperties => ({
-  padding: '8px 16px', border: 'none', borderRadius: 4, fontSize: 13,
-  background: ok ? '#28a745' : '#ccc', color: '#fff',
-  cursor: ok ? 'pointer' : 'default', alignSelf: 'flex-start',
-});
-
-const actionBtn: React.CSSProperties = {
-  padding: '6px 12px', border: '1px solid #666', borderRadius: 4,
-  background: 'transparent', color: '#333', cursor: 'pointer', fontSize: 12,
-};
-
-const stopBtnS: React.CSSProperties = {
-  padding: '6px 12px', border: '1px solid #dc3545', borderRadius: 4,
-  background: 'transparent', color: '#dc3545', cursor: 'pointer', fontSize: 12,
-};

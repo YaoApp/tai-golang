@@ -1,4 +1,5 @@
 import type { SessionInfo } from '../../../api';
+import StatusDot from '../../../components/ui/StatusDot';
 
 interface Props {
   sessions: SessionInfo[];
@@ -8,30 +9,25 @@ interface Props {
 
 export default function SessionList({ sessions, selected, onSelect }: Props) {
   return (
-    <div style={{ borderRight: '1px solid #ddd', width: 240, paddingRight: 12 }}>
-      <h3 style={{ margin: '0 0 12px' }}>Sessions</h3>
-      {sessions.length === 0 && (
-        <p style={{ color: '#999', fontSize: 13 }}>No active sessions</p>
-      )}
-      {sessions.map((s) => (
-        <div
-          key={s.id}
-          onClick={() => onSelect(s.id)}
-          style={{
-            padding: '8px 10px',
-            marginBottom: 4,
-            borderRadius: 6,
-            cursor: 'pointer',
-            background: selected === s.id ? '#e8f0fe' : 'transparent',
-            border: selected === s.id ? '1px solid #0066cc' : '1px solid transparent',
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 500 }}>{s.id}</div>
-          <div style={{ fontSize: 11, color: '#888' }}>
-            {s.nodeId} · {s.status}
-          </div>
-        </div>
-      ))}
+    <div className="session-list">
+      <h3 className="session-list__title">Sessions</h3>
+      {sessions.length === 0 && <p className="faint" style={{ fontSize: 'var(--text-sm)' }}>No active sessions</p>}
+      <div className="session-list__rows">
+        {sessions.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onSelect(s.id)}
+            className={`session-list__item${selected === s.id ? ' session-list__item--active' : ''}`}
+          >
+            <span className="session-list__id mono truncate">{s.id}</span>
+            <span className="session-list__meta">
+              <span className="mono truncate">{s.nodeId}</span>
+              <StatusDot status={s.status} />
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
