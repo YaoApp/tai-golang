@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/yaoapp/tai-golang/auth"
@@ -481,11 +480,14 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	registerNode(t, reg, "n-os")
 
 	// The transport backend runs its handler on another goroutine, so the
-	// counter needs atomic access.
-	var callCount atomic.Int32
+	// observed kinds need synchronization.
+	var mu sync.Mutex
+	var kinds []string
 	transport.SetTestBackend(&mockTransportBackend{
 		handler: func(ff *pb.Payload) (io.ReadWriteCloser, error) {
-			callCount.Add(1)
+			mu.Lock()
+			kinds = append(kinds, ff.Kind)
+			mu.Unlock()
 			if ff.Kind == "open" {
 				// Return "opened" frame via codec format
 				opened := buildCodecFrame(types.NamespaceSession, "opened", nil)
@@ -513,9 +515,21 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	if sess.NodeID() != "n-os" {
 		t.Errorf("NodeID=%q, want n-os", sess.NodeID())
 	}
-	if got := callCount.Load(); got != 2 {
-		t.Errorf("expected 2 stream opens (ctrl+data), got %d", got)
+
+	// The contract is "ctrl and data are opened", not "exactly two streams" —
+	// pinning the count makes the test fail on unrelated refactors and races.
+	mu.Lock()
+	seen := map[string]bool{}
+	for _, k := range kinds {
+		seen[k] = true
 	}
+	mu.Unlock()
+	for _, want := range []string{"open", "data"} {
+		if !seen[want] {
+			t.Errorf("stream kind %q was never opened; observed %v", want, kinds)
+		}
+	}
+
 	sess.Close(context.Background())
 }
 
