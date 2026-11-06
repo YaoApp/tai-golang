@@ -25,7 +25,21 @@ one.
 
 ## Starting realtime
 
+The provider endpoint must name a Realtime-capable model and carry its key.
+Where the key comes from is the application's choice: put it in `APIKey` here, or
+leave it out and let the node pick it up from the session environment
+(`SessionRequest.Env`), which is how the demo app does it.
+
 ```go
+providers := types.Providers{
+    Primary: types.Provider{
+        ProviderID: "openai",
+        Model:      "gpt-4o-realtime-preview",
+        BaseURL:    "wss://api.openai.com/v1/realtime",
+        APIKey:     os.Getenv("OPENAI_API_KEY"),
+    },
+}
+
 err := sess.StartRealtime(&types.RealtimeRequest{
     Providers: providers,          // required: realtime provider endpoints
     Audio: &types.AudioConfig{

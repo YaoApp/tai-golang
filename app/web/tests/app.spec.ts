@@ -38,6 +38,9 @@ test.describe('Auth Page', () => {
     await expect(page.locator('text=tai start command:')).toBeVisible();
     const cmdBlock = page.locator('label:has-text("tai start command:") + pre');
     await expect(cmdBlock).toContainText('tai start --node-id test-pw-node');
+    // The generated command must pin a project-local data root so a node's
+    // credentials and workspaces stay out of the home directory.
+    await expect(cmdBlock).toContainText('--data ./tai-volumns');
   });
 });
 

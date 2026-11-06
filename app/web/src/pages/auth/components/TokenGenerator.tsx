@@ -17,7 +17,7 @@ export default function TokenGenerator() {
   };
 
   const taiCommand = token
-    ? `tai start --node-id ${nodeId} --server http://localhost:5099 --node-token ${token}`
+    ? `tai start --node-id ${nodeId} --server http://localhost:5099 --node-token ${token} --data ./tai-volumns`
     : '';
 
   return (

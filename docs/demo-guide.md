@@ -14,6 +14,11 @@ make build-web
 DEEPSEEK_API_KEY=<your-key> go run . --port 3000
 ```
 
+`DEEPSEEK_API_KEY` covers the text agent. Realtime voice needs a provider key
+too: the demo picks it from the environment by `provider_id`, and the built-in
+Realtime preset uses OpenAI, so add `OPENAI_API_KEY=<your-key>` when you want to
+test voice.
+
 This starts:
 - SDK transport server on `:6099`
 - SDK HTTP server on `:5099`
@@ -64,8 +69,9 @@ page.
 Run backend and frontend separately for hot-reload:
 
 ```bash
-# Terminal 1: Go backend (needs DEEPSEEK_API_KEY for agent sessions)
-DEEPSEEK_API_KEY=<your-key> go run . --port 3000
+# Terminal 1: Go backend (needs DEEPSEEK_API_KEY for agent sessions;
+# add OPENAI_API_KEY to test Realtime voice)
+DEEPSEEK_API_KEY=<your-key> OPENAI_API_KEY=<your-key> go run . --port 3000
 
 # Terminal 2: Vite dev server (proxies API to :3000)
 cd web && npm run dev
