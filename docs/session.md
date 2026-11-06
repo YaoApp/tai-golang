@@ -70,7 +70,7 @@ sess, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     Token:     token,
     Request: &types.SessionRequest{
         WorkspaceID: "ws-001",
-        Runtime:     "agent",
+        Runtime:     "tai",
         Isolation:   "host",
         LLM:         llmJSON,
         Env:         map[string]string{"DEEPSEEK_API_KEY": os.Getenv("DEEPSEEK_API_KEY")},
@@ -92,7 +92,7 @@ the runtime needs to start the agent.
 |-------|---------|
 | `WorkspaceID` | Workspace the session works in. Either this or `Cwd` is required. |
 | `Cwd` | Explicit workspace path, used instead of `WorkspaceID` |
-| `Runtime` | Agent runner: `agent`, `dsh`, `claude`, `codex` |
+| `Runtime` | Agent runner: `tai`, `dsh`, `claude`, `codex`. Defaults to `tai`. |
 | `Isolation` | `auto`, `host`, or `container` |
 | `LLM` | Providers matrix as JSON; roles map to endpoints. See [LLM Providers](llm-providers.md). |
 | `Env` | Environment variables for the agent subprocess |

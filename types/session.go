@@ -7,6 +7,15 @@ import (
 	"io"
 )
 
+// Runtime names the agent implementation a session runs on. The value is sent
+// verbatim in SessionRequest.Runtime and normalized by the node.
+const (
+	RuntimeTai    = "tai"    // PiG-based agent, the default
+	RuntimeDSH    = "dsh"    // DeepSeek Harness
+	RuntimeClaude = "claude" // Claude Code
+	RuntimeCodex  = "codex"  // Codex CLI
+)
+
 // SessionRequest mirrors tai/types.SessionRequest — same name, same fields.
 // It carries all parameters needed to open a session on a Tai node.
 type SessionRequest struct {
@@ -18,7 +27,7 @@ type SessionRequest struct {
 	// Tai extensions
 	AssistantID string `json:"assistantId,omitempty"`
 	WorkspaceID string `json:"workspaceId,omitempty"`
-	Runtime     string `json:"runtime"`
+	Runtime     string `json:"runtime"` // RuntimeTai | RuntimeDSH | RuntimeClaude | RuntimeCodex
 	Isolation   string `json:"isolation"`
 	IdleTimeout uint32 `json:"idleTimeout,omitempty"` // seconds
 	MaxDuration uint32 `json:"maxDuration,omitempty"` // seconds

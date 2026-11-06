@@ -499,7 +499,7 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	sess, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: "sess-1",
 		Token:     "test-token",
-		Request:   &types.SessionRequest{Runtime: "agent", Isolation: "none"},
+		Request:   &types.SessionRequest{Runtime: types.RuntimeTai, Isolation: "none"},
 	})
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
@@ -532,7 +532,7 @@ func TestRemoteNodeOpenSessionError(t *testing.T) {
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: "sess-err",
 		Token:     "tok",
-		Request:   &types.SessionRequest{Runtime: "agent"},
+		Request:   &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -591,7 +591,7 @@ func TestRemoteNodeGoAway(t *testing.T) {
 
 func TestSessionRequestToProto(t *testing.T) {
 	req := &types.SessionRequest{
-		Runtime:     "agent",
+		Runtime:     types.RuntimeTai,
 		Isolation:   "container",
 		Cwd:         "/home/user",
 		IdleTimeout: 300,
@@ -609,7 +609,7 @@ func TestSessionRequestToProto(t *testing.T) {
 		Meta:     map[string]any{"custom": true},
 	}
 	pr := sessionRequestToProto(req)
-	if pr.Runtime != "agent" || pr.Isolation != "container" || pr.Cwd != "/home/user" {
+	if pr.Runtime != types.RuntimeTai || pr.Isolation != "container" || pr.Cwd != "/home/user" {
 		t.Errorf("basic fields: %+v", pr)
 	}
 	if pr.IdleTimeoutSec != 300 || pr.MaxDurationSec != 3600 {
@@ -766,7 +766,7 @@ func TestRemoteNodeOpenSessionTransportError(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-te")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: "agent"},
+		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected transport error")
@@ -786,7 +786,7 @@ func TestRemoteNodeOpenSessionUnexpectedKind(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-uk")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: "agent"},
+		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected unexpected-kind error")
@@ -812,7 +812,7 @@ func TestRemoteNodeOpenSessionDataStreamError(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-de")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: "agent"},
+		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected data stream error")

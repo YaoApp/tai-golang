@@ -68,7 +68,7 @@ n := node.Get("node-1")
 session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     operationToken,
-    Request:   &types.SessionRequest{Runtime: "agent"},
+    Request:   &types.SessionRequest{Runtime: "tai"},
 })
 ```
 

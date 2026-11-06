@@ -64,7 +64,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Request = &types.SessionRequest{}
 	}
 	if req.Request.Runtime == "" {
-		req.Request.Runtime = "agent"
+		req.Request.Runtime = types.RuntimeTai
 	}
 	if req.Request.Isolation == "" {
 		req.Request.Isolation = "host"

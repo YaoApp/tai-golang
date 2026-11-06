@@ -109,7 +109,7 @@ sess, err := node.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-xyz",
     Token:     token,
     Request: &types.SessionRequest{
-        Runtime: "agent",
+        Runtime: "tai",
         Metadata: map[string]string{
             "_agents_md": merged,
         },

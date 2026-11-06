@@ -11,7 +11,7 @@ interface Props {
   disabled?: boolean;
 }
 
-const RUNTIMES = ['agent', 'dsh', 'claude', 'codex'];
+const RUNTIMES = ['tai', 'dsh', 'claude', 'codex'];
 const ISOLATIONS = ['auto', 'host', 'container'];
 
 const defaultLLM: ProvidersMatrix = {
@@ -21,7 +21,7 @@ const defaultLLM: ProvidersMatrix = {
 };
 
 export default function SessionCreateForm({ nodes, currentNode, onNodeChange, workspaces, onSubmit, disabled }: Props) {
-  const [runtime, setRuntime] = useState('agent');
+  const [runtime, setRuntime] = useState('tai');
   const [isolation, setIsolation] = useState('auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
 

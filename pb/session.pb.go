@@ -334,7 +334,7 @@ func (x *SessionResume) GetLastDataSeq() uint64 {
 type SessionOpened struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`                               // Actual runtime used (e.g. "agent")
+	Runtime       string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`                               // Actual runtime used (e.g. "tai")
 	Isolation     string                 `protobuf:"bytes,3,opt,name=isolation,proto3" json:"isolation,omitempty"`                           // Actual isolation (e.g. "host", "container")
 	LastDataSeq   uint64                 `protobuf:"varint,4,opt,name=last_data_seq,json=lastDataSeq,proto3" json:"last_data_seq,omitempty"` // Recovery: last data stream seq buffered (0 on fresh open)
 	unknownFields protoimpl.UnknownFields
@@ -523,7 +523,7 @@ func (x *SessionError) GetMessage() string {
 
 type SessionRequest struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
-	Runtime               string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`                                                                              // "agent"
+	Runtime               string                 `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`                                                                              // "tai" | "dsh" | "claude" | "codex"
 	Isolation             string                 `protobuf:"bytes,2,opt,name=isolation,proto3" json:"isolation,omitempty"`                                                                          // "auto" | "host" | "container"
 	IdleTimeoutSec        uint32                 `protobuf:"varint,3,opt,name=idle_timeout_sec,json=idleTimeoutSec,proto3" json:"idle_timeout_sec,omitempty"`                                       // Session idle timeout (seconds, default 1800)
 	MaxDurationSec        uint32                 `protobuf:"varint,4,opt,name=max_duration_sec,json=maxDurationSec,proto3" json:"max_duration_sec,omitempty"`                                       // Max session duration (seconds, 0 = unlimited)

@@ -63,7 +63,7 @@ sess, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     Token:     token,
     Request: &types.SessionRequest{
         WorkspaceID: "ws-001",
-        Runtime:     "agent",
+        Runtime:     "tai",
         LLM:         llmJSON,
         Env:         map[string]string{"DEEPSEEK_API_KEY": apiKey},
     },

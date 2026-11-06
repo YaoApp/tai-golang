@@ -58,7 +58,7 @@ message SessionResume {
 // SessionOpened is Tai's acknowledgment that a session is ready.
 message SessionOpened {
   string session_id    = 1;
-  string runtime       = 2; // Actual runtime used (e.g. "agent")
+  string runtime       = 2; // Actual runtime used (e.g. "tai")
   string isolation     = 3; // Actual isolation (e.g. "host", "container")
   uint64 last_data_seq = 4; // Recovery: last data stream seq buffered (0 on fresh open)
 }
@@ -83,7 +83,7 @@ message SessionError {
 // ---------------------------------------------------------------------------
 
 message SessionRequest {
-  string runtime                         = 1;  // "agent"
+  string runtime                         = 1;  // "tai" | "dsh" | "claude" | "codex"
   string isolation                       = 2;  // "auto" | "host" | "container"
   uint32 idle_timeout_sec                = 3;  // Session idle timeout (seconds, default 1800)
   uint32 max_duration_sec                = 4;  // Max session duration (seconds, 0 = unlimited)

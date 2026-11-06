@@ -81,7 +81,7 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     opToken,
     Request: &types.SessionRequest{
-        Runtime: "agent",
+        Runtime: "tai",
         LLM:     llm,
         Env:     map[string]string{"DEEPSEEK_API_KEY": os.Getenv("DEEPSEEK_API_KEY")},
     },
