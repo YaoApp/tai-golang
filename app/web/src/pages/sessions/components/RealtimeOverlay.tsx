@@ -28,6 +28,7 @@ export default function RealtimeOverlay({
   const [model, setModel] = useState('gpt-realtime-mini');
   const [voice, setVoice] = useState('alloy');
   const [motionEnabled, setMotionEnabled] = useState(false);
+  const [motionPreset, setMotionPreset] = useState('fast');
   const [error, setError] = useState<string | null>(null);
 
   const audioWsRef = useRef<WebSocket | null>(null);
@@ -190,7 +191,7 @@ export default function RealtimeOverlay({
       data: {
         providers: { primary: { provider, model } },
         audio: { input_format: 'pcm16', output_format: 'pcm16', sample_rate: 24000, channels: 1, voice },
-        motion: motionEnabled ? { enabled: true, provider: 'fast', fps: 30 } : undefined,
+        motion: motionEnabled ? { enabled: true, provider: motionPreset, fps: 30 } : undefined,
       },
       receivedAt: Date.now(),
     });
@@ -200,7 +201,7 @@ export default function RealtimeOverlay({
         setError('Connection timeout (15s)'); setStatus('stopped'); onRealtimeChange(false);
       }
     }, 15000);
-  }, [provider, model, voice, motionEnabled, onSendCtrl, onRealtimeChange]);
+  }, [provider, model, voice, motionEnabled, motionPreset, onSendCtrl, onRealtimeChange]);
 
   const stopRealtime = useCallback(() => {
     setStatus('stopping');
@@ -240,6 +241,12 @@ export default function RealtimeOverlay({
             <label style={{ ...labelS, cursor: 'pointer' }}>
               <input type="checkbox" checked={motionEnabled} onChange={(e) => setMotionEnabled(e.target.checked)} /> Motion
             </label>
+            {motionEnabled && (
+              <select value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)} style={inputS}>
+                <option value="fast">fast</option>
+                <option value="balanced">balanced</option>
+              </select>
+            )}
           </div>
           <button onClick={startRealtime} disabled={!ctrlConnected} style={startBtn(ctrlConnected)}>Start Realtime</button>
         </div>

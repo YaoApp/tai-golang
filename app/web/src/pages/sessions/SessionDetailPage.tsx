@@ -63,86 +63,27 @@ export default function SessionDetailPage() {
   const render = useWebSocket(realtimeActive && id ? `/ws/sessions/${id}/render` : null);
 
   // Motion WS: raw WebSocket, only stores latest frame in ref (no setState per frame).
-  // Falls back to simulated motion when WS gets _closed (H2 transport has no motion datagram).
-  const motionSimRef = useRef<number | null>(null);
+  // Motion is optional — if unavailable, panel stays still (no simulation).
   useEffect(() => {
     if (!realtimeActive || !id) {
       if (motionWsRef.current) { motionWsRef.current.close(); motionWsRef.current = null; }
-      if (motionSimRef.current) { cancelAnimationFrame(motionSimRef.current); motionSimRef.current = null; }
       return;
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/sessions/${id}/motion`;
     const ws = new WebSocket(wsUrl);
     motionWsRef.current = ws;
-    let gotReal = false;
     ws.onmessage = (e) => {
       try {
         const parsed = JSON.parse(e.data);
-        if (parsed.type === '_closed') {
-          // H2 transport: motion not available, start simulation.
-          startMotionSim();
-          return;
-        }
-        if (parsed.face) { gotReal = true; motionFrameRef.current = parsed as MotionFrame; }
+        if (parsed.type === '_closed') return;
+        if (parsed.face) { motionFrameRef.current = parsed as MotionFrame; }
       } catch { /* ignore */ }
     };
-    ws.onclose = () => {
-      motionWsRef.current = null;
-      if (!gotReal) startMotionSim();
-    };
-
-    function startMotionSim() {
-      if (motionSimRef.current) return;
-      const base: MotionFrame = {
-        version: 2, profile: 0, state: 0, emotion: 0, intensity: 0,
-        frame_seq: 0, audio_seq: 0, pts_ms: 0,
-        face: new Array(52).fill(0), head: [0, 0, 0], gaze: [0, 0],
-        viseme: [0, 0, 0, 0, 0], gesture_id: 0, gesture_phase: 0, body: new Array(8).fill(0),
-      };
-      let seq = 0;
-      const tick = () => {
-        seq++;
-        const t = Date.now() / 1000;
-        const face = [...base.face];
-        // Simulate mouth movement (speaking-like)
-        face[0] = Math.floor(Math.abs(Math.sin(t * 5)) * 180);   // jawOpen
-        face[9] = Math.floor(Math.abs(Math.sin(t * 2)) * 100);   // mouthSmileLeft
-        face[10] = Math.floor(Math.abs(Math.sin(t * 2)) * 100);  // mouthSmileRight
-        face[5] = Math.floor(Math.abs(Math.sin(t * 3.5)) * 80);  // mouthFunnel
-        // Simulate eye blinks (every ~3 seconds)
-        const blinkCycle = (t % 3) < 0.15 ? 255 : 0;
-        face[40] = blinkCycle; face[41] = blinkCycle;
-        // Simulate eyebrows
-        face[29] = Math.floor(Math.abs(Math.sin(t * 0.7)) * 60); // browInnerUp
-        // Head sway
-        const head: [number, number, number] = [
-          Math.floor(Math.sin(t * 0.5) * 15),  // yaw
-          Math.floor(Math.sin(t * 0.3) * 8),   // pitch
-          Math.floor(Math.sin(t * 0.2) * 5),   // roll
-        ];
-        // Viseme (simulate vowels)
-        const viseme: [number, number, number, number, number] = [
-          Math.floor(Math.abs(Math.sin(t * 4)) * 200),    // aa
-          Math.floor(Math.abs(Math.sin(t * 4.5)) * 120),  // ih
-          Math.floor(Math.abs(Math.cos(t * 3)) * 150),    // ee
-          Math.floor(Math.abs(Math.sin(t * 3.5)) * 100),  // oh
-          Math.floor(Math.abs(Math.cos(t * 5)) * 80),     // ou
-        ];
-        motionFrameRef.current = {
-          ...base, frame_seq: seq, pts_ms: Math.floor(t * 1000),
-          state: 3, emotion: 1, intensity: 150,
-          face, head, gaze: [Math.floor(Math.sin(t) * 10), Math.floor(Math.cos(t) * 5)],
-          viseme,
-        };
-        motionSimRef.current = requestAnimationFrame(tick);
-      };
-      motionSimRef.current = requestAnimationFrame(tick);
-    }
+    ws.onclose = () => { motionWsRef.current = null; };
 
     return () => {
       ws.close(); motionWsRef.current = null;
-      if (motionSimRef.current) { cancelAnimationFrame(motionSimRef.current); motionSimRef.current = null; }
     };
   }, [realtimeActive, id]);
 

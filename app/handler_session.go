@@ -832,7 +832,6 @@ func (h *SessionHandler) WSMotion(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		ch = info.Session.RecvMotion()
 		if ch == nil {
-			log.Printf("motion ws: RecvMotion returned nil (motion not enabled)")
 			conn.WriteJSON(map[string]string{"type": "_closed"})
 			return
 		}

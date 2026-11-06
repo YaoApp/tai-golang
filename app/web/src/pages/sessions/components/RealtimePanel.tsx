@@ -20,6 +20,7 @@ export default function RealtimePanel({
   const [apiKey, setApiKey] = useState('');
   const [voice, setVoice] = useState('alloy');
   const [motionEnabled, setMotionEnabled] = useState(false);
+  const [motionPreset, setMotionPreset] = useState('fast');
   const [error, setError] = useState<string | null>(null);
   const [micAnalyser, setMicAnalyser] = useState<AnalyserNode | null>(null);
   const [playAnalyser, setPlayAnalyser] = useState<AnalyserNode | null>(null);
@@ -242,7 +243,7 @@ export default function RealtimePanel({
           channels: 1,
           voice,
         },
-        motion: motionEnabled ? { enabled: true, provider: 'fast', fps: 30 } : undefined,
+        motion: motionEnabled ? { enabled: true, provider: motionPreset, fps: 30 } : undefined,
       },
       receivedAt: Date.now(),
     });
@@ -254,7 +255,7 @@ export default function RealtimePanel({
         onRealtimeChange(false);
       }
     }, 15000);
-  }, [provider, model, apiKey, voice, motionEnabled, onSendCtrl, onRealtimeChange]);
+  }, [provider, model, apiKey, voice, motionEnabled, motionPreset, onSendCtrl, onRealtimeChange]);
 
   const stopRealtime = useCallback(() => {
     setStatus('stopping');
@@ -326,6 +327,12 @@ export default function RealtimePanel({
               <input type="checkbox" checked={motionEnabled} onChange={(e) => setMotionEnabled(e.target.checked)} />
               {' '}Motion
             </label>
+            {motionEnabled && (
+              <select value={motionPreset} onChange={(e) => setMotionPreset(e.target.value)} style={inputStyle}>
+                <option value="fast">fast</option>
+                <option value="balanced">balanced</option>
+              </select>
+            )}
           </div>
           <button onClick={startRealtime} disabled={!ctrlConnected} style={startBtnS(ctrlConnected)}>
             Start Realtime

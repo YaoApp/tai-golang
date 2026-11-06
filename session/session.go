@@ -63,6 +63,8 @@ type Session struct {
 	// Motion + render stream state (protected by mu)
 	motionChannelID uint32
 	motionOut       chan *types.MotionFrame // downstream motion frames; nil when motion disabled
+	motionStream    io.ReadWriteCloser      // H2 motion uni stream; nil on H3
+	motionCancel    context.CancelFunc      // cancels H2 motion read goroutine; nil on H3
 	renderOut       chan *types.RenderEvent // downstream render stream events (transcript + emotion)
 	renderStream    io.ReadWriteCloser      // dedicated render uni stream; nil before StartRealtime
 	renderCancel    context.CancelFunc
@@ -274,7 +276,7 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 		s.mu.Unlock()
 		go s.recvDatagramLoop(dgCtx, started.AudioChannelID, audioOut, started.MotionChannelID, motionOut)
 	} else {
-		// H2: audio over a dedicated bidi stream; motion not supported.
+		// H2: audio over a dedicated bidi stream.
 		if err := s.openAudioStreamH2(audioCtx, started.AudioChannelID, audioOut); err != nil {
 			audioCancel()
 			renderCancel()
@@ -287,6 +289,26 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 			s.mu.Unlock()
 			return fmt.Errorf("open audio stream: %w", err)
 		}
+
+		// H2: motion over dedicated uni stream (render-protocol.md §2.13).
+		if started.MotionChannelID != 0 {
+			motionOut := make(chan *types.MotionFrame, 8)
+			motionCtx, motionCancel := context.WithCancel(context.Background())
+			s.mu.Lock()
+			s.motionChannelID = started.MotionChannelID
+			s.motionOut = motionOut
+			s.motionCancel = motionCancel
+			s.mu.Unlock()
+			if err := s.openMotionStreamH2(motionCtx, motionOut); err != nil {
+				motionCancel()
+				s.mu.Lock()
+				s.motionChannelID = 0
+				s.motionOut = nil
+				s.motionCancel = nil
+				s.mu.Unlock()
+				// Non-fatal: continue without motion.
+			}
+		}
 	}
 
 	// Open dedicated render uni stream (transcript + emotion).
@@ -298,16 +320,22 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 			s.dgCancel()
 		}
 		s.mu.Lock()
+		motionCancelFn := s.motionCancel
 		s.audioChannelID = 0
 		s.audioOut = nil
 		s.audioCancel = nil
 		s.dgCancel = nil
 		s.motionChannelID = 0
 		s.motionOut = nil
+		s.motionCancel = nil
+		s.motionStream = nil
 		s.renderOut = nil
 		s.renderStream = nil
 		s.renderCancel = nil
 		s.mu.Unlock()
+		if motionCancelFn != nil {
+			motionCancelFn()
+		}
 		return fmt.Errorf("open render stream: %w", err)
 	}
 
@@ -346,6 +374,10 @@ func (s *Session) StopRealtime() error {
 
 	dgCancelFn := s.dgCancel
 	s.dgCancel = nil
+	motionCancelFn := s.motionCancel
+	motionStream := s.motionStream
+	s.motionCancel = nil
+	s.motionStream = nil
 	s.motionChannelID = 0
 	s.motionOut = nil
 
@@ -361,17 +393,23 @@ func (s *Session) StopRealtime() error {
 	if dgCancelFn != nil {
 		dgCancelFn()
 	}
+	if motionCancelFn != nil {
+		motionCancelFn()
+	}
 	if renderCancelFn != nil {
 		renderCancelFn() // triggers stream.Close() in readRenderStream's cancel goroutine
 	}
 
-	// Notify the server BEFORE closing the audio stream. audioStream.Close()
-	// on H2 can block waiting for transport-level RST_STREAM; the server must
+	// Notify the server BEFORE closing streams. LightStream.Close() on H2
+	// can block waiting for transport-level RST_STREAM; the server must
 	// learn about the stop first so its state is clean for the next start.
 	err := s.sendCtrl("realtime.stop", nil)
 
 	// audioOut/motionOut/renderOut are closed by their I/O goroutines on exit
 	// (via defer), not here, to avoid a send-on-closed-channel panic.
+	if motionStream != nil {
+		motionStream.Close()
+	}
 	if audioStream != nil {
 		audioStream.Close()
 	}
@@ -399,6 +437,10 @@ func (s *Session) cleanupRealtimeLocal() {
 
 	dgCancelFn := s.dgCancel
 	s.dgCancel = nil
+	motionCancelFn := s.motionCancel
+	motionStream := s.motionStream
+	s.motionCancel = nil
+	s.motionStream = nil
 	s.motionChannelID = 0
 	s.motionOut = nil
 
@@ -414,11 +456,17 @@ func (s *Session) cleanupRealtimeLocal() {
 	if dgCancelFn != nil {
 		dgCancelFn()
 	}
+	if motionCancelFn != nil {
+		motionCancelFn()
+	}
 	if renderCancelFn != nil {
 		renderCancelFn()
 	}
 	// Close in a goroutine to avoid blocking readCtrlLoop — H2
 	// audioStream.Close() can wait for transport-level RST_STREAM.
+	if motionStream != nil {
+		go motionStream.Close()
+	}
 	if audioStream != nil {
 		go audioStream.Close()
 	}
@@ -663,6 +711,10 @@ func (s *Session) Close(ctx context.Context) error {
 	// Cancel datagram loop + motion/render goroutines if active.
 	dgCancelFn := s.dgCancel
 	s.dgCancel = nil
+	motionCancelFn := s.motionCancel
+	motionStream := s.motionStream
+	s.motionCancel = nil
+	s.motionStream = nil
 	s.motionChannelID = 0
 	s.motionOut = nil
 
@@ -677,6 +729,12 @@ func (s *Session) Close(ctx context.Context) error {
 	}
 	if dgCancelFn != nil {
 		dgCancelFn()
+	}
+	if motionCancelFn != nil {
+		motionCancelFn()
+	}
+	if motionStream != nil {
+		motionStream.Close()
 	}
 	if renderCancelFn != nil {
 		renderCancelFn() // triggers stream.Close() in readRenderStream's cancel goroutine

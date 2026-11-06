@@ -1,9 +1,5 @@
-import { useRef, useState, useCallback, useEffect, useMemo, Suspense } from 'react';
-import { Canvas, useFrame, useThree, useLoader } from '@react-three/fiber';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import * as THREE from 'three';
+import { useRef, useState, useCallback, useEffect } from 'react';
+import FaceSvg from './FaceSvg';
 
 // MotionFrame mirrors the Go MotionFrame JSON.
 export interface MotionFrame {
@@ -63,8 +59,8 @@ export default function MotionPanel({ frameRef, visible, onClose }: Props) {
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
 
-  // FPS counter
-  const fpsRef = useRef({ count: 0, lastTime: Date.now(), fps: 0 });
+  // FPS counter（lastTime 延迟到首次 tick 初始化，避免在渲染期调用 Date.now）
+  const fpsRef = useRef<{ count: number; lastTime: number; fps: number } | null>(null);
   const fpsLabelRef = useRef<HTMLSpanElement>(null);
 
   // Bar refs for direct DOM updates (no re-render)
@@ -85,9 +81,12 @@ export default function MotionPanel({ frameRef, visible, onClose }: Props) {
     const tick = () => {
       const f = frameRef.current;
       if (f) {
-        // FPS
-        fpsRef.current.count++;
+        // FPS：首次进入时惰性初始化计时起点
         const now = Date.now();
+        if (!fpsRef.current) {
+          fpsRef.current = { count: 0, lastTime: now, fps: 0 };
+        }
+        fpsRef.current.count++;
         if (now - fpsRef.current.lastTime >= 1000) {
           fpsRef.current.fps = fpsRef.current.count;
           fpsRef.current.count = 0;
@@ -179,16 +178,9 @@ export default function MotionPanel({ frameRef, visible, onClose }: Props) {
         </span>
       </div>
 
-      {/* Three.js 3D head */}
-      <div style={{ height: 200, background: 'linear-gradient(180deg, #e8f0fe 0%, #f5e6d3 100%)', borderRadius: 6, overflow: 'hidden' }}>
-        <Canvas camera={{ position: [0, 0, 1.8], fov: 40 }}>
-          <ambientLight intensity={0.8} />
-          <directionalLight position={[3, 4, 5]} intensity={0.6} />
-          <directionalLight position={[-2, 1, 3]} intensity={0.3} color="#ffe4cc" />
-          <Suspense fallback={null}>
-            <FacecapHead frameRef={frameRef} />
-          </Suspense>
-        </Canvas>
+      {/* 程序化 SVG 卡通脸 */}
+      <div style={{ height: 200, background: '#eef3fb', borderRadius: 6, overflow: 'hidden' }}>
+        <FaceSvg frameRef={frameRef} />
       </div>
 
       {/* Status row */}
@@ -238,77 +230,6 @@ function barColor(idx: number): string {
   if (idx <= 31) return '#ff9800'; // brow
   if (idx <= 45) return '#4caf50'; // eye
   return '#9c27b0'; // cheek/nose
-}
-
-// ---------- GLB Face Model (three.js facecap) ----------
-// Maps MotionFrame face[0..51] to the model's morph target indices.
-// face[] uses render-protocol.md order; GLB uses Apple's original order with _L/_R suffixes.
-const FACE_TO_MORPH = [24,25,26,27,36,28,29,30,31,37,38,39,40,41,42,49,50,33,32,35,34,47,48,45,46,43,44,1,2,0,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,51];
-
-function FacecapHead({ frameRef }: { frameRef: React.RefObject<MotionFrame | null> }) {
-  const { gl } = useThree();
-  const gltf = useLoader(GLTFLoader, '/models/head.glb', (loader) => {
-    const ktx2 = new KTX2Loader();
-    ktx2.setTranscoderPath('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r175/examples/jsm/libs/basis/');
-    ktx2.detectSupport(gl);
-    loader.setKTX2Loader(ktx2);
-    loader.setMeshoptDecoder(MeshoptDecoder);
-  });
-  const groupRef = useRef<THREE.Group>(null);
-
-  // Clone scene and compute centering transform once
-  const { clonedScene, morphMeshes, offset, scale } = useMemo(() => {
-    const cloned = gltf.scene.clone(true);
-    const meshes: THREE.Mesh[] = [];
-    cloned.traverse((node) => {
-      if ((node as THREE.Mesh).isMesh) {
-        if ((node as THREE.Mesh).morphTargetInfluences) {
-          meshes.push(node as THREE.Mesh);
-        }
-      }
-    });
-    // Auto-center: compute bounding box, derive offset and scale
-    const box = new THREE.Box3().setFromObject(cloned);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    // Target: fill ~1.2 units so it looks good at fov 40, camera z=1.8
-    const s = maxDim > 0 ? 1.2 / maxDim : 1;
-    return { clonedScene: cloned, morphMeshes: meshes, offset: center, scale: s };
-  }, [gltf.scene]);
-
-  useFrame(() => {
-    const f = frameRef.current;
-    if (!groupRef.current) return;
-
-    // Head rotation (apply even without frame data for idle pose)
-    if (f) {
-      groupRef.current.rotation.set(
-        (f.head[1] / 127) * 0.4,
-        (f.head[0] / 127) * 0.5,
-        (f.head[2] / 127) * 0.25,
-      );
-
-      // Apply all 52 blendshapes
-      for (const mesh of morphMeshes) {
-        const influences = mesh.morphTargetInfluences!;
-        for (let i = 0; i < 52; i++) {
-          const morphIdx = FACE_TO_MORPH[i];
-          if (morphIdx >= 0 && morphIdx < influences.length) {
-            influences[morphIdx] = f.face[i] / 255;
-          }
-        }
-      }
-    }
-  });
-
-  return (
-    <group ref={groupRef} scale={scale}>
-      <group position={[-offset.x, -offset.y, -offset.z]}>
-        <primitive object={clonedScene} />
-      </group>
-    </group>
-  );
 }
 
 // ---------- Styles ----------
