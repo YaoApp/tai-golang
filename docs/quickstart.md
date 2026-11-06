@@ -44,6 +44,8 @@ tai start --node-id demo-node --server http://localhost:5099 --node-token <token
 
 ```go
 import (
+    "encoding/json"
+
     tai "github.com/yaoapp/tai-golang"
     "github.com/yaoapp/tai-golang/auth"
     "github.com/yaoapp/tai-golang/node"
@@ -67,12 +69,27 @@ go server.Start(ctx)
 // After a Tai node connects:
 n := node.Get("node-1")
 opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
+
+// The models the session may use. Only "model" is required; the provider is
+// inferred from base_url when provider_id is empty.
+llm := json.RawMessage(`{
+  "primary": {"provider_id": "deepseek", "model": "deepseek-chat"},
+  "roles":   {"light": {"provider_id": "deepseek", "model": "deepseek-chat"}}
+}`)
+
 session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     opToken,
-    Request:   &types.SessionRequest{Runtime: "agent"},
+    Request: &types.SessionRequest{
+        Runtime: "agent",
+        LLM:     llm,
+        Env:     map[string]string{"DEEPSEEK_API_KEY": os.Getenv("DEEPSEEK_API_KEY")},
+    },
 })
 ```
+
+See [LLM Providers](llm-providers.md) for every endpoint field and how to switch
+models at runtime.
 
 ## Realtime (Voice)
 
@@ -81,7 +98,7 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 err := session.StartRealtime(&types.RealtimeRequest{
     Providers: types.Providers{
         Primary: types.Provider{
-            Provider: "openai", Model: "gpt-4o-realtime-preview",
+            ProviderID: "openai", Model: "gpt-4o-realtime-preview",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },
     },

@@ -61,7 +61,7 @@ all := node.List()         // returns []types.RemoteNode
 | `SendControl(msg)` | Send a control message |
 | `GoAway(reason, reconnectAfter)` | Ask the node to disconnect and reconnect |
 
-## Session (17 methods)
+## Session (29 methods)
 
 ```go
 n := node.Get("node-1")
@@ -79,6 +79,7 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 | `ID()` | Session identifier |
 | `NodeID()` | Node running this session |
 | `Status()` | `opening` / `running` / `closing` / `closed` |
+| `Done()` | Channel that closes when the session is fully torn down |
 | `Close(ctx)` | Close the session |
 
 ### Commands
@@ -97,13 +98,16 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 |--------|-------------|
 | `ResolvePermission(requestID, resp)` | Reply to permission request |
 | `ResolveElicitation(id, resp)` | Reply to elicitation request |
-| `SetConfigOption(configID, val)` | Set a config option |
+| `SetConfigOption(configID, val)` | Switch a session option chosen from the agent's published list. `model` is the only option today; the value must be a model ID the matrix offers. |
 
 ### Runtime
 
 | Method | Description |
 |--------|-------------|
-| `UpdateSession(ctx, opts)` | Update session configuration |
+| `UpdateSession(ctx, opts)` | Change workspace, access policy, mounts, LLM matrix, environment, or resources |
+
+See [LLM Providers](llm-providers.md#changing-models-at-runtime) for how
+`UpdateSession` and `SetConfigOption` divide the work.
 
 ### Realtime
 
@@ -116,16 +120,26 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 | `AudioCommit()` | Commit audio buffer (manual VAD) |
 | `AudioClear()` | Clear audio buffer |
 | `AudioInterrupt()` | Interrupt model speech output |
+| `ResponseCreate()` | Trigger model response (manual VAD) |
 | `RecvAudio()` | Receive model speech audio frames (`<-chan *AudioFrame`) |
+| `RecvRender()` | Receive transcript/emotion events (`<-chan *RenderEvent`) |
+| `RecvMotion()` | Receive avatar motion frames (`<-chan *MotionFrame`) |
 
-See [Realtime Protocol](realtime.md) for wire-level event details.
+`SendVideoFrame` and `RecvVideoFrame` are declared but not implemented: the first
+returns an error, the second a nil channel.
+
+See [Session Realtime](session-realtime.md) for the integration guide and
+[Realtime Protocol](realtime.md) for wire-level event details.
 
 ### Receive
 
 | Method | Description |
 |--------|-------------|
-| `RecvEvent()` | Read next ACP event from data stream (blocks; underlying stream EOF on end) |
-| `RecvAction()` | Read next action from ctrl stream (permissions, disposition, realtime ctrl events) |
+| `RecvEvent()` | Read next ACP event from data stream (blocks; returns `io.EOF` on end) |
+| `RecvAction()` | Read next action from ctrl stream (permissions, disposition, realtime control events) |
+
+See [Session](session.md) for how these fit together, including the
+single-reader constraint.
 
 ## Auth
 

@@ -107,7 +107,7 @@ func TestMotionStreamH2_EndToEnd(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestMotionStreamH2_MultipleFrames(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -241,7 +241,7 @@ func TestMotionStreamH2_NoMotionChannel(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -261,7 +261,7 @@ func TestMotionStreamH2_StopCleansUp(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -313,7 +313,7 @@ func TestMotionStreamH2_CleanupRealtimeLocal(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -355,7 +355,7 @@ func TestMotionStreamH2_BadFrame(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -405,7 +405,7 @@ func TestMotionStreamH2_StreamCloseClosesChannel(t *testing.T) {
 
 	err := env.session.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {
@@ -503,7 +503,7 @@ func TestMotionStreamH2_OpenStreamFnError(t *testing.T) {
 
 	err := s.StartRealtime(&types.RealtimeRequest{
 		Providers: types.Providers{
-			Primary: types.Provider{Provider: "openai", Model: "gpt-realtime-2.1"},
+			Primary: types.Provider{ProviderID: "openai", Model: "gpt-realtime-2.1"},
 		},
 	})
 	if err != nil {

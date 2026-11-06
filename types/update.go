@@ -37,7 +37,7 @@ type MountSpec struct {
 type ResourceLimit struct {
 	Memory    int64   `json:"memory,omitempty"`    // bytes
 	CPUs      float64 `json:"cpus,omitempty"`      // number of cores
-	GPU       string  `json:"gpu,omitempty"`       // GPU device
+	GPUs      int     `json:"gpus,omitempty"`      // GPU count, 0 = none
 	DiskSpace int64   `json:"diskSpace,omitempty"` // bytes
 }
 

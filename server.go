@@ -59,6 +59,11 @@ type (
 	TunnelBindRequest     = types.TunnelBindRequest
 	RealtimeRequest       = types.RealtimeRequest
 	RealtimeUpdateOptions = types.RealtimeUpdateOptions
+	Providers             = types.Providers
+	Provider              = types.Provider
+	AudioConfig           = types.AudioConfig
+	VADConfig             = types.VADConfig
+	MotionConfig          = types.MotionConfig
 )
 
 // Re-export constants.

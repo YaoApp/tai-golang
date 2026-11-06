@@ -55,7 +55,9 @@ Manage and interact with agent sessions.
 ### Docs (`/docs`)
 
 Browse SDK documentation rendered from Markdown files in `tai-golang/docs/`.
-Supports syntax-highlighted code blocks and GFM tables.
+Supports syntax-highlighted code blocks, GFM tables, and Mermaid diagrams. A
+diagram whose syntax fails to parse renders its source instead of breaking the
+page.
 
 ## Development Mode
 

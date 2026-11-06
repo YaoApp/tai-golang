@@ -92,12 +92,23 @@ func main() {
 // Issue an operation token for the session
 opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
 
+// Describe the models the session may use. Only "model" is required; the
+// provider is inferred from base_url when provider_id is empty.
+llm := json.RawMessage(`{
+  "primary": {"provider_id": "deepseek", "model": "deepseek-chat"},
+  "roles":   {"light": {"provider_id": "deepseek", "model": "deepseek-chat"}}
+}`)
+
 // Get a registered node and open a session
 n := node.Get("node-1")
 session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
     Token:     opToken,
-    Request:   &tai.SessionRequest{Runtime: "agent"},
+    Request: &tai.SessionRequest{
+        Runtime: "agent",
+        LLM:     llm,
+        Env:     map[string]string{"DEEPSEEK_API_KEY": "sk-..."},
+    },
 })
 
 // Send a prompt
@@ -113,6 +124,9 @@ for {
 }
 ```
 
+See [LLM Providers](docs/llm-providers.md) for the full endpoint fields and how
+to switch models at runtime.
+
 ## Realtime (Voice)
 
 ```go
@@ -120,7 +134,7 @@ for {
 session.StartRealtime(&tai.RealtimeRequest{
     Providers: tai.Providers{
         Primary: tai.Provider{
-            Provider: "openai", Model: "gpt-4o-realtime-preview",
+            ProviderID: "openai", Model: "gpt-4o-realtime-preview",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },
     },
@@ -264,6 +278,13 @@ Full SDK documentation is available in the [`docs/`](docs/) directory:
 - [API Reference](docs/api-reference.md)
 - [Workspace API](docs/workspace.md)
 - [Session Protocol](docs/session-protocol.md)
+- [Session](docs/session.md)
+- [LLM Providers](docs/llm-providers.md)
+- [Session File Inputs](docs/session-inputs.md)
+- [Session Context](docs/session-context.md)
+- [Session Skills](docs/session-skills.md)
+- [Session Attachments](docs/session-attachments.md)
+- [Session Realtime](docs/session-realtime.md)
 - [ACP Events Reference](docs/events.md)
 - [Realtime Protocol](docs/realtime.md)
 - [Render Protocol](docs/render.md)

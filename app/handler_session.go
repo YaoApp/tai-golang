@@ -590,7 +590,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 
 				// Inject API keys from environment (frontend never sends keys).
 				if req.Providers.Primary.APIKey == "" {
-					switch req.Providers.Primary.Provider {
+					switch req.Providers.Primary.ProviderID {
 					case "openai":
 						if k := os.Getenv("OPENAI_API_KEY"); k != "" {
 							req.Providers.Primary.APIKey = k
@@ -607,7 +607,7 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				}
 				for role, prov := range req.Providers.Roles {
 					if prov.APIKey == "" {
-						switch prov.Provider {
+						switch prov.ProviderID {
 						case "openai":
 							if k := os.Getenv("OPENAI_API_KEY"); k != "" {
 								prov.APIKey = k

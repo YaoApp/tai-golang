@@ -2,6 +2,10 @@
 
 Realtime enables voice interaction over a persistent session. Commands flow Yao → Tai on the ctrl stream; lifecycle/control events flow Tai → Yao on the ctrl stream. A separate bidirectional audio stream carries PCM frames. A dedicated render uni stream carries transcript, audio lifecycle, and emotion events. An optional motion channel carries avatar motion via QUIC datagram — see [render.md](render.md) for the full render protocol.
 
+> This page documents the wire protocol. For how to drive realtime from an
+> application — starting it, the single-reader constraint, audio flow, and
+> stopping — see [Session Realtime](session-realtime.md).
+
 ## Commands (Yao → Tai)
 
 Sent as `SessionMessage { kind, data(JSON) }` on the ctrl stream.
@@ -14,6 +18,11 @@ Sent as `SessionMessage { kind, data(JSON) }` on the ctrl stream.
 | `audio.commit` | `null` | `AudioCommit()` |
 | `audio.clear` | `null` | `AudioClear()` |
 | `audio.interrupt` | `null` | `AudioInterrupt()` |
+| `response.create` | `null` | `ResponseCreate()` |
+
+`realtime.start` is the only blocking command; the rest confirm asynchronously.
+See [Session — Control command reference](session.md#control-command-reference) for
+reply behaviour.
 
 ## Ctrl Stream Events (Tai → Yao)
 

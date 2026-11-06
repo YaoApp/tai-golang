@@ -12,11 +12,16 @@ export interface McpServer {
   headers?: Record<string, string>;
 }
 
+// Provider mirrors tai's LLMEndpoint; field names follow yao/llm/types.go.
 export interface Provider {
-  provider: string;
-  model: string;
+  provider_id: string;
+  api?: string;
   base_url?: string;
   api_key?: string;
+  headers?: Record<string, unknown>;
+  compat?: Record<string, unknown>;
+  model: string;
+  sampling_params?: Record<string, unknown>;
 }
 
 export interface ProvidersMatrix {

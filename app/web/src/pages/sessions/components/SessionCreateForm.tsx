@@ -15,9 +15,9 @@ const RUNTIMES = ['agent', 'dsh', 'claude', 'codex'];
 const ISOLATIONS = ['auto', 'host', 'container'];
 
 const defaultLLM: ProvidersMatrix = {
-  light: { provider: 'deepseek', model: 'deepseek-flash' },
-  default: { provider: 'deepseek', model: 'deepseek-flash' },
-  realtime: { provider: 'openai', model: 'gpt-realtime-mini' },
+  light: { provider_id: 'deepseek', model: 'deepseek-flash' },
+  default: { provider_id: 'deepseek', model: 'deepseek-flash' },
+  realtime: { provider_id: 'openai', model: 'gpt-realtime-mini' },
 };
 
 export default function SessionCreateForm({ nodes, currentNode, onNodeChange, workspaces, onSubmit, disabled }: Props) {
@@ -46,7 +46,7 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
     if (workspaceId) req.workspaceId = workspaceId;
 
     // LLM
-    const hasLlm = Object.values(llm).some((p) => p && (p.provider || p.model));
+    const hasLlm = Object.values(llm).some((p) => p && (p.provider_id || p.model));
     if (hasLlm) req.llm = llm;
 
     // Agent config
@@ -126,8 +126,8 @@ export default function SessionCreateForm({ nodes, currentNode, onNodeChange, wo
                     <td style={tdStyle}><strong>{role}</strong></td>
                     <td style={tdStyle}>
                       <input
-                        value={llm[role]?.provider ?? ''}
-                        onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, provider: e.target.value } })}
+                        value={llm[role]?.provider_id ?? ''}
+                        onChange={(e) => setLlm({ ...llm, [role]: { ...llm[role]!, provider_id: e.target.value } })}
                         placeholder={role === 'realtime' ? 'openai' : 'deepseek'}
                         style={inputSmall}
                       />

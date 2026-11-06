@@ -1,5 +1,9 @@
 # Session Protocol
 
+> This page documents the wire format. For how to build and drive a session from
+> an application — opening, prompting, steering, resolving requests, closing —
+> see [Session](session.md).
+
 ## Wire Format
 
 All frames use length-prefixed protobuf:
@@ -59,7 +63,13 @@ The `data` field contains a protobuf `SessionMessage { seq, kind, data(JSON) }`.
 | `update_session` | `SessionUpdateOptions` | `UpdateSession(ctx, opts)` |
 | `close` | `null` | `Close(ctx)` |
 
-Realtime commands (`realtime.start`, `realtime.update`, `realtime.stop`, `audio.commit`, `audio.clear`, `audio.interrupt`): see [realtime.md](realtime.md#commands-yao--tai).
+Realtime commands (`realtime.start`, `realtime.update`, `realtime.stop`,
+`audio.commit`, `audio.clear`, `audio.interrupt`, `response.create`): see
+[realtime.md](realtime.md#commands-yao--tai).
+
+This table is the complete set of accepted kinds — the node rejects anything
+else. For payload details, reply behaviour, and which commands block, see
+[Session — Control command reference](session.md#control-command-reference).
 
 ## Control Stream Responses (Tai → Yao)
 
