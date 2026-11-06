@@ -115,7 +115,7 @@ OPENAI_API_KEY=<your-key> DEEPSEEK_API_KEY=<your-key> ./tai-demo --port 3000
 err := session.StartRealtime(&types.RealtimeRequest{
     Providers: types.Providers{
         Primary: types.Provider{
-            ProviderID: "openai", Model: "gpt-4o-realtime-preview",
+            ProviderID: "openai", Model: "gpt-realtime-mini",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },
     },

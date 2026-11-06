@@ -134,7 +134,7 @@ to switch models at runtime.
 session.StartRealtime(&tai.RealtimeRequest{
     Providers: tai.Providers{
         Primary: tai.Provider{
-            ProviderID: "openai", Model: "gpt-4o-realtime-preview",
+            ProviderID: "openai", Model: "gpt-realtime-mini",
             BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
         },
     },

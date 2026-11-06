@@ -34,7 +34,7 @@ leave it out and let the node pick it up from the session environment
 providers := types.Providers{
     Primary: types.Provider{
         ProviderID: "openai",
-        Model:      "gpt-4o-realtime-preview",
+        Model:      "gpt-realtime-mini",
         BaseURL:    "wss://api.openai.com/v1/realtime",
         APIKey:     os.Getenv("OPENAI_API_KEY"),
     },
