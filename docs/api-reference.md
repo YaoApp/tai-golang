@@ -166,8 +166,6 @@ who, _ := provider.ValidateUserToken(fresh)
 | `IssueUserToken(nodeID, scopes)` | Issue a user credential; returns token + identity |
 | `RefreshUserToken(oldToken)` | Re-sign the old credential (inherits identity/scopes) |
 | `ValidateUserToken(token)` | Verify a user credential and return its identity |
-| `IssueOperationToken(nodeID, sessionID, ops, scope)` | Deprecated: v1 path only |
-| `SigningPublicKey()` | Return `(keyID, publicKey)` |
 | `WellKnownInfo()` | Return transport discovery metadata |
 
 A user credential is carried in the first-frame `Payload.identity` and is

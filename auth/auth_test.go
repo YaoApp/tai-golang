@@ -1,12 +1,9 @@
 package auth
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
-
-	"github.com/yaoapp/tai-golang/types"
 )
 
 func newTestAuth(t *testing.T) (*defaultAuth, ed25519.PrivateKey) {
@@ -83,43 +80,6 @@ func TestRefreshNodeToken_Invalid(t *testing.T) {
 	_, err := auth.RefreshNodeToken("bad-token")
 	if err == nil {
 		t.Error("expected error for invalid token refresh")
-	}
-}
-
-func TestIssueOperationToken(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	token, err := auth.IssueOperationToken("node-005", "sess-001", []string{"file.read", "file.write"}, nil)
-	if err != nil {
-		t.Fatalf("issue: %v", err)
-	}
-	if token == "" {
-		t.Error("token should not be empty")
-	}
-}
-
-func TestIssueOperationToken_WithScope(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	scope := &types.TokenScope{Paths: []string{"/tmp", "/home"}}
-	token, err := auth.IssueOperationToken("node-006", "sess-002", []string{"file.read"}, scope)
-	if err != nil {
-		t.Fatalf("issue with scope: %v", err)
-	}
-	if token == "" {
-		t.Error("token should not be empty")
-	}
-}
-
-func TestSigningPublicKey(t *testing.T) {
-	auth, _ := newTestAuth(t)
-
-	keyID, pubKey := auth.SigningPublicKey()
-	if keyID == "" {
-		t.Error("keyID should not be empty")
-	}
-	if !bytes.HasPrefix(pubKey, []byte("-----BEGIN PUBLIC KEY-----")) {
-		t.Errorf("pubKey should be PEM-encoded, got: %s", pubKey[:min(40, len(pubKey))])
 	}
 }
 

@@ -69,9 +69,7 @@ message ContainerRuntime {
 // RegisterAck is the server response to a successful Register.
 message RegisterAck {
   string     tai_id      = 1; // Server-assigned Tai identifier
-  bytes      public_key  = 2; // Legacy OperationToken verification key (v1; v2 does not verify user credentials)
-  string     key_id      = 3; // Public key identifier for rotation
-  PoolConfig pool_config = 4; // Initial pool parameters
+  PoolConfig pool_config = 2; // Initial pool parameters
 }
 
 // Ping is sent by Tai at a 30-second interval, carrying lightweight status.
@@ -201,12 +199,6 @@ message ServerTool {
 message ACLSync {
   repeated string computer_users = 1;
   repeated string workspaces     = 2;
-}
-
-// KeyRotation pushes a new OperationToken signing public key.
-message KeyRotation {
-  string kid        = 1; // Key identifier
-  bytes  public_key = 2; // PEM-encoded public key
 }
 
 // CertRotation pushes a new TLS CA certificate.

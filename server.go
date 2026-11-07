@@ -44,7 +44,6 @@ type (
 	RemoteNode            = types.RemoteNode
 	AuthProvider          = types.AuthProvider
 	NodeInfo              = types.NodeInfo
-	TokenScope            = types.TokenScope
 	WellKnownResponse     = types.WellKnownResponse
 	TLSInfo               = types.TLSInfo
 	Session               = types.Session

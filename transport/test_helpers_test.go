@@ -12,11 +12,8 @@ type testNodeRegistry struct {
 }
 
 func (r *testNodeRegistry) Register(nodeID string, reg *pb.Register, auth types.AuthProvider) (*pb.RegisterAck, error) {
-	keyID, pubKey := auth.SigningPublicKey()
 	return &pb.RegisterAck{
 		TaiId:      "test-tai-id",
-		PublicKey:  pubKey,
-		KeyId:      keyID,
 		PoolConfig: r.PoolConfig(),
 	}, nil
 }

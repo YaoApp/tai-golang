@@ -49,11 +49,7 @@ func (a *testAuth) ValidateNodeToken(token string) (*types.NodeInfo, error) {
 }
 func (a *testAuth) IssueNodeToken(nodeID string) (string, error) { return "tok", nil }
 func (a *testAuth) RefreshNodeToken(old string) (string, error)  { return "new-tok", nil }
-func (a *testAuth) IssueOperationToken(nodeID, sessionID string, ops []string, scope *types.TokenScope) (string, error) {
-	return "op-tok", nil
-}
-func (a *testAuth) SigningPublicKey() (string, []byte)      { return "key-1", []byte("pubkey") }
-func (a *testAuth) WellKnownInfo() *types.WellKnownResponse { return &types.WellKnownResponse{} }
+func (a *testAuth) WellKnownInfo() *types.WellKnownResponse      { return &types.WellKnownResponse{} }
 
 func (a *testAuth) IssueUserToken(nodeID string, scopes types.Scope) (string, *types.UserIdentity, error) {
 	return "user-tok", &types.UserIdentity{UserID: "u1", TeamID: "t1", Scope: scopes}, nil

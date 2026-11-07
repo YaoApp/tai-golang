@@ -51,10 +51,6 @@ func (f *fakeAuth) IssueNodeToken(string) (string, error) { return f.nodeToken, 
 
 func (f *fakeAuth) RefreshNodeToken(string) (string, error) { return "", errors.New("not implemented") }
 
-func (f *fakeAuth) IssueOperationToken(string, string, []string, *types.TokenScope) (string, error) {
-	return "", errors.New("retired")
-}
-
 func (f *fakeAuth) IssueUserToken(nodeID string, scopes types.Scope) (string, *types.UserIdentity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -83,8 +79,6 @@ func (f *fakeAuth) RefreshUserToken(string) (string, error) { return "", errors.
 func (f *fakeAuth) ValidateUserToken(string) (*types.UserIdentity, error) {
 	return f.identity, nil
 }
-
-func (f *fakeAuth) SigningPublicKey() (string, []byte) { return "key-1", []byte("public-key") }
 
 func (f *fakeAuth) WellKnownInfo() *types.WellKnownResponse {
 	return &types.WellKnownResponse{
@@ -316,7 +310,7 @@ func TestAuthInfoHandler(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	for _, key := range []string{"transportPort", "protocols", "version", "publicKeyId", "publicKey"} {
+	for _, key := range []string{"transportPort", "protocols", "version"} {
 		if _, ok := out[key]; !ok {
 			t.Errorf("response missing %q", key)
 		}

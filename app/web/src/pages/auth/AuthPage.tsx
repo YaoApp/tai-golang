@@ -29,14 +29,6 @@ export default function AuthPage() {
               <dd className="mono">{info.protocols?.join(', ')}</dd>
               <dt>Protocol Version</dt>
               <dd className="mono">{info.version}</dd>
-              <dt>Public Key ID</dt>
-              <dd className="mono">{info.publicKeyId}</dd>
-              <dt>Public Key</dt>
-              <dd>
-                <pre className="code-block" style={{ margin: 0 }}>
-                  {info.publicKey}
-                </pre>
-              </dd>
             </dl>
           </Panel>
         </div>

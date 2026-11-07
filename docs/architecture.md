@@ -43,7 +43,7 @@ Both ports are configurable via `ServerConfig.HTTPPort` and `ServerConfig.Transp
 1. Tai node discovers SDK server via `GET http://<host>:5099/.well-known/yao-transport`
 2. Opens Control stream to `:6099` (bidirectional, long-lived)
 3. Sends `register` with `node_id`, `version`, hardware, capabilities, container runtimes
-4. SDK returns `register_ack` with `tai_id`, `public_key`, `key_id`, `pool_config`
+4. SDK returns `register_ack` with `tai_id`, `pool_config` (v2 does not distribute signing keys)
 5. Light pool established (H3 WebTransport or reversed H2)
 6. Session streams opened on Light connections
 

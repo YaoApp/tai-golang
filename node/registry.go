@@ -64,7 +64,6 @@ func NewRegistry(pool *pb.PoolConfig, policy *workspace.ChannelPolicy) *Registry
 // Register handles a Register message, stores the node, and returns a RegisterAck.
 func (r *Registry) Register(nodeID string, reg *pb.Register, auth types.AuthProvider) (*pb.RegisterAck, error) {
 	taiID := generateTaiID()
-	keyID, pubKey := auth.SigningPublicKey()
 
 	node := types.Node{
 		ID:           nodeID,
@@ -110,8 +109,6 @@ func (r *Registry) Register(nodeID string, reg *pb.Register, auth types.AuthProv
 
 	ack := &pb.RegisterAck{
 		TaiId:      taiID,
-		PublicKey:  pubKey,
-		KeyId:      keyID,
 		PoolConfig: r.PoolConfig(),
 	}
 	return ack, nil

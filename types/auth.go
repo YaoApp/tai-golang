@@ -24,10 +24,6 @@ type AuthProvider interface {
 	// RefreshNodeToken issues a replacement for an expiring node_token.
 	RefreshNodeToken(oldToken string) (string, error)
 
-	// IssueOperationToken creates a session-scoped JWT for authorizing
-	// operations on a Tai node. Deprecated: v1 path only.
-	IssueOperationToken(nodeID, sessionID string, ops []string, scope *TokenScope) (string, error)
-
 	// IssueUserToken issues a user credential for one business operation.
 	// The caller knows the target node and required scopes; the implementation
 	// resolves the user from its own business context and returns the identity.
@@ -40,10 +36,6 @@ type AuthProvider interface {
 	// ValidateUserToken verifies a user credential and returns its identity.
 	ValidateUserToken(token string) (*UserIdentity, error)
 
-	// SigningPublicKey returns the current public key for OperationToken
-	// verification. Distributed to Tai nodes via RegisterAck.
-	SigningPublicKey() (keyID string, publicKey []byte)
-
 	// WellKnownInfo returns the well-known transport endpoint metadata.
 	WellKnownInfo() *WellKnownResponse
 }
@@ -52,11 +44,6 @@ type AuthProvider interface {
 type NodeInfo struct {
 	NodeID string
 	UserID string // Optional: associated user
-}
-
-// TokenScope restricts an OperationToken to specific paths.
-type TokenScope struct {
-	Paths []string // Glob patterns (e.g. "/workspace/**")
 }
 
 // WellKnownResponse is served at GET /.well-known/yao-transport.

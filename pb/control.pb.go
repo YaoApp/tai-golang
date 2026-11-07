@@ -416,9 +416,7 @@ func (x *ContainerRuntime) GetSocket() string {
 type RegisterAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaiId         string                 `protobuf:"bytes,1,opt,name=tai_id,json=taiId,proto3" json:"tai_id,omitempty"`                // Server-assigned Tai identifier
-	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`    // Legacy OperationToken verification key (v1; v2 does not verify user credentials)
-	KeyId         string                 `protobuf:"bytes,3,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`                // Public key identifier for rotation
-	PoolConfig    *PoolConfig            `protobuf:"bytes,4,opt,name=pool_config,json=poolConfig,proto3" json:"pool_config,omitempty"` // Initial pool parameters
+	PoolConfig    *PoolConfig            `protobuf:"bytes,2,opt,name=pool_config,json=poolConfig,proto3" json:"pool_config,omitempty"` // Initial pool parameters
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -456,20 +454,6 @@ func (*RegisterAck) Descriptor() ([]byte, []int) {
 func (x *RegisterAck) GetTaiId() string {
 	if x != nil {
 		return x.TaiId
-	}
-	return ""
-}
-
-func (x *RegisterAck) GetPublicKey() []byte {
-	if x != nil {
-		return x.PublicKey
-	}
-	return nil
-}
-
-func (x *RegisterAck) GetKeyId() string {
-	if x != nil {
-		return x.KeyId
 	}
 	return ""
 }
@@ -1406,59 +1390,6 @@ func (x *ACLSync) GetWorkspaces() []string {
 	return nil
 }
 
-// KeyRotation pushes a new OperationToken signing public key.
-type KeyRotation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kid           string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`                              // Key identifier
-	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // PEM-encoded public key
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *KeyRotation) Reset() {
-	*x = KeyRotation{}
-	mi := &file_control_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *KeyRotation) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*KeyRotation) ProtoMessage() {}
-
-func (x *KeyRotation) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use KeyRotation.ProtoReflect.Descriptor instead.
-func (*KeyRotation) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *KeyRotation) GetKid() string {
-	if x != nil {
-		return x.Kid
-	}
-	return ""
-}
-
-func (x *KeyRotation) GetPublicKey() []byte {
-	if x != nil {
-		return x.PublicKey
-	}
-	return nil
-}
-
 // CertRotation pushes a new TLS CA certificate.
 type CertRotation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1469,7 +1400,7 @@ type CertRotation struct {
 
 func (x *CertRotation) Reset() {
 	*x = CertRotation{}
-	mi := &file_control_proto_msgTypes[23]
+	mi := &file_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1481,7 +1412,7 @@ func (x *CertRotation) String() string {
 func (*CertRotation) ProtoMessage() {}
 
 func (x *CertRotation) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[23]
+	mi := &file_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1494,7 +1425,7 @@ func (x *CertRotation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertRotation.ProtoReflect.Descriptor instead.
 func (*CertRotation) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{23}
+	return file_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CertRotation) GetCaCertificate() []byte {
@@ -1516,7 +1447,7 @@ type TokenRefresh struct {
 
 func (x *TokenRefresh) Reset() {
 	*x = TokenRefresh{}
-	mi := &file_control_proto_msgTypes[24]
+	mi := &file_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1528,7 +1459,7 @@ func (x *TokenRefresh) String() string {
 func (*TokenRefresh) ProtoMessage() {}
 
 func (x *TokenRefresh) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[24]
+	mi := &file_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1541,7 +1472,7 @@ func (x *TokenRefresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRefresh.ProtoReflect.Descriptor instead.
 func (*TokenRefresh) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{24}
+	return file_control_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *TokenRefresh) GetSessionId() string {
@@ -1598,13 +1529,10 @@ const file_control_proto_rawDesc = "" +
 	"\x10ContainerRuntime\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
-	"\x06socket\x18\x03 \x01(\tR\x06socket\"\x8c\x01\n" +
+	"\x06socket\x18\x03 \x01(\tR\x06socket\"V\n" +
 	"\vRegisterAck\x12\x15\n" +
-	"\x06tai_id\x18\x01 \x01(\tR\x05taiId\x12\x1d\n" +
-	"\n" +
-	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x15\n" +
-	"\x06key_id\x18\x03 \x01(\tR\x05keyId\x120\n" +
-	"\vpool_config\x18\x04 \x01(\v2\x0f.tai.PoolConfigR\n" +
+	"\x06tai_id\x18\x01 \x01(\tR\x05taiId\x120\n" +
+	"\vpool_config\x18\x02 \x01(\v2\x0f.tai.PoolConfigR\n" +
 	"poolConfig\"j\n" +
 	"\x04Ping\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12#\n" +
@@ -1679,11 +1607,7 @@ const file_control_proto_rawDesc = "" +
 	"\x0ecomputer_users\x18\x01 \x03(\tR\rcomputerUsers\x12\x1e\n" +
 	"\n" +
 	"workspaces\x18\x02 \x03(\tR\n" +
-	"workspaces\">\n" +
-	"\vKeyRotation\x12\x10\n" +
-	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x1d\n" +
-	"\n" +
-	"public_key\x18\x02 \x01(\fR\tpublicKey\"5\n" +
+	"workspaces\"5\n" +
 	"\fCertRotation\x12%\n" +
 	"\x0eca_certificate\x18\x01 \x01(\fR\rcaCertificate\"b\n" +
 	"\fTokenRefresh\x12\x1d\n" +
@@ -1705,7 +1629,7 @@ func file_control_proto_rawDescGZIP() []byte {
 	return file_control_proto_rawDescData
 }
 
-var file_control_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_control_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_control_proto_goTypes = []any{
 	(*Identity)(nil),         // 0: tai.Identity
 	(*Payload)(nil),          // 1: tai.Payload
@@ -1729,9 +1653,8 @@ var file_control_proto_goTypes = []any{
 	(*ServerToolSync)(nil),   // 19: tai.ServerToolSync
 	(*ServerTool)(nil),       // 20: tai.ServerTool
 	(*ACLSync)(nil),          // 21: tai.ACLSync
-	(*KeyRotation)(nil),      // 22: tai.KeyRotation
-	(*CertRotation)(nil),     // 23: tai.CertRotation
-	(*TokenRefresh)(nil),     // 24: tai.TokenRefresh
+	(*CertRotation)(nil),     // 22: tai.CertRotation
+	(*TokenRefresh)(nil),     // 23: tai.TokenRefresh
 }
 var file_control_proto_depIdxs = []int32{
 	0,  // 0: tai.Payload.identity:type_name -> tai.Identity
@@ -1759,7 +1682,7 @@ func file_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_control_proto_rawDesc), len(file_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

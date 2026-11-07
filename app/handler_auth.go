@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,13 +19,10 @@ type AuthHandler struct {
 // Info returns server information including public key and ports.
 func (h *AuthHandler) Info(w http.ResponseWriter, r *http.Request) {
 	wk := h.auth.WellKnownInfo()
-	keyID, pubKey := h.auth.SigningPublicKey()
 	writeJSON(w, map[string]any{
 		"transportPort": wk.TransportPort,
 		"protocols":     wk.Protocols,
 		"version":       wk.Version,
-		"publicKeyId":   keyID,
-		"publicKey":     base64.StdEncoding.EncodeToString(pubKey),
 	})
 }
 

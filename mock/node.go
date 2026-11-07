@@ -34,8 +34,6 @@ type MockNode struct {
 	nodeToken  string
 	taiID      string
 	poolConfig *pb.PoolConfig
-	publicKey  []byte
-	keyID      string
 
 	codec *transport.FrameCodec
 
@@ -277,8 +275,6 @@ func (m *MockNode) Register() (*pb.RegisterAck, error) {
 	m.mu.Lock()
 	m.taiID = ack.TaiId
 	m.poolConfig = ack.PoolConfig
-	m.publicKey = ack.PublicKey
-	m.keyID = ack.KeyId
 	m.mu.Unlock()
 
 	select {

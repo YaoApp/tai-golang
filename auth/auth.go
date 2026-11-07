@@ -5,9 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/hex"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"sync"
@@ -24,13 +22,11 @@ var (
 )
 
 // DefaultAuth creates an AuthProvider backed by Ed25519 JWT signing.
-// The private key signs node_tokens and OperationTokens.
+// The private key signs node tokens and user credentials.
 func DefaultAuth(privateKey ed25519.PrivateKey) types.AuthProvider {
-	keyID := hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)[:8])
 	return &defaultAuth{
 		privateKey:   privateKey,
 		publicKey:    privateKey.Public().(ed25519.PublicKey),
-		keyID:        keyID,
 		userTokenTTL: 30 * time.Minute,
 	}
 }
@@ -38,7 +34,6 @@ func DefaultAuth(privateKey ed25519.PrivateKey) types.AuthProvider {
 type defaultAuth struct {
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
-	keyID      string
 
 	mu              sync.RWMutex
 	tlsInfo         *types.TLSInfo
@@ -103,42 +98,6 @@ func (a *defaultAuth) RefreshNodeToken(oldToken string) (string, error) {
 		return "", err
 	}
 	return a.IssueNodeToken(info.NodeID)
-}
-
-// IssueOperationToken creates a session-scoped JWT valid for 30 minutes.
-func (a *defaultAuth) IssueOperationToken(nodeID, sessionID string, ops []string, scope *types.TokenScope) (string, error) {
-	now := time.Now()
-	var paths []string
-	if scope != nil {
-		paths = scope.Paths
-	}
-	claims := &opTokenClaims{
-		TaiID:     nodeID,
-		SessionID: sessionID,
-		Ops:       ops,
-		Paths:     paths,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Minute)),
-			ID:        GenerateID("op"),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	return token.SignedString(a.privateKey)
-}
-
-// SigningPublicKey returns the current Ed25519 public key in PEM format
-// for OperationToken verification on the Tai node side.
-func (a *defaultAuth) SigningPublicKey() (keyID string, publicKey []byte) {
-	pkix, err := x509.MarshalPKIXPublicKey(ed25519.PublicKey(a.publicKey))
-	if err != nil {
-		return a.keyID, []byte(a.publicKey)
-	}
-	pemBytes := pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: pkix,
-	})
-	return a.keyID, pemBytes
 }
 
 // ProtocolVersion is the transport protocol revision advertised in well-known
@@ -362,14 +321,6 @@ type userTokenClaims struct {
 	TeamID   string         `json:"team_id"`
 	Scope    []string       `json:"scope,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
-	jwt.RegisteredClaims
-}
-
-type opTokenClaims struct {
-	TaiID     string   `json:"tai_id"`
-	SessionID string   `json:"session_id"`
-	Ops       []string `json:"ops"`
-	Paths     []string `json:"paths,omitempty"`
 	jwt.RegisteredClaims
 }
 

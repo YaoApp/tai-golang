@@ -24,8 +24,6 @@ export interface AuthInfo {
   transportPort: number;
   protocols: string[];
   version: string;
-  publicKeyId: string;
-  publicKey: string;
 }
 
 export interface NodeInfo {
