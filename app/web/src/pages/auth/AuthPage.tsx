@@ -15,7 +15,7 @@ export default function AuthPage() {
 
   return (
     <div style={{ maxWidth: 900 }}>
-      <PageHeader title="Auth" subtitle="Server identity and node token issuance" />
+      <PageHeader title="Auth" subtitle="Server identity, node token and user credential issuance" />
 
       {error && <div className="notice notice--error">{error}</div>}
 

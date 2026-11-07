@@ -15,13 +15,23 @@ package tai;
 
 option go_package = "github.com/yaoapp/tai-golang/pb";
 
+// Identity is the caller identity carried by the first frame of every business
+// stream. Tai only transports and stores it; user_token is opaque.
+message Identity {
+  string user_id    = 1; // Calling user
+  string team_id    = 2; // Owning team
+  string user_token = 3; // Opaque user credential (optional per namespace)
+  int64  expires_at = 4; // Unix seconds; local GC hint only, never trusted
+}
+
 // Payload is the envelope for every command: messages on the Control stream,
 // and the first frame of every Light stream and Heavy transfer. The transport
 // layer routes by `namespace + kind` and does not interpret `data`.
 message Payload {
-  string namespace = 1; // e.g. "control", "session", "workspace"
-  string kind      = 2; // Command or event name (e.g. "register", "ping", "open")
-  bytes  data      = 3; // Kind-specific protobuf or JSON payload
+  string   namespace = 1; // e.g. "control", "session", "workspace"
+  string   kind      = 2; // Command or event name (e.g. "register", "ping", "open")
+  bytes    data      = 3; // Kind-specific protobuf or JSON payload
+  Identity identity  = 4; // Optional; set on the first frame of a business stream only
 }
 
 // Connect is the first message of a TCP connection carrying the Tai frame
@@ -59,7 +69,7 @@ message ContainerRuntime {
 // RegisterAck is the server response to a successful Register.
 message RegisterAck {
   string     tai_id      = 1; // Server-assigned Tai identifier
-  bytes      public_key  = 2; // OperationToken verification public key (PEM)
+  bytes      public_key  = 2; // Legacy OperationToken verification key (v1; v2 does not verify user credentials)
   string     key_id      = 3; // Public key identifier for rotation
   PoolConfig pool_config = 4; // Initial pool parameters
 }
@@ -204,8 +214,9 @@ message CertRotation {
   bytes ca_certificate = 1; // PEM-encoded CA certificate
 }
 
-// TokenRefresh pushes a refreshed OperationToken for a long-running session.
+// TokenRefresh pushes a refreshed user credential for a long-running session.
 message TokenRefresh {
   string session_id = 1;
-  string token      = 2; // New OperationToken (JWT)
+  string token      = 2; // New user credential (opaque to Tai)
+  int64  expires_at = 3; // Unix seconds; local GC hint only, never trusted
 }

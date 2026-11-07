@@ -22,6 +22,16 @@ import (
 	"github.com/yaoapp/tai-golang/types"
 )
 
+// keyState reports whether an API key env var is configured, without
+// revealing the value. Realtime providers need their own key (OpenAI), which
+// is separate from the text LLM key (DeepSeek).
+func keyState(name string) string {
+	if os.Getenv(name) != "" {
+		return "set"
+	}
+	return "unset"
+}
+
 func main() {
 	var (
 		apiPort       int
@@ -40,6 +50,31 @@ func main() {
 	}
 
 	authProvider := auth.DefaultAuth(privateKey)
+	users := NewUserStore()
+	if err := users.SeedDefaultUser(); err != nil {
+		log.Printf("seed default demo user: %v", err)
+	} else {
+		log.Printf("default demo account: %s / %s", DefaultDemoEmail, DefaultDemoPassword)
+	}
+
+	// Resolve the caller from the login context: the SDK passes the session
+	// request context to this resolver (identity.md §2.4.4).
+	if ctxResolver, ok := authProvider.(interface {
+		SetUserResolverContext(func(ctx context.Context, nodeID string, scopes types.Scope) (*types.UserIdentity, error))
+	}); ok {
+		ctxResolver.SetUserResolverContext(func(ctx context.Context, _ string, scopes types.Scope) (*types.UserIdentity, error) {
+			user, ok := demoUserFromContext(ctx)
+			if !ok {
+				return nil, context.Canceled // no login → no credential
+			}
+			return &types.UserIdentity{
+				UserID:   user.Email,
+				TeamID:   DemoTeamID,
+				Scope:    scopes,
+				Metadata: map[string]any{"name": user.Name},
+			}, nil
+		})
+	}
 
 	// Create SDK server.
 	sdkServer, err := tai.NewServer(&tai.ServerConfig{
@@ -84,7 +119,7 @@ func main() {
 	time.Sleep(200 * time.Millisecond)
 
 	// Build API router.
-	mux := NewAPI(authProvider, store)
+	mux := NewAPI(authProvider, store, users)
 
 	apiServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", apiPort),
@@ -103,6 +138,8 @@ func main() {
 		apiServer.Shutdown(ctx)
 	}()
 
+	log.Printf("env: DEEPSEEK_API_KEY=%s OPENAI_API_KEY=%s QWEN_API_KEY=%s",
+		keyState("DEEPSEEK_API_KEY"), keyState("OPENAI_API_KEY"), keyState("QWEN_API_KEY"))
 	log.Printf("Demo app starting on http://localhost:%d", apiPort)
 	log.Printf("SDK transport: :%d  HTTP: :%d", transportPort, httpPort)
 	if err := apiServer.ListenAndServe(); err != http.ErrServerClosed {

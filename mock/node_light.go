@@ -29,10 +29,22 @@ type MockLightConn struct {
 	h2Server *http2.Server
 	h2Conn   net.Conn
 
-	mu      sync.Mutex
-	streams chan *MockLightStream
-	closeFn func()
-	closed  bool
+	mu       sync.Mutex
+	streams  chan *MockLightStream
+	closeFn  func()
+	closed   bool
+	done     chan struct{} // closed when the connection stops accepting streams
+	doneOnce sync.Once
+}
+
+// signalDone marks the connection as no longer accepting streams. It unblocks
+// AcceptStream and any handler waiting to publish a stream, and is safe to call
+// from multiple goroutines.
+func (lc *MockLightConn) signalDone() {
+	if lc.done == nil {
+		return
+	}
+	lc.doneOnce.Do(func() { close(lc.done) })
 }
 
 // MockLightStream wraps an accepted stream from Yao.
@@ -105,6 +117,7 @@ func (m *MockNode) ConnectLightH3(ctx context.Context) (*MockLightConn, error) {
 		proto:   "H3",
 		session: sess,
 		streams: make(chan *MockLightStream, 32),
+		done:    make(chan struct{}),
 		closeFn: func() {
 			sess.CloseWithError(0, "close")
 			d.Close()
@@ -123,7 +136,7 @@ func (lc *MockLightConn) acceptH3Streams(codec *transport.FrameCodec) {
 			lc.mu.Lock()
 			lc.closed = true
 			lc.mu.Unlock()
-			close(lc.streams)
+			lc.signalDone()
 			return
 		}
 		firstFrame, err := codec.ReadFrame(stream)
@@ -132,11 +145,17 @@ func (lc *MockLightConn) acceptH3Streams(codec *transport.FrameCodec) {
 			stream.Close()
 			continue
 		}
-		lc.streams <- &MockLightStream{
+		accepted := &MockLightStream{
 			FirstFrame: firstFrame,
 			r:          io.NopCloser(stream),
 			w:          stream,
 			codec:      codec,
+		}
+		select {
+		case lc.streams <- accepted:
+		case <-lc.done:
+			stream.Close()
+			return
 		}
 	}
 }
@@ -191,6 +210,7 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 		proto:   "H2",
 		h2Conn:  conn,
 		streams: make(chan *MockLightStream, 32),
+		done:    make(chan struct{}),
 		closeFn: func() { conn.Close() },
 	}
 
@@ -206,7 +226,7 @@ func (m *MockNode) ConnectLightH2(ctx context.Context) (*MockLightConn, error) {
 		lc.mu.Lock()
 		lc.closed = true
 		lc.mu.Unlock()
-		close(lc.streams)
+		lc.signalDone()
 	}()
 
 	return lc, nil
@@ -234,7 +254,12 @@ func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, 
 		codec:      codec,
 	}
 
-	lc.streams <- stream
+	select {
+	case lc.streams <- stream:
+	case <-lc.done:
+		pw.Close()
+		return
+	}
 
 	fw := flushWriter{w}
 	io.Copy(fw, pr)
@@ -243,11 +268,13 @@ func (lc *MockLightConn) handleH2Stream(w http.ResponseWriter, r *http.Request, 
 // AcceptStream waits for the next stream opened by Yao.
 func (lc *MockLightConn) AcceptStream(ctx context.Context) (*MockLightStream, error) {
 	select {
-	case s, ok := <-lc.streams:
-		if !ok {
+	case s := <-lc.streams:
+		if s == nil {
 			return nil, fmt.Errorf("light connection closed")
 		}
 		return s, nil
+	case <-lc.done:
+		return nil, fmt.Errorf("light connection closed")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -261,6 +288,7 @@ func (lc *MockLightConn) Close() {
 		return
 	}
 	lc.closed = true
+	lc.signalDone()
 	if lc.closeFn != nil {
 		lc.closeFn()
 	}

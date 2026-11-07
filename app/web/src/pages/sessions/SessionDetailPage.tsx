@@ -182,6 +182,11 @@ export default function SessionDetailPage() {
                 <Link to={`/workspaces/${session?.workspaceId}?nodeId=${session?.nodeId}`}>{wsLabel}</Link>
               </span>
             )}
+            {session?.userId && (
+              <span className="mono" title={session.teamId ? `team: ${session.teamId}` : undefined}>
+                {session.userId}
+              </span>
+            )}
             <span className="mono truncate">{id}</span>
           </div>
         </div>

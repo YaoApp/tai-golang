@@ -370,6 +370,7 @@ func registerNode(t *testing.T, reg *Registry, nodeID string) {
 	t.Helper()
 	a := testAuth(t)
 	reg.Register(nodeID, &pb.Register{Hardware: &pb.Hardware{Os: "linux"}}, a)
+	reg.SetAuth(a)
 }
 
 func TestRemoteNodeOnline(t *testing.T) {
@@ -503,7 +504,7 @@ func TestRemoteNodeOpenSession(t *testing.T) {
 	rn := reg.RemoteNodeByID("n-os")
 	sess, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: "sess-1",
-		Token:     "test-token",
+		Scopes:    types.Scope{types.SessionAccess},
 		Request:   &types.SessionRequest{Runtime: types.RuntimeTai, Isolation: "none"},
 	})
 	if err != nil {
@@ -548,7 +549,6 @@ func TestRemoteNodeOpenSessionError(t *testing.T) {
 	rn := reg.RemoteNodeByID("n-oserr")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
 		SessionID: "sess-err",
-		Token:     "tok",
 		Request:   &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
@@ -563,11 +563,25 @@ func TestRemoteNodeResumeSession(t *testing.T) {
 	reg := testRegistry()
 	registerNode(t, reg, "n-rs")
 
+	opened, _ := proto.Marshal(&pb.SessionOpened{SessionId: "s1"})
+	transport.SetTestBackend(&mockTransportBackend{
+		handler: func(ff *pb.Payload) (io.ReadWriteCloser, error) {
+			if ff.Kind == "resume" {
+				return &mockNodeStream{Reader: bytes.NewReader(buildCodecFrame(types.NamespaceSession, "opened", opened)), buf: &bytes.Buffer{}}, nil
+			}
+			return &mockNodeStream{Reader: bytes.NewReader(nil), buf: &bytes.Buffer{}}, nil
+		},
+	})
+
 	rn := reg.RemoteNodeByID("n-rs")
-	_, err := rn.ResumeSession(context.Background(), &types.ResumeSessionRequest{SessionID: "s1"})
-	if err == nil {
-		t.Fatal("expected not-implemented error")
+	sess, err := rn.ResumeSession(context.Background(), &types.ResumeSessionRequest{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("ResumeSession: %v", err)
 	}
+	if sess.ID() != "s1" {
+		t.Errorf("ID = %q, want s1", sess.ID())
+	}
+	sess.Close(context.Background())
 }
 
 func TestRemoteNodeSendControl(t *testing.T) {
@@ -783,7 +797,7 @@ func TestRemoteNodeOpenSessionTransportError(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-te")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
+		SessionID: "s1", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected transport error")
@@ -803,7 +817,7 @@ func TestRemoteNodeOpenSessionUnexpectedKind(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-uk")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
+		SessionID: "s1", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected unexpected-kind error")
@@ -827,7 +841,7 @@ func TestRemoteNodeOpenSessionDataStreamError(t *testing.T) {
 
 	rn := reg.RemoteNodeByID("n-os-de")
 	_, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
-		SessionID: "s1", Token: "tok", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
+		SessionID: "s1", Request: &types.SessionRequest{Runtime: types.RuntimeTai},
 	})
 	if err == nil {
 		t.Fatal("expected data stream error")

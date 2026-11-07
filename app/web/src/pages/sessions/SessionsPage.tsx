@@ -77,7 +77,9 @@ export default function SessionsPage() {
     try {
       setError('');
       const result = await api.sessions.resume(id);
-      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, status: result.status } : s));
+      setSessions((prev) => prev.map((s) => s.id === id
+        ? { ...s, status: result.status, userId: result.userId ?? s.userId, teamId: result.teamId ?? s.teamId }
+        : s));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Resume failed');
     }
@@ -103,6 +105,16 @@ export default function SessionsPage() {
       header: 'Node',
       mono: true,
       render: (s) => s.nodeId,
+    },
+    {
+      key: 'user',
+      header: 'User',
+      render: (s) =>
+        s.userId ? (
+          <span className="mono" title={`team: ${s.teamId || '—'}`}>{s.userId}</span>
+        ) : (
+          <span className="faint" title="no user identity on this session">—</span>
+        ),
     },
     {
       key: 'workspace',

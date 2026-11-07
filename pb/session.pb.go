@@ -139,13 +139,12 @@ func (x *SessionData) GetSessionId() string {
 }
 
 // SessionOpen is the data of the first frame ("open") of the Session Control
-// stream.
+// stream. The caller identity travels in the enclosing Payload.identity.
 type SessionOpen struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"` // OperationToken (JWT)
-	Request       *SessionRequest        `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
+	Request       *SessionRequest        `protobuf:"bytes,3,opt,name=request,proto3" json:"request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -190,13 +189,6 @@ func (x *SessionOpen) GetSessionId() string {
 func (x *SessionOpen) GetNodeId() string {
 	if x != nil {
 		return x.NodeId
-	}
-	return ""
-}
-
-func (x *SessionOpen) GetToken() string {
-	if x != nil {
-		return x.Token
 	}
 	return ""
 }
@@ -265,9 +257,8 @@ func (x *SessionClose) GetReason() string {
 type SessionResume struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`                                   // Fresh OperationToken
-	LastCtrlSeq   uint64                 `protobuf:"varint,3,opt,name=last_ctrl_seq,json=lastCtrlSeq,proto3" json:"last_ctrl_seq,omitempty"` // Last received Control stream seq
-	LastDataSeq   uint64                 `protobuf:"varint,4,opt,name=last_data_seq,json=lastDataSeq,proto3" json:"last_data_seq,omitempty"` // Last received Data stream seq
+	LastCtrlSeq   uint64                 `protobuf:"varint,2,opt,name=last_ctrl_seq,json=lastCtrlSeq,proto3" json:"last_ctrl_seq,omitempty"` // Last received Control stream seq
+	LastDataSeq   uint64                 `protobuf:"varint,3,opt,name=last_data_seq,json=lastDataSeq,proto3" json:"last_data_seq,omitempty"` // Last received Data stream seq
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -305,13 +296,6 @@ func (*SessionResume) Descriptor() ([]byte, []int) {
 func (x *SessionResume) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
-	}
-	return ""
-}
-
-func (x *SessionResume) GetToken() string {
-	if x != nil {
-		return x.Token
 	}
 	return ""
 }
@@ -834,23 +818,21 @@ const file_session_proto_rawDesc = "" +
 	"\x04data\x18\x03 \x01(\fR\x04data\",\n" +
 	"\vSessionData\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\x8a\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"t\n" +
 	"\vSessionOpen\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token\x12-\n" +
-	"\arequest\x18\x04 \x01(\v2\x13.tai.SessionRequestR\arequest\"E\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12-\n" +
+	"\arequest\x18\x03 \x01(\v2\x13.tai.SessionRequestR\arequest\"E\n" +
 	"\fSessionClose\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x8c\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"v\n" +
 	"\rSessionResume\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\x12\"\n" +
-	"\rlast_ctrl_seq\x18\x03 \x01(\x04R\vlastCtrlSeq\x12\"\n" +
-	"\rlast_data_seq\x18\x04 \x01(\x04R\vlastDataSeq\"\x8a\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\"\n" +
+	"\rlast_ctrl_seq\x18\x02 \x01(\x04R\vlastCtrlSeq\x12\"\n" +
+	"\rlast_data_seq\x18\x03 \x01(\x04R\vlastDataSeq\"\x8a\x01\n" +
 	"\rSessionOpened\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +

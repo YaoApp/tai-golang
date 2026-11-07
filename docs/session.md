@@ -32,10 +32,18 @@ Three things must be in place before opening a session:
 |-------------|---------------|
 | A connected node | Node calls `tai start` and registers; see [Quick Start](quickstart.md) |
 | A node token | `auth.IssueNodeToken(nodeID)`, 7-day expiry |
-| An operation token | `auth.IssueOperationToken(nodeID, sessionID, ops, scope)`, 30-min expiry, auto-refreshed |
+| An `AuthProvider` on the server | Passed to `NewServer`; the transport uses it to issue user credentials |
 
-The operation token scopes the session. It carries the operations the session may
-perform and is separate from the node token that authenticates the node itself.
+Sessions without a user (scheduled jobs, unattended pool nodes) set
+`SessionOpenRequest.Anonymous = true`: no identity is issued and the first
+frame carries no `Payload.identity`. The daemon then has no credential to
+forward for that session.
+
+You do **not** create a user credential yourself: `OpenSession` calls
+`AuthProvider.IssueUserToken(nodeID, scopes)` before opening the stream and
+sends the result in the first-frame `Payload.identity`. The Tai node treats it
+as an opaque string (store + forward only), so scopes must be declared by the
+caller.
 
 ## Opening a session
 
@@ -43,7 +51,6 @@ perform and is separate from the node token that authenticates the node itself.
 import (
     "context"
 
-    "github.com/yaoapp/tai-golang/auth"
     "github.com/yaoapp/tai-golang/node"
     "github.com/yaoapp/tai-golang/types"
 )
@@ -53,11 +60,9 @@ if n == nil {
     return fmt.Errorf("node demo-node is not connected")
 }
 
-token, err := authProvider.IssueOperationToken("demo-node", "sess-001",
-    []string{"session", "workspace"}, &types.TokenScope{Paths: []string{"/workspace/**"}})
-if err != nil {
-    return err
-}
+// Declare the actions the session needs. The transport issues the user
+// credential from the AuthProvider with exactly these scopes.
+scopes := types.Scope{types.SessionAccess, types.WorkspaceRead, types.WorkspaceWrite}
 
 // Only "model" is required; the provider is inferred from base_url when
 // provider_id is empty.
@@ -67,7 +72,7 @@ llmJSON := json.RawMessage(`{
 
 sess, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
-    Token:     token,
+    Scopes:    scopes,
     Request: &types.SessionRequest{
         WorkspaceID: "ws-001",
         Runtime:     "tai",
@@ -399,7 +404,7 @@ concurrency constraints.
   workspace branch, so the two would share files and commits.
 - Omitting `WorkspaceID` and `Cwd`. One of them is required; opening fails
   otherwise.
-- Forgetting the operation token. The node token authenticates the node, not the
-  session.
+- Skipping scopes. The transport issues the user credential from the scopes you
+  declare; a session opened without `session:access` cannot be driven.
 - Expecting `Prompt` to return the reply. It starts the turn; the reply arrives on
   the event stream.

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
+	"time"
 
 	"github.com/yaoapp/tai-golang/pb"
 	"github.com/yaoapp/tai-golang/session"
@@ -20,6 +22,113 @@ type remoteNode struct {
 	nodeID   string
 	registry *Registry
 	policy   *workspace.ChannelPolicy
+}
+
+// authProvider returns the registry auth provider or an error when the
+// embedding server has not installed one.
+func (n *remoteNode) authProvider() (types.AuthProvider, error) {
+	auth := n.registry.Auth()
+	if auth == nil {
+		return nil, fmt.Errorf("node: auth provider not configured")
+	}
+	return auth, nil
+}
+
+// normalizeScopes applies the default session scope set when the caller did
+// not declare any: opening/driving a session needs session:access.
+func normalizeScopes(scopes types.Scope) types.Scope {
+	if len(scopes) == 0 {
+		return types.DefaultSessionScopes()
+	}
+	return scopes
+}
+
+// issueIdentity issues a user credential for the given scopes via the
+// registry auth provider and converts it into the wire identity carried by the
+// first frame of a business stream. When the provider reports credential
+// expiry, it is attached as the local GC hint (Identity.expires_at).
+//
+// Providers implementing UserTokenContextProvider receive ctx, so they can
+// resolve the caller from the request's login state (identity.md §2.4.4).
+func (n *remoteNode) issueIdentity(ctx context.Context, scopes types.Scope) (*pb.Identity, error) {
+	auth, err := n.authProvider()
+	if err != nil {
+		return nil, err
+	}
+	scopes = normalizeScopes(scopes)
+
+	var token string
+	var identity *types.UserIdentity
+	if ctp, ok := auth.(types.UserTokenContextProvider); ok {
+		token, identity, err = ctp.IssueUserTokenContext(ctx, n.nodeID, scopes)
+	} else {
+		token, identity, err = auth.IssueUserToken(n.nodeID, scopes)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return types.IdentityToPB(identity, token, tokenExpiresAt(auth, token)), nil
+}
+
+// tokenExpiresAt returns the credential expiry as a Unix GC hint, or 0 when
+// the provider does not expose it. It is informational only: Tai never
+// validates it.
+func tokenExpiresAt(auth types.AuthProvider, token string) int64 {
+	reporter, ok := auth.(types.UserTokenExpiry)
+	if !ok {
+		return 0
+	}
+	expiry, err := reporter.UserTokenExpiresAt(token)
+	if err != nil || expiry.IsZero() {
+		return 0
+	}
+	return expiry.Unix()
+}
+
+// userTokenRefresher returns a callback that keeps the user credential fresh
+// for a long-running session. It follows the credential contract: renew the
+// existing credential first (RefreshUserToken inherits identity and scopes and
+// only extends the validity window); when the old credential can no longer be
+// renewed, fall back to issuing a fresh one from the business context.
+func (n *remoteNode) userTokenRefresher(identity *pb.Identity, scopes types.Scope) func() (string, time.Time, error) {
+	scopes = normalizeScopes(scopes)
+	current := identity.GetUserToken()
+
+	var mu sync.Mutex
+	return func() (string, time.Time, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		auth, err := n.authProvider()
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		if current != "" {
+			if renewed, err := auth.RefreshUserToken(current); err == nil {
+				current = renewed
+				return renewed, expiryTime(auth, renewed), nil
+			}
+		}
+		token, _, err := auth.IssueUserToken(n.nodeID, scopes)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		current = token
+		return token, expiryTime(auth, token), nil
+	}
+}
+
+// expiryTime returns the credential expiry (zero when unknown).
+func expiryTime(auth types.AuthProvider, token string) time.Time {
+	reporter, ok := auth.(types.UserTokenExpiry)
+	if !ok {
+		return time.Time{}
+	}
+	expiry, err := reporter.UserTokenExpiresAt(token)
+	if err != nil {
+		return time.Time{}
+	}
+	return expiry
 }
 
 // ---------- types.RemoteNode implementation ----------
@@ -45,11 +154,10 @@ func (n *remoteNode) OpenWorkspace(ctx context.Context, wsID string, branch ...s
 		return nil, fmt.Errorf("workspace: marshal open: %w", err)
 	}
 
-	firstFrame := &pb.Payload{
-		Namespace: workspace.NamespaceWorkspace,
-		Kind:      workspace.KindWSOpen,
-		Data:      data,
-	}
+	// Workspace first frames keep the identity slot for when the business
+	// layer declares workspace scopes; the demo binding does not attach one
+	// yet (identity is optional per namespace).
+	firstFrame := transport.FirstFrame(workspace.NamespaceWorkspace, workspace.KindWSOpen, data, nil)
 	stream, err := transport.PkgOpenLightStream(ctx, n.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: open %s: %w", wsID, err)
@@ -76,11 +184,7 @@ func (n *remoteNode) CreateWorkspace(ctx context.Context, meta types.Meta) (type
 		return nil, fmt.Errorf("workspace: marshal create: %w", err)
 	}
 
-	firstFrame := &pb.Payload{
-		Namespace: workspace.NamespaceWorkspace,
-		Kind:      workspace.KindWSCreate,
-		Data:      data,
-	}
+	firstFrame := transport.FirstFrame(workspace.NamespaceWorkspace, workspace.KindWSCreate, data, nil)
 	stream, err := transport.PkgOpenLightStream(ctx, n.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: create: %w", err)
@@ -110,11 +214,7 @@ func (n *remoteNode) ListWorkspaces(ctx context.Context, opts types.ListOptions)
 		return nil, fmt.Errorf("workspace: marshal list: %w", err)
 	}
 
-	firstFrame := &pb.Payload{
-		Namespace: workspace.NamespaceWorkspace,
-		Kind:      workspace.KindWSList,
-		Data:      data,
-	}
+	firstFrame := transport.FirstFrame(workspace.NamespaceWorkspace, workspace.KindWSList, data, nil)
 	stream, err := transport.PkgOpenLightStream(ctx, n.nodeID, firstFrame)
 	if err != nil {
 		return nil, fmt.Errorf("workspace: list: %w", err)
@@ -140,11 +240,7 @@ func (n *remoteNode) DeleteWorkspace(ctx context.Context, wsID string) error {
 		return fmt.Errorf("workspace: marshal delete: %w", err)
 	}
 
-	firstFrame := &pb.Payload{
-		Namespace: workspace.NamespaceWorkspace,
-		Kind:      workspace.KindWSDelete,
-		Data:      data,
-	}
+	firstFrame := transport.FirstFrame(workspace.NamespaceWorkspace, workspace.KindWSDelete, data, nil)
 	stream, err := transport.PkgOpenLightStream(ctx, n.nodeID, firstFrame)
 	if err != nil {
 		return fmt.Errorf("workspace: delete %s: %w", wsID, err)
@@ -161,22 +257,26 @@ func (n *remoteNode) DeleteWorkspace(ctx context.Context, wsID string) error {
 // ---------- Session lifecycle ----------
 
 func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequest) (types.Session, error) {
+	var identity *pb.Identity
+	if !req.Anonymous {
+		var err error
+		identity, err = n.issueIdentity(ctx, req.Scopes)
+		if err != nil {
+			return nil, fmt.Errorf("issue user token: %w", err)
+		}
+	}
 	pbReq := sessionRequestToProto(req.Request)
 	openData, err := proto.Marshal(&pb.SessionOpen{
 		SessionId: req.SessionID,
 		NodeId:    n.nodeID,
-		Token:     req.Token,
 		Request:   pbReq,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal SessionOpen: %w", err)
 	}
 
-	ctrlStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "open",
-		Data:      openData,
-	})
+	ctrlStream, err := transport.PkgOpenLightStream(ctx, n.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "open", openData, identity))
 	if err != nil {
 		return nil, fmt.Errorf("open ctrl stream: %w", err)
 	}
@@ -205,11 +305,11 @@ func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequ
 		ctrlStream.Close()
 		return nil, fmt.Errorf("marshal SessionData: %w", err)
 	}
-	dataStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "data",
-		Data:      dataData,
-	})
+	// The data stream is a separate Light stream: its first frame repeats the
+	// identity so a node that only sees this stream can still bind the
+	// session to its caller.
+	dataStream, err := transport.PkgOpenLightStream(ctx, n.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "data", dataData, identity))
 	if err != nil {
 		ctrlStream.Close()
 		return nil, fmt.Errorf("open data stream: %w", err)
@@ -221,17 +321,19 @@ func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequ
 		dgConn = ls.DatagramConn()
 	}
 
-	resumeFn := n.makeResumeFn(req.SessionID, req.Token, req.IssueToken)
+	resumeFn := n.makeResumeFn(req.SessionID, req.Scopes, req.Anonymous)
 	sess := session.New(req.SessionID, n.nodeID, ctrlStream, dataStream, codec, session.Options{
 		ResumeFn:     resumeFn,
 		OnEvent:      req.OnEvent,
 		DatagramConn: dgConn,
+		Identity:     identity,
 	})
 
-	// Start automatic OperationToken refresh for long-running sessions.
-	if req.IssueToken != nil {
-		tr := session.NewTokenRefresher(req.SessionID, req.IssueToken, n.SendControl)
-		// Stop refresher when session closes (best-effort).
+	if !req.Anonymous {
+		// Keep the daemon-side user credential fresh for long-running
+		// sessions: each tick renews the credential and pushes it over the
+		// Control stream (identity.md §4.3).
+		tr := session.NewTokenRefresher(req.SessionID, n.userTokenRefresher(identity, req.Scopes), n.SendControl)
 		go func() {
 			<-sess.Done()
 			tr.Stop()
@@ -243,7 +345,7 @@ func (n *remoteNode) OpenSession(ctx context.Context, req *types.SessionOpenRequ
 
 func (n *remoteNode) ResumeSession(ctx context.Context, req *types.ResumeSessionRequest) (types.Session, error) {
 	codec := transport.DefaultCodec()
-	newCtrl, newData, _, err := n.doResume(ctx, req.SessionID, req.Token, req.LastCtrlSeq, req.LastDataSeq, codec)
+	newCtrl, newData, _, identity, err := n.doResume(ctx, req.SessionID, req.Scopes, req.Anonymous, req.LastCtrlSeq, req.LastDataSeq, codec)
 	if err != nil {
 		return nil, err
 	}
@@ -253,56 +355,57 @@ func (n *remoteNode) ResumeSession(ctx context.Context, req *types.ResumeSession
 		dgConn = ls.DatagramConn()
 	}
 
-	resumeFn := n.makeResumeFn(req.SessionID, req.Token, nil)
+	resumeFn := n.makeResumeFn(req.SessionID, req.Scopes, req.Anonymous)
 	sess := session.New(req.SessionID, n.nodeID, newCtrl, newData, codec, session.Options{
 		ResumeFn:     resumeFn,
 		OnEvent:      req.OnEvent,
 		DatagramConn: dgConn,
+		Identity:     identity,
 	})
 	return sess, nil
 }
 
 // makeResumeFn creates a ResumeFunc closure for automatic session resume.
-// When issueToken is non-nil, a fresh OperationToken is obtained at resume time
-// to avoid sending an expired JWT. Falls back to initialToken on error.
-func (n *remoteNode) makeResumeFn(sessionID, initialToken string, issueToken func() (string, error)) types.ResumeFunc {
+// A fresh user credential is issued on every resume attempt.
+func (n *remoteNode) makeResumeFn(sessionID string, scopes types.Scope, anonymous bool) types.ResumeFunc {
 	return func(ctx context.Context, lastCtrlSeq, lastDataSeq uint64) (io.ReadWriteCloser, io.ReadWriteCloser, uint64, error) {
-		token := initialToken
-		if issueToken != nil {
-			if fresh, err := issueToken(); err == nil {
-				token = fresh
-			}
-		}
 		codec := transport.DefaultCodec()
-		return n.doResume(ctx, sessionID, token, lastCtrlSeq, lastDataSeq, codec)
+		ctrl, data, lastSeq, _, err := n.doResume(ctx, sessionID, scopes, anonymous, lastCtrlSeq, lastDataSeq, codec)
+		return ctrl, data, lastSeq, err
 	}
 }
 
-// doResume opens new ctrl (with resume first frame) and data streams.
-func (n *remoteNode) doResume(ctx context.Context, sessionID, token string, lastCtrlSeq, lastDataSeq uint64, codec *transport.FrameCodec) (io.ReadWriteCloser, io.ReadWriteCloser, uint64, error) {
+// doResume opens new ctrl (with resume first frame) and data streams. A fresh
+// user credential is issued on every resume: the resumed stream may represent
+// a different business context than the original open.
+func (n *remoteNode) doResume(ctx context.Context, sessionID string, scopes types.Scope, anonymous bool, lastCtrlSeq, lastDataSeq uint64, codec *transport.FrameCodec) (io.ReadWriteCloser, io.ReadWriteCloser, uint64, *pb.Identity, error) {
+	var identity *pb.Identity
+	if !anonymous {
+		var err error
+		identity, err = n.issueIdentity(ctx, scopes)
+		if err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("issue user token: %w", err)
+		}
+	}
 	resumeData, err := proto.Marshal(&pb.SessionResume{
 		SessionId:   sessionID,
-		Token:       token,
 		LastCtrlSeq: lastCtrlSeq,
 		LastDataSeq: lastDataSeq,
 	})
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("marshal SessionResume: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("marshal SessionResume: %w", err)
 	}
 
-	ctrlStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "resume",
-		Data:      resumeData,
-	})
+	ctrlStream, err := transport.PkgOpenLightStream(ctx, n.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "resume", resumeData, identity))
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("open resume ctrl stream: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("open resume ctrl stream: %w", err)
 	}
 
 	respFrame, err := codec.ReadFrame(ctrlStream)
 	if err != nil {
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("read resume response: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("read resume response: %w", err)
 	}
 	switch respFrame.Kind {
 	case "opened":
@@ -311,34 +414,34 @@ func (n *remoteNode) doResume(ctx context.Context, sessionID, token string, last
 		var se pb.SessionError
 		proto.Unmarshal(respFrame.Data, &se)
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("session resume rejected: %s: %s", se.Code, se.Message)
+		return nil, nil, 0, nil, fmt.Errorf("session resume rejected: %s: %s", se.Code, se.Message)
 	default:
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("unexpected resume response kind: %s", respFrame.Kind)
+		return nil, nil, 0, nil, fmt.Errorf("unexpected resume response kind: %s", respFrame.Kind)
 	}
 
 	var opened pb.SessionOpened
 	if err := proto.Unmarshal(respFrame.Data, &opened); err != nil {
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("unmarshal SessionOpened: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("unmarshal SessionOpened: %w", err)
 	}
 
 	dataData, err := proto.Marshal(&pb.SessionData{SessionId: sessionID})
 	if err != nil {
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("marshal SessionData: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("marshal SessionData: %w", err)
 	}
-	dataStream, err := transport.PkgOpenLightStream(ctx, n.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "data",
-		Data:      dataData,
-	})
+	// The data stream is a separate Light stream: its first frame repeats the
+	// identity so a node that only sees this stream can still bind the
+	// session to its caller.
+	dataStream, err := transport.PkgOpenLightStream(ctx, n.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "data", dataData, identity))
 	if err != nil {
 		ctrlStream.Close()
-		return nil, nil, 0, fmt.Errorf("open resume data stream: %w", err)
+		return nil, nil, 0, nil, fmt.Errorf("open resume data stream: %w", err)
 	}
 
-	return ctrlStream, dataStream, opened.LastDataSeq, nil
+	return ctrlStream, dataStream, opened.LastDataSeq, identity, nil
 }
 
 // ---------- Control ----------

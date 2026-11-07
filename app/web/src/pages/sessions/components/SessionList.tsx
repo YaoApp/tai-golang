@@ -23,6 +23,9 @@ export default function SessionList({ sessions, selected, onSelect }: Props) {
             <span className="session-list__id mono truncate">{s.id}</span>
             <span className="session-list__meta">
               <span className="mono truncate">{s.nodeId}</span>
+              <span className="mono truncate" title={s.teamId ? `team: ${s.teamId}` : 'no user'}>
+                {s.userId || '—'}
+              </span>
               <StatusDot status={s.status} />
             </span>
           </button>

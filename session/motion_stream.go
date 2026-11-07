@@ -19,11 +19,8 @@ func (s *Session) openMotionStreamH2(ctx context.Context, motionOut chan<- *type
 		return err
 	}
 
-	stream, err := s.openStreamFn(ctx, s.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "motion",
-		Data:      dataBytes,
-	})
+	stream, err := s.openStreamFn(ctx, s.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "motion", dataBytes, s.identity))
 	if err != nil {
 		return err
 	}

@@ -30,3 +30,15 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## API client
+
+`src/api.ts` is the single typed HTTP client. Auth-related calls:
+
+- `api.auth.issueNodeToken(nodeId)` — v1 node connection credential.
+- `api.auth.issueUserToken(nodeId, scopes)` — v2 user credential; returns
+  `{token, identity: {user_id, team_id, scope}}`.
+- `api.sessions.*` — session list/rows carry `userId` / `teamId` for owner display.
+
+The old `issueOperationToken` helper is gone: `POST /api/auth/operation-token`
+was retired in favour of `POST /api/auth/user-token`.

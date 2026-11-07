@@ -22,8 +22,24 @@ type Registry struct {
 	nodes        map[string]*managedNode
 	pool         *pb.PoolConfig
 	policy       *workspace.ChannelPolicy
+	auth         types.AuthProvider
 	onRegister   func(types.RemoteNode) error
 	onDisconnect func(nodeID string)
+}
+
+// SetAuth installs the auth provider used to issue user credentials when the
+// transport opens or resumes a session.
+func (r *Registry) SetAuth(auth types.AuthProvider) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.auth = auth
+}
+
+// Auth returns the configured auth provider (may be nil).
+func (r *Registry) Auth() types.AuthProvider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.auth
 }
 
 type managedNode struct {

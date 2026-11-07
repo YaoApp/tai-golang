@@ -68,6 +68,11 @@ type Session struct {
 	renderOut       chan *types.RenderEvent // downstream render stream events (transcript + emotion)
 	renderStream    io.ReadWriteCloser      // dedicated render uni stream; nil before StartRealtime
 	renderCancel    context.CancelFunc
+
+	// identity is the caller identity carried by the first frame of the
+	// session streams. It is optional: nil means the session has no user
+	// (system task / unattended node). The value is fixed at construction.
+	identity *pb.Identity
 }
 
 // OpenStreamFunc opens a Light stream to a node. Used by H2 audio to open
@@ -80,6 +85,7 @@ type Options struct {
 	OnEvent      types.OnSessionEventFunc // lifecycle event callback
 	DatagramConn transport.DatagramConn   // QUIC datagram I/O for Realtime audio (nil on H2)
 	OpenStreamFn OpenStreamFunc           // opens Light streams; nil = transport.PkgOpenLightStream
+	Identity     *pb.Identity             // caller identity carried by sub-stream first frames (optional)
 }
 
 // New creates a Session with ctrl and data streams already established.
@@ -100,6 +106,7 @@ func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.Fram
 		s.onEvent = opts[0].OnEvent
 		s.dgConn = opts[0].DatagramConn
 		s.openStreamFn = opts[0].OpenStreamFn
+		s.identity = opts[0].Identity
 	}
 	if s.openStreamFn == nil {
 		s.openStreamFn = transport.PkgOpenLightStream

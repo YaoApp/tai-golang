@@ -17,13 +17,16 @@ import (
 type MockSession struct {
 	ID      string
 	Request *types.SessionRequest
-	ctrl    *MockLightStream
-	data    *MockLightStream
-	audio   *MockLightStream // H2 audio bidi stream (set by handleAudio)
-	codec   *transport.FrameCodec
-	dataSeq uint64
-	mu      sync.Mutex
-	closed  bool
+	// Identity is the caller identity carried by the first frame of the
+	// session ctrl stream (Payload.identity). Nil means no user identity.
+	Identity *pb.Identity
+	ctrl     *MockLightStream
+	data     *MockLightStream
+	audio    *MockLightStream // H2 audio bidi stream (set by handleAudio)
+	codec    *transport.FrameCodec
+	dataSeq  uint64
+	mu       sync.Mutex
+	closed   bool
 }
 
 // Send writes an event frame to the data stream.
@@ -251,10 +254,11 @@ func (sh *SessionHandler) handleOpen(ctrl *MockLightStream) {
 	}
 
 	ms := &MockSession{
-		ID:      open.SessionId,
-		Request: req,
-		ctrl:    ctrl,
-		codec:   sh.codec,
+		ID:       open.SessionId,
+		Request:  req,
+		Identity: transport.IdentityFromFrame(ctrl.FirstFrame),
+		ctrl:     ctrl,
+		codec:    sh.codec,
 	}
 
 	sh.mu.Lock()
@@ -303,10 +307,12 @@ func (sh *SessionHandler) handleResume(ctrl *MockLightStream) {
 		return
 	}
 
-	// Replace ctrl stream.
+	// Replace ctrl stream. Resume re-issues the credential, so the identity of
+	// the resume first frame supersedes the open one.
 	ms.mu.Lock()
 	oldCtrl := ms.ctrl
 	ms.ctrl = ctrl
+	ms.Identity = transport.IdentityFromFrame(ctrl.FirstFrame)
 	ms.mu.Unlock()
 	if oldCtrl != nil {
 		oldCtrl.Close()

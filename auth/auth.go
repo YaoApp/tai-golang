@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -27,9 +28,10 @@ var (
 func DefaultAuth(privateKey ed25519.PrivateKey) types.AuthProvider {
 	keyID := hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)[:8])
 	return &defaultAuth{
-		privateKey: privateKey,
-		publicKey:  privateKey.Public().(ed25519.PublicKey),
-		keyID:      keyID,
+		privateKey:   privateKey,
+		publicKey:    privateKey.Public().(ed25519.PublicKey),
+		keyID:        keyID,
+		userTokenTTL: 30 * time.Minute,
 	}
 }
 
@@ -38,9 +40,13 @@ type defaultAuth struct {
 	publicKey  ed25519.PublicKey
 	keyID      string
 
-	mu            sync.RWMutex
-	tlsInfo       *types.TLSInfo
-	transportPort int
+	mu              sync.RWMutex
+	tlsInfo         *types.TLSInfo
+	transportPort   int
+	userResolver    func(nodeID string, scopes types.Scope) (*types.UserIdentity, error)
+	userResolverCtx func(ctx context.Context, nodeID string, scopes types.Scope) (*types.UserIdentity, error)
+
+	userTokenTTL time.Duration
 }
 
 // SetTLS configures TLS information returned in well-known responses.
@@ -164,12 +170,198 @@ func (a *defaultAuth) WellKnownInfo() *types.WellKnownResponse {
 }
 
 // ---------------------------------------------------------------------------
+// User credentials
+// ---------------------------------------------------------------------------
+
+// SetUserResolver installs the business-context resolver used by
+// IssueUserToken. When nil, a single local identity (local-user/local-team)
+// is returned so the demo app works out of the box.
+func (a *defaultAuth) SetUserResolver(fn func(nodeID string, scopes types.Scope) (*types.UserIdentity, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.userResolver = fn
+}
+
+// SetUserResolverContext installs a request-scoped resolver used by
+// IssueUserTokenContext. It wins over SetUserResolver when both are set.
+func (a *defaultAuth) SetUserResolverContext(fn func(ctx context.Context, nodeID string, scopes types.Scope) (*types.UserIdentity, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.userResolverCtx = fn
+}
+
+// IssueUserTokenContext resolves the caller from the request context (login
+// state) and signs a user credential. Falls back to IssueUserToken when no
+// context resolver is installed.
+func (a *defaultAuth) IssueUserTokenContext(ctx context.Context, nodeID string, scopes types.Scope) (string, *types.UserIdentity, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.mu.RLock()
+	resolverCtx := a.userResolverCtx
+	resolver := a.userResolver
+	a.mu.RUnlock()
+
+	var identity *types.UserIdentity
+	switch {
+	case resolverCtx != nil:
+		var err error
+		identity, err = resolverCtx(ctx, nodeID, scopes)
+		if err != nil {
+			return "", nil, err
+		}
+	case resolver != nil:
+		var err error
+		identity, err = resolver(nodeID, scopes)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return a.signResolvedIdentity(identity, scopes)
+}
+
+// IssueUserToken resolves the caller identity from the business context and
+// signs a user credential carrying the requested scopes.
+func (a *defaultAuth) IssueUserToken(nodeID string, scopes types.Scope) (string, *types.UserIdentity, error) {
+	a.mu.RLock()
+	resolver := a.userResolver
+	a.mu.RUnlock()
+
+	var identity *types.UserIdentity
+	if resolver != nil {
+		var err error
+		identity, err = resolver(nodeID, scopes)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return a.signResolvedIdentity(identity, scopes)
+}
+
+// signResolvedIdentity applies the shared fallback/validation and signs.
+func (a *defaultAuth) signResolvedIdentity(identity *types.UserIdentity, scopes types.Scope) (string, *types.UserIdentity, error) {
+	if identity == nil {
+		identity = &types.UserIdentity{UserID: "local-user", TeamID: "local-team"}
+	}
+	if identity.UserID == "" || identity.TeamID == "" {
+		return "", nil, ErrUnauthorized
+	}
+	// The returned identity must reflect exactly what was signed: when the
+	// resolver does not populate Scope, mirror the requested scopes.
+	if len(identity.Scope) == 0 {
+		identity.Scope = scopes
+	}
+	token, err := a.signUserToken(identity, scopes, time.Now())
+	if err != nil {
+		return "", nil, err
+	}
+	return token, identity, nil
+}
+
+// RefreshUserToken re-signs the credential carried by oldToken, inheriting its
+// identity and scopes and only renewing the validity window.
+func (a *defaultAuth) RefreshUserToken(oldToken string) (string, error) {
+	claims, err := a.parseUserToken(oldToken)
+	if err != nil {
+		return "", err
+	}
+	identity := &types.UserIdentity{
+		UserID:   claims.UserID,
+		TeamID:   claims.TeamID,
+		Scope:    types.Scope(claims.Scope),
+		Metadata: claims.Metadata,
+	}
+	return a.signUserToken(identity, identity.Scope, time.Now())
+}
+
+// ValidateUserToken verifies a user credential and returns its identity.
+func (a *defaultAuth) ValidateUserToken(token string) (*types.UserIdentity, error) {
+	claims, err := a.parseUserToken(token)
+	if err != nil {
+		return nil, err
+	}
+	return &types.UserIdentity{
+		UserID:   claims.UserID,
+		TeamID:   claims.TeamID,
+		Scope:    types.Scope(claims.Scope),
+		Metadata: claims.Metadata,
+	}, nil
+}
+
+// UserTokenExpiresAt reports the expiry carried by token. It verifies the
+// signature but returns the expiry even for an already-expired credential:
+// the value is a GC hint for the Tai daemon, not an authorization decision.
+func (a *defaultAuth) UserTokenExpiresAt(token string) (time.Time, error) {
+	claims := &userTokenClaims{}
+	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return a.publicKey, nil
+	})
+	if err != nil {
+		return time.Time{}, ErrUnauthorized
+	}
+	if claims.ExpiresAt == nil {
+		return time.Time{}, nil
+	}
+	return claims.ExpiresAt.Time, nil
+}
+
+func (a *defaultAuth) signUserToken(identity *types.UserIdentity, scopes types.Scope, now time.Time) (string, error) {
+	if identity == nil || identity.UserID == "" || identity.TeamID == "" {
+		return "", ErrUnauthorized
+	}
+	claims := &userTokenClaims{
+		UserID:   identity.UserID,
+		TeamID:   identity.TeamID,
+		Scope:    []string(scopes),
+		Metadata: identity.Metadata,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(a.userTokenTTL)),
+			ID:        GenerateID("ut"),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	return token.SignedString(a.privateKey)
+}
+
+func (a *defaultAuth) parseUserToken(token string) (*userTokenClaims, error) {
+	claims := &userTokenClaims{}
+	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return a.publicKey, nil
+	})
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrUnauthorized
+	}
+	if claims.UserID == "" || claims.TeamID == "" {
+		return nil, ErrUnauthorized
+	}
+	return claims, nil
+}
+
+// ---------------------------------------------------------------------------
 // JWT claim types
 // ---------------------------------------------------------------------------
 
 type nodeTokenClaims struct {
 	NodeID string `json:"node_id"`
 	UserID string `json:"user_id,omitempty"`
+	jwt.RegisteredClaims
+}
+
+type userTokenClaims struct {
+	UserID   string         `json:"user_id"`
+	TeamID   string         `json:"team_id"`
+	Scope    []string       `json:"scope,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 	jwt.RegisteredClaims
 }
 

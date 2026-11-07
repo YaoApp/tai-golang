@@ -14,12 +14,14 @@ message ServerToolRequest {
   string tool       = 1; // Tool name (e.g. "search", "db.query")
   bytes  input      = 2; // JSON input payload
   uint32 timeout_ms = 3; // Timeout in milliseconds, 0 = default (30s)
+  string request_id = 4; // Correlation id (Control round-trip)
 }
 
 // ServerToolResponse is the result of a `tai call` invocation.
 message ServerToolResponse {
-  bytes     output = 1; // JSON output payload
-  ToolError error  = 2; // Non-nil on failure
+  bytes     output     = 1; // JSON output payload
+  ToolError error      = 2; // Non-nil on failure
+  string    request_id = 3; // Correlation id echoed from the request
 }
 
 // ToolError describes a tool execution failure.

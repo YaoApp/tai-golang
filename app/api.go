@@ -12,10 +12,10 @@ import (
 var staticFS embed.FS
 
 // NewAPI creates the HTTP mux with all API routes and static frontend.
-func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
+func NewAPI(authProvider types.AuthProvider, store *Store, users *UserStore) http.Handler {
 	mux := http.NewServeMux()
 
-	authH := &AuthHandler{auth: authProvider}
+	authH := &AuthHandler{auth: authProvider, users: users}
 	nodeH := &NodeHandler{store: store}
 	sessionH := &SessionHandler{store: store, auth: authProvider}
 	wsH := NewWorkspaceHandler(store)
@@ -26,7 +26,12 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	// Auth endpoints
 	mux.HandleFunc("GET /api/auth/info", authH.Info)
 	mux.HandleFunc("POST /api/auth/node-token", authH.IssueNodeToken)
-	mux.HandleFunc("POST /api/auth/operation-token", authH.IssueOperationToken)
+	mux.HandleFunc("POST /api/auth/register", authH.Register)
+	mux.HandleFunc("POST /api/auth/login", authH.Login)
+	mux.HandleFunc("POST /api/auth/logout", authH.Logout)
+	mux.HandleFunc("GET /api/auth/me", authH.Me)
+	// v2 user credential: replaces the retired /api/auth/operation-token route.
+	mux.HandleFunc("POST /api/auth/user-token", authH.IssueUserToken)
 
 	// Node endpoints
 	mux.HandleFunc("GET /api/nodes", nodeH.List)
@@ -110,7 +115,7 @@ func NewAPI(authProvider types.AuthProvider, store *Store) http.Handler {
 	fileServer := http.FileServer(http.FS(staticSub))
 	mux.Handle("/", spaHandler(fileServer, staticSub))
 
-	return corsMiddleware(mux)
+	return corsMiddleware(users.protect(mux))
 }
 
 // spaHandler serves static files; falls back to index.html for SPA routes.

@@ -146,9 +146,16 @@ single-reader constraint.
 ```go
 provider := auth.DefaultAuth(ed25519PrivateKey)
 
-token, _ := provider.IssueNodeToken("node-1")
-info, _ := provider.ValidateNodeToken(token)
-opToken, _ := provider.IssueOperationToken("node-1", "sess-1", []string{"session"}, nil)
+// Node credential (connection identity).
+nodeToken, _ := provider.IssueNodeToken("node-1")
+info, _ := provider.ValidateNodeToken(nodeToken)
+
+// User credential (business-operation identity). The transport calls these
+// automatically when a session is opened/resumed; consumers only supply the
+// target node and the scopes they need.
+token, identity, _ := provider.IssueUserToken("node-1", types.Scope{types.SessionAccess})
+fresh, _ := provider.RefreshUserToken(token)
+who, _ := provider.ValidateUserToken(fresh)
 ```
 
 | Method | Description |
@@ -156,12 +163,20 @@ opToken, _ := provider.IssueOperationToken("node-1", "sess-1", []string{"session
 | `IssueNodeToken(nodeID)` | Create a node token (7-day expiry) |
 | `ValidateNodeToken(token)` | Verify and decode a node token |
 | `RefreshNodeToken(oldToken)` | Validate old token and issue a new one |
-| `IssueOperationToken(nodeID, sessionID, ops, scope)` | Create a session-scoped token (30-min expiry) |
-| `SigningPublicKey()` | Return `(keyID, publicKey)` for token verification |
+| `IssueUserToken(nodeID, scopes)` | Issue a user credential; returns token + identity |
+| `RefreshUserToken(oldToken)` | Re-sign the old credential (inherits identity/scopes) |
+| `ValidateUserToken(token)` | Verify a user credential and return its identity |
+| `IssueOperationToken(nodeID, sessionID, ops, scope)` | Deprecated: v1 path only |
+| `SigningPublicKey()` | Return `(keyID, publicKey)` |
 | `WellKnownInfo()` | Return transport discovery metadata |
+
+A user credential is carried in the first-frame `Payload.identity` and is
+opaque to the Tai node: it only stores and forwards the string. See
+`tai/docs/v2/runtime/identity.md` for the wire contract.
 
 ## Key Types
 
+- `SessionOpenRequest` — `SessionID`, `Scopes`, `Anonymous`, `Request`, `OnEvent`
 - `SessionRequest` — Runtime, isolation, LLM config, MCP servers, environment
 - `UserMessage` — Content blocks, message text, attachments
 - `Event` — ACP update (`Type` + `Data` as raw JSON)

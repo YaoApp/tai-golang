@@ -22,11 +22,3 @@ type Provider struct {
 	Model          string         `json:"model"` // e.g. "deepseek-chat"
 	SamplingParams map[string]any `json:"sampling_params,omitempty"`
 }
-
-// UserIdentity carries authenticated user context.
-// Placeholder — will be populated when RBAC is implemented.
-type UserIdentity struct {
-	UserID string `json:"userId"`
-	Name   string `json:"name,omitempty"`
-	Email  string `json:"email,omitempty"`
-}

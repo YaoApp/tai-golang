@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -31,11 +33,14 @@ func (h *SessionHandler) List(w http.ResponseWriter, _ *http.Request) {
 	sessions := h.store.Sessions()
 	out := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {
+		userID, teamID := s.GetUser()
 		entry := map[string]any{
 			"id":        s.ID,
 			"nodeId":    s.NodeID,
 			"createdAt": s.CreatedAt,
 			"status":    s.GetStatus(),
+			"userId":    userID,
+			"teamId":    teamID,
 		}
 		if s.WorkspaceID != "" {
 			entry["workspaceId"] = s.WorkspaceID
@@ -123,15 +128,23 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := auth.GenerateID("sess")
 
-	opToken, err := h.auth.IssueOperationToken(req.NodeID, sessionID, []string{"session"}, nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "issue operation token: "+err.Error())
-		return
-	}
-
 	rn := node.Get(req.NodeID)
 	if rn == nil {
 		writeError(w, http.StatusNotFound, "node not found")
+		return
+	}
+
+	// Caller identity comes from the login context. The SDK transport resolves
+	// the same context through AuthProvider.IssueUserTokenContext when it
+	// issues the credential, so the session owner and the token claims match.
+	if _, ok := demoUserFromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "login required")
+		return
+	}
+	scopes := demoSessionScopes()
+	userID, teamID, err := sessionOwner(r.Context(), h.auth, req.NodeID, scopes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "issue user token: "+err.Error())
 		return
 	}
 
@@ -148,9 +161,11 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Capture store reference for lifecycle callbacks.
 	store := h.store
 
-	session, err := rn.OpenSession(context.Background(), &types.SessionOpenRequest{
+	// The login identity lives in the request context, but the session must
+	// outlive the HTTP request: detach cancellation while keeping the values.
+	session, err := rn.OpenSession(context.WithoutCancel(r.Context()), &types.SessionOpenRequest{
 		SessionID: sessionID,
-		Token:     opToken,
+		Scopes:    scopes,
 		Request:   req.Request,
 		OnEvent: func(sid string, event types.SessionEventKind) {
 			si, ok := store.GetSession(sid)
@@ -198,6 +213,7 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		WorkspaceName: wsName,
 		Session:       session,
 	}
+	info.SetUser(userID, teamID)
 	h.store.AddSession(info)
 
 	// Monitor session lifecycle in the background.
@@ -209,6 +225,8 @@ func (h *SessionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"status":        string(StatusRunning),
 		"workspaceId":   wsID,
 		"workspaceName": wsName,
+		"userId":        userID,
+		"teamId":        teamID,
 	})
 }
 
@@ -296,18 +314,26 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := h.store
-	opToken, err := h.auth.IssueOperationToken(info.NodeID, id, []string{"session"}, nil)
+
+	// Re-issue the credential from the current login context: a resume may hand
+	// the session to a different account, so the displayed owner is refreshed.
+	if _, ok := demoUserFromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "login required")
+		return
+	}
+	scopes := demoSessionScopes()
+	userID, teamID, err := sessionOwner(r.Context(), h.auth, info.NodeID, scopes)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "issue operation token: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "issue user token: "+err.Error())
 		return
 	}
 
 	// Intermediate state: the frontend shows a spinner and blocks double clicks.
 	info.SetStatus(StatusResuming, store)
 
-	newSession, err := rn.ResumeSession(context.Background(), &types.ResumeSessionRequest{
+	newSession, err := rn.ResumeSession(context.WithoutCancel(r.Context()), &types.ResumeSessionRequest{
 		SessionID:   id,
-		Token:       opToken,
+		Scopes:      scopes,
 		LastCtrlSeq: 0,
 		LastDataSeq: 0,
 		OnEvent: func(sid string, event types.SessionEventKind) {
@@ -354,12 +380,64 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info.SetStatus(StatusRunning, store)
+	info.SetUser(userID, teamID)
 	go h.watchSession(info, newSession)
 
 	writeJSON(w, map[string]any{
 		"id":     id,
 		"status": string(StatusRunning),
+		"userId": userID,
+		"teamId": teamID,
 	})
+}
+
+// realtimeProviderKeyEnv maps realtime provider ids to the environment
+// variable that carries their API key. Unknown providers are left to the
+// runtime (which reports its own error).
+func realtimeProviderKeyEnv(providerID string) string {
+	switch providerID {
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	case "qwen":
+		return "QWEN_API_KEY"
+	default:
+		return ""
+	}
+}
+
+// injectRealtimeAPIKeys fills missing provider keys from the server
+// environment. It returns an actionable error when a known provider needs a
+// key that is not configured anywhere, so the console does not show a bare
+// "connect: EOF" from the provider handshake.
+func injectRealtimeAPIKeys(req *types.RealtimeRequest) error {
+	primary := req.Providers.Primary
+	if primary.APIKey == "" {
+		if env := realtimeProviderKeyEnv(primary.ProviderID); env != "" {
+			if key := os.Getenv(env); key != "" {
+				req.Providers.Primary.APIKey = key
+			} else {
+				return fmt.Errorf("realtime provider %q requires %s (export it before starting the demo, or paste the key in the Realtime panel)", primary.ProviderID, env)
+			}
+		}
+	}
+	for role, prov := range req.Providers.Roles {
+		if prov.APIKey != "" {
+			continue
+		}
+		env := realtimeProviderKeyEnv(prov.ProviderID)
+		if env == "" {
+			continue
+		}
+		if key := os.Getenv(env); key != "" {
+			prov.APIKey = key
+			req.Providers.Roles[role] = prov
+			continue
+		}
+		return fmt.Errorf("realtime provider %q (role %q) requires %s (export it before starting the demo, or paste the key in the Realtime panel)", prov.ProviderID, role, env)
+	}
+	return nil
 }
 
 // WSCtrl relays the ctrl stream between browser and session.
@@ -589,37 +667,14 @@ func (h *SessionHandler) WSCtrl(w http.ResponseWriter, r *http.Request) {
 				json.Unmarshal(cmd.Data, &req)
 
 				// Inject API keys from environment (frontend never sends keys).
-				if req.Providers.Primary.APIKey == "" {
-					switch req.Providers.Primary.ProviderID {
-					case "openai":
-						if k := os.Getenv("OPENAI_API_KEY"); k != "" {
-							req.Providers.Primary.APIKey = k
-						}
-					case "deepseek":
-						if k := os.Getenv("DEEPSEEK_API_KEY"); k != "" {
-							req.Providers.Primary.APIKey = k
-						}
-					case "qwen":
-						if k := os.Getenv("QWEN_API_KEY"); k != "" {
-							req.Providers.Primary.APIKey = k
-						}
-					}
-				}
-				for role, prov := range req.Providers.Roles {
-					if prov.APIKey == "" {
-						switch prov.ProviderID {
-						case "openai":
-							if k := os.Getenv("OPENAI_API_KEY"); k != "" {
-								prov.APIKey = k
-								req.Providers.Roles[role] = prov
-							}
-						case "deepseek":
-							if k := os.Getenv("DEEPSEEK_API_KEY"); k != "" {
-								prov.APIKey = k
-								req.Providers.Roles[role] = prov
-							}
-						}
-					}
+				// Fail fast with an actionable message instead of letting the
+				// provider dial unauthenticated and surface a bare EOF.
+				if err := injectRealtimeAPIKeys(&req); err != nil {
+					sendJSON(map[string]any{
+						"kind": "realtime.error",
+						"data": map[string]string{"message": err.Error()},
+					})
+					continue
 				}
 
 				go func() {
@@ -1003,4 +1058,30 @@ func (h *SessionHandler) WSData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// demoSessionScopes returns the scopes the demo app grants to a session:
+// enough to drive the session, touch its workspace, and call remote tools.
+func demoSessionScopes() types.Scope {
+	return types.Scope{
+		types.SessionAccess,
+		types.WorkspaceRead,
+		types.WorkspaceWrite,
+		types.WorkspaceDelete,
+		types.RemoteToolCall,
+	}
+}
+
+// sessionOwner resolves the account behind a session for display; the
+// credential that reaches the node is issued separately by the SDK transport
+// from the same login context.
+func sessionOwner(ctx context.Context, provider types.AuthProvider, nodeID string, scopes types.Scope) (string, string, error) {
+	_, identity, err := issueUserTokenContext(ctx, provider, nodeID, scopes)
+	if err != nil {
+		return "", "", err
+	}
+	if identity == nil || identity.UserID == "" {
+		return "", "", errors.New("identity not resolved")
+	}
+	return identity.UserID, identity.TeamID, nil
 }

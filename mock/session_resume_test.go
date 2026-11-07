@@ -119,7 +119,6 @@ func TestSessionResumeProtocol(t *testing.T) {
 	// Step 5: resume — open new ctrl with "resume" kind.
 	resumeData, _ := proto.Marshal(&pb.SessionResume{
 		SessionId:   "s-resume-1",
-		Token:       "",
 		LastCtrlSeq: 0,
 		LastDataSeq: 2, // SDK received up to seq 2
 	})
@@ -213,7 +212,6 @@ func TestSessionResumeUnknownSessionProtocol(t *testing.T) {
 
 	resumeData, _ := proto.Marshal(&pb.SessionResume{
 		SessionId: "nonexistent",
-		Token:     "",
 	})
 	stream, err := ts.OpenLightStream(ctx, "resume-unknown-node", &pb.Payload{
 		Namespace: types.NamespaceSession,

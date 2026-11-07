@@ -55,6 +55,14 @@ func (a *testAuth) IssueOperationToken(nodeID, sessionID string, ops []string, s
 func (a *testAuth) SigningPublicKey() (string, []byte)      { return "key-1", []byte("pubkey") }
 func (a *testAuth) WellKnownInfo() *types.WellKnownResponse { return &types.WellKnownResponse{} }
 
+func (a *testAuth) IssueUserToken(nodeID string, scopes types.Scope) (string, *types.UserIdentity, error) {
+	return "user-tok", &types.UserIdentity{UserID: "u1", TeamID: "t1", Scope: scopes}, nil
+}
+func (a *testAuth) RefreshUserToken(oldToken string) (string, error) { return "user-tok-2", nil }
+func (a *testAuth) ValidateUserToken(token string) (*types.UserIdentity, error) {
+	return &types.UserIdentity{UserID: "u1", TeamID: "t1"}, nil
+}
+
 func writeCtrlFrame(t *testing.T, w io.Writer, codec *FrameCodec, ns, kind string, data []byte) {
 	t.Helper()
 	if err := codec.WriteFrame(w, &pb.Payload{Namespace: ns, Kind: kind, Data: data}); err != nil {

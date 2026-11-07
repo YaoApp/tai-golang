@@ -18,6 +18,30 @@ proto:
 test:
 	go test ./...
 
+# Unit tests with coverage profile
+.PHONY: cover
+cover:
+	go test ./... -timeout 600s -covermode=count -coverprofile=coverage.out
+	@go tool cover -func=coverage.out | tail -1
+
+# Per-package coverage gate (thresholds in scripts/coverage-thresholds.txt)
+.PHONY: cover-gate
+cover-gate: cover
+	./scripts/coverage-gate.sh coverage.out --global 71
+
+# Demo app module (separate go.mod)
+.PHONY: cover-app
+cover-app:
+	cd app && go test ./... -timeout 600s -covermode=count -coverprofile=coverage.out
+
+.PHONY: cover-all
+cover-all: cover cover-app
+
+# Race detector for the packages touched by the identity work
+.PHONY: cover-race
+cover-race:
+	go test -race -timeout 900s ./...
+
 # Format all Go source files
 fmt:
 	gofmt -w .

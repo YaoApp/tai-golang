@@ -19,11 +19,8 @@ func (s *Session) openRenderStream(ctx context.Context, renderOut chan<- *types.
 		return err
 	}
 
-	stream, err := s.openStreamFn(ctx, s.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "render",
-		Data:      dataBytes,
-	})
+	stream, err := s.openStreamFn(ctx, s.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "render", dataBytes, s.identity))
 	if err != nil {
 		return err
 	}

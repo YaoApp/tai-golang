@@ -22,7 +22,8 @@ message SessionMessage {
 
 // ---------------------------------------------------------------------------
 // Session lifecycle. The server opens streams on a Light connection; the
-// first frame is a Payload { namespace: "session", kind, data }. These
+// first frame is a Payload { namespace: "session", kind, data, identity }.
+// The caller identity travels in Payload.identity (first frame only). These
 // handshake messages do not consume `seq`.
 // ---------------------------------------------------------------------------
 
@@ -33,12 +34,11 @@ message SessionData {
 }
 
 // SessionOpen is the data of the first frame ("open") of the Session Control
-// stream.
+// stream. The caller identity travels in the enclosing Payload.identity.
 message SessionOpen {
   string         session_id = 1;
   string         node_id    = 2;
-  string         token      = 3; // OperationToken (JWT)
-  SessionRequest request    = 4;
+  SessionRequest request    = 3;
 }
 
 // SessionClose is sent by either side to close a session.
@@ -50,9 +50,8 @@ message SessionClose {
 // SessionResume is sent by the server after reconnection to resume a session.
 message SessionResume {
   string session_id    = 1;
-  string token         = 2; // Fresh OperationToken
-  uint64 last_ctrl_seq = 3; // Last received Control stream seq
-  uint64 last_data_seq = 4; // Last received Data stream seq
+  uint64 last_ctrl_seq = 2; // Last received Control stream seq
+  uint64 last_data_seq = 3; // Last received Data stream seq
 }
 
 // SessionOpened is Tai's acknowledgment that a session is ready.

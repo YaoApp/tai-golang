@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -87,6 +88,8 @@ func (cs *controlStream) dispatch(msg *pb.Payload) {
 		cs.handleRegister(msg.Data)
 	case "ping":
 		cs.handlePing(msg.Data)
+	case types.KindRemoteToolCall:
+		cs.handleRemoteToolCall(msg)
 	default:
 		log.Printf("tai-sdk: unknown control kind=%q node=%s", msg.Kind, cs.nodeID)
 	}
@@ -134,6 +137,64 @@ func (cs *controlStream) handlePing(data []byte) {
 	}
 
 	cs.WriteControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "pong", Data: pongData})
+}
+
+// handleRemoteToolCall handles a Tai → Yao remote tool invocation carried on
+// the Control stream (stub phase: echo handler with credential validation).
+//
+// The daemon has already resolved the caller's credential from its custody
+// table and attached it as Payload.identity.user_token. This side verifies the
+// credential (it issued it) and stubs the tool execution by echoing the input
+// plus the verified identity, so end-to-end identity propagation is testable
+// before the real remote-tool registry lands.
+func (cs *controlStream) handleRemoteToolCall(msg *pb.Payload) {
+	req := &pb.ServerToolRequest{}
+	if err := proto.Unmarshal(msg.Data, req); err != nil {
+		log.Printf("tai-sdk: remote_tool call unmarshal: %v", err)
+		return
+	}
+	resp := &pb.ServerToolResponse{RequestId: req.RequestId}
+
+	token := msg.GetIdentity().GetUserToken()
+	if token == "" {
+		resp.Error = &pb.ToolError{Code: "unauthorized", Message: "missing user credential"}
+	} else if identity, err := cs.auth.ValidateUserToken(token); err != nil {
+		resp.Error = &pb.ToolError{Code: "unauthorized", Message: "invalid user credential"}
+	} else {
+		var input any
+		if len(req.Input) > 0 {
+			if err := json.Unmarshal(req.Input, &input); err != nil {
+				resp.Error = &pb.ToolError{Code: "invalid_input", Message: err.Error()}
+			}
+		}
+		if resp.Error == nil {
+			out, err := json.Marshal(map[string]any{
+				"tool":    req.Tool,
+				"echo":    input,
+				"user_id": identity.UserID,
+				"team_id": identity.TeamID,
+				"scope":   identity.Scope,
+			})
+			if err != nil {
+				resp.Error = &pb.ToolError{Code: "handler_error", Message: err.Error()}
+			} else {
+				resp.Output = out
+			}
+		}
+	}
+
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		log.Printf("tai-sdk: remote_tool result marshal: %v", err)
+		return
+	}
+	if err := cs.WriteControl(&pb.Payload{
+		Namespace: types.NamespaceControl,
+		Kind:      types.KindRemoteToolResult,
+		Data:      data,
+	}); err != nil {
+		log.Printf("tai-sdk: remote_tool result send node=%s: %v", cs.nodeID, err)
+	}
 }
 
 // WriteControl implements types.ControlWriter.

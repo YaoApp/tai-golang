@@ -33,6 +33,7 @@ type ServerToolRequest struct {
 	Tool          string                 `protobuf:"bytes,1,opt,name=tool,proto3" json:"tool,omitempty"`                             // Tool name (e.g. "search", "db.query")
 	Input         []byte                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`                           // JSON input payload
 	TimeoutMs     uint32                 `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"` // Timeout in milliseconds, 0 = default (30s)
+	RequestId     string                 `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`  // Correlation id (Control round-trip)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -88,11 +89,19 @@ func (x *ServerToolRequest) GetTimeoutMs() uint32 {
 	return 0
 }
 
+func (x *ServerToolRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 // ServerToolResponse is the result of a `tai call` invocation.
 type ServerToolResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Output        []byte                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"` // JSON output payload
-	Error         *ToolError             `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`   // Non-nil on failure
+	Output        []byte                 `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`                        // JSON output payload
+	Error         *ToolError             `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                          // Non-nil on failure
+	RequestId     string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // Correlation id echoed from the request
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -139,6 +148,13 @@ func (x *ServerToolResponse) GetError() *ToolError {
 		return x.Error
 	}
 	return nil
+}
+
+func (x *ServerToolResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 // ToolError describes a tool execution failure.
@@ -198,15 +214,19 @@ var File_servertool_proto protoreflect.FileDescriptor
 
 const file_servertool_proto_rawDesc = "" +
 	"\n" +
-	"\x10servertool.proto\x12\x03tai\"\\\n" +
+	"\x10servertool.proto\x12\x03tai\"{\n" +
 	"\x11ServerToolRequest\x12\x12\n" +
 	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x14\n" +
 	"\x05input\x18\x02 \x01(\fR\x05input\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"R\n" +
+	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x04 \x01(\tR\trequestId\"q\n" +
 	"\x12ServerToolResponse\x12\x16\n" +
 	"\x06output\x18\x01 \x01(\fR\x06output\x12$\n" +
-	"\x05error\x18\x02 \x01(\v2\x0e.tai.ToolErrorR\x05error\"9\n" +
+	"\x05error\x18\x02 \x01(\v2\x0e.tai.ToolErrorR\x05error\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"9\n" +
 	"\tToolError\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessageB!Z\x1fgithub.com/yaoapp/tai-golang/pbb\x06proto3"

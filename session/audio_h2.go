@@ -20,11 +20,8 @@ func (s *Session) openAudioStreamH2(ctx context.Context, channelID uint32, audio
 		return err
 	}
 
-	stream, err := s.openStreamFn(ctx, s.nodeID, &pb.Payload{
-		Namespace: types.NamespaceSession,
-		Kind:      "audio",
-		Data:      dataBytes,
-	})
+	stream, err := s.openStreamFn(ctx, s.nodeID,
+		transport.FirstFrame(types.NamespaceSession, "audio", dataBytes, s.identity))
 	if err != nil {
 		return err
 	}

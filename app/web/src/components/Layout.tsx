@@ -1,4 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import type { DemoUser } from '../api';
+import Button from './ui/Button';
 
 const navGroups = [
   {
@@ -19,7 +21,12 @@ const navGroups = [
   },
 ];
 
-export default function Layout() {
+interface Props {
+  user: DemoUser;
+  onLogout: () => void;
+}
+
+export default function Layout({ user, onLogout }: Props) {
   const { pathname } = useLocation();
 
   return (
@@ -54,7 +61,17 @@ export default function Layout() {
           </div>
         ))}
 
-        <div className="sidebar__footer mono">transport v2</div>
+        <div className="sidebar__account">
+          <div className="sidebar__account-email mono" title={user.email}>
+            {user.email}
+          </div>
+          <div className="sidebar__account-meta">
+            <span>transport v2</span>
+            <Button size="sm" variant="ghost" onClick={onLogout}>
+              Sign out
+            </Button>
+          </div>
+        </div>
       </nav>
 
       <main className="app__main">

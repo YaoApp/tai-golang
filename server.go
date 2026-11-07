@@ -224,6 +224,7 @@ func newServer(cfg *ServerConfig) (*server, error) {
 
 	// Two-step assembly: registry, then transport server + global
 	reg := node.NewRegistry(pool, workspace.DefaultPolicy())
+	reg.SetAuth(c.Auth)
 	tr := transport.NewServer(c.Auth, reg, codec)
 	transport.SetDefault(tr)
 

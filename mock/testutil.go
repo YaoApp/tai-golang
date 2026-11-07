@@ -73,6 +73,7 @@ func newTestServer(t *testing.T, unauthTimeout time.Duration) *TestServer {
 
 	pool, _ := DefaultPoolConfig()
 	reg := node.NewRegistry(pool, workspace.DefaultPolicy())
+	reg.SetAuth(a)
 
 	httpSrv := transport.NewHTTPServer(a)
 

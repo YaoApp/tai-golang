@@ -75,9 +75,9 @@ server, err := tai.NewServer(&tai.ServerConfig{
 
 go server.Start(ctx)
 
-// After a Tai node connects:
+// After a Tai node connects. The transport issues the user credential from
+// the scopes you declare (no operation token needed).
 n := node.Get("node-1")
-opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
 
 // The models the session may use. Only "model" is required; the provider is
 // inferred from base_url when provider_id is empty.
@@ -88,7 +88,7 @@ llm := json.RawMessage(`{
 
 session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
-    Token:     opToken,
+    Scopes:    types.Scope{types.SessionAccess},
     Request: &types.SessionRequest{
         Runtime: "tai",
         LLM:     llm,

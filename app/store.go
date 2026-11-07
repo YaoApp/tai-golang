@@ -30,11 +30,42 @@ type SessionInfo struct {
 	WorkspaceID   string        `json:"workspaceId,omitempty"`
 	WorkspaceName string        `json:"workspaceName,omitempty"`
 	Session       types.Session `json:"-"`
-	mu            sync.Mutex    // protects Status, Session, and deleted
+	// userID / teamID identify the user this session belongs to. They are
+	// display-only: the credential itself lives in the SDK transport's
+	// credential store, and the demo never authorizes on these fields.
+	userID string
+	teamID string
+	mu     sync.Mutex // protects Status, Session, userID, teamID, and deleted
 	// deleted marks the record as removed from the store. It guards the
 	// Resume path: replaceSession refuses once the record is gone, so a resume
 	// that finishes after Delete cannot install an ownerless instance.
 	deleted bool
+}
+
+// GetUser returns the identity of the user this session belongs to.
+//
+// Thread-safe: a Resume re-issues the credential and may update the identity
+// while List renders the row.
+//
+// @returns userID and teamID; both are empty when the session has no user
+func (si *SessionInfo) GetUser() (userID, teamID string) {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	return si.userID, si.teamID
+}
+
+// SetUser records the identity that owns the session.
+//
+// Called on Create and again after a Resume, which re-issues the credential
+// from the then-current business context (the user may have changed).
+//
+// @param userID the calling user
+// @param teamID the user's team
+func (si *SessionInfo) SetUser(userID, teamID string) {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	si.userID = userID
+	si.teamID = teamID
 }
 
 // GetStatus returns the current session status (thread-safe).

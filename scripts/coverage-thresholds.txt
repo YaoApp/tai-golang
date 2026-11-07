@@ -1,0 +1,10 @@
+# 本轮触及包（identity 实施）的最低行覆盖率。
+# 格式: <包路径> <最低覆盖率>；包路径相对模块根。生成代码 pb/ 由 gate 默认排除。
+(root) 88
+types 95
+auth 95
+node 90
+transport 90
+session 90
+mock 90
+workspace 73

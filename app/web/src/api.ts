@@ -2,6 +2,7 @@ const BASE = '';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
@@ -10,6 +11,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(body.error || res.statusText);
   }
   return res.json();
+}
+
+/** Demo account returned by the login/registration endpoints. */
+export interface DemoUser {
+  email: string;
+  name?: string;
+  createdAt: string;
 }
 
 export interface AuthInfo {
@@ -31,6 +39,24 @@ export interface NodeInfo {
   registeredAt: string;
 }
 
+/**
+ * Verified user identity behind a user credential.
+ *
+ * Mirrors tai-golang/types.UserIdentity. `scope` lists the actions the
+ * credential may start; it is not an object-level authorization grant.
+ */
+export interface UserIdentity {
+  user_id: string;
+  team_id: string;
+  scope: string[];
+}
+
+/** Result of POST /api/auth/user-token. */
+export interface UserTokenResult {
+  token: string;
+  identity: UserIdentity;
+}
+
 export interface SessionInfo {
   id: string;
   nodeId: string;
@@ -38,6 +64,10 @@ export interface SessionInfo {
   status: string;
   workspaceId?: string;
   workspaceName?: string;
+  /** User the session belongs to (empty when the session has no user). */
+  userId?: string;
+  /** Team the session belongs to. */
+  teamId?: string;
 }
 
 export interface DocEntry {
@@ -99,15 +129,35 @@ export interface FileStat {
 export const api = {
   auth: {
     info: () => request<AuthInfo>('/api/auth/info'),
+    register: (email: string, password: string, name?: string) =>
+      request<{ user: DemoUser }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      }),
+    login: (email: string, password: string) =>
+      request<{ user: DemoUser }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    logout: () =>
+      request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+    me: () => request<{ user: DemoUser }>('/api/auth/me'),
     issueNodeToken: (nodeId: string) =>
       request<{ token: string }>('/api/auth/node-token', {
         method: 'POST',
         body: JSON.stringify({ nodeId }),
       }),
-    issueOperationToken: (nodeId: string, sessionId: string) =>
-      request<{ token: string }>('/api/auth/operation-token', {
+    /**
+     * Issue a v2 user credential for one business operation.
+     *
+     * The caller declares the target node and the action scopes it needs; the
+     * server resolves the user from its business context and returns both the
+     * token and the verified identity. The old operation-token endpoint is gone.
+     */
+    issueUserToken: (nodeId: string, scopes: string[]) =>
+      request<UserTokenResult>('/api/auth/user-token', {
         method: 'POST',
-        body: JSON.stringify({ nodeId, sessionId }),
+        body: JSON.stringify({ nodeId, scopes }),
       }),
   },
   nodes: {
@@ -123,7 +173,10 @@ export const api = {
     delete: (id: string) =>
       request<{ status: string }>(`/api/sessions/${id}`, { method: 'DELETE' }),
     resume: (id: string) =>
-      request<{ id: string; status: string }>(`/api/sessions/${id}/resume`, { method: 'POST' }),
+      request<{ id: string; status: string; userId?: string; teamId?: string }>(
+        `/api/sessions/${id}/resume`,
+        { method: 'POST' },
+      ),
   },
   docs: {
     list: () => request<DocEntry[]>('/api/docs'),

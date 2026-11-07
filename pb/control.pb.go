@@ -33,6 +33,76 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Identity is the caller identity carried by the first frame of every business
+// stream. Tai only transports and stores it; user_token is opaque.
+type Identity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`           // Calling user
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`           // Owning team
+	UserToken     string                 `protobuf:"bytes,3,opt,name=user_token,json=userToken,proto3" json:"user_token,omitempty"`  // Opaque user credential (optional per namespace)
+	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // Unix seconds; local GC hint only, never trusted
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Identity) Reset() {
+	*x = Identity{}
+	mi := &file_control_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Identity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Identity) ProtoMessage() {}
+
+func (x *Identity) ProtoReflect() protoreflect.Message {
+	mi := &file_control_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Identity.ProtoReflect.Descriptor instead.
+func (*Identity) Descriptor() ([]byte, []int) {
+	return file_control_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Identity) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Identity) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *Identity) GetUserToken() string {
+	if x != nil {
+		return x.UserToken
+	}
+	return ""
+}
+
+func (x *Identity) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
 // Payload is the envelope for every command: messages on the Control stream,
 // and the first frame of every Light stream and Heavy transfer. The transport
 // layer routes by `namespace + kind` and does not interpret `data`.
@@ -41,13 +111,14 @@ type Payload struct {
 	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"` // e.g. "control", "session", "workspace"
 	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`           // Command or event name (e.g. "register", "ping", "open")
 	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`           // Kind-specific protobuf or JSON payload
+	Identity      *Identity              `protobuf:"bytes,4,opt,name=identity,proto3" json:"identity,omitempty"`   // Optional; set on the first frame of a business stream only
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Payload) Reset() {
 	*x = Payload{}
-	mi := &file_control_proto_msgTypes[0]
+	mi := &file_control_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -59,7 +130,7 @@ func (x *Payload) String() string {
 func (*Payload) ProtoMessage() {}
 
 func (x *Payload) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[0]
+	mi := &file_control_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -72,7 +143,7 @@ func (x *Payload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Payload.ProtoReflect.Descriptor instead.
 func (*Payload) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{0}
+	return file_control_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Payload) GetNamespace() string {
@@ -96,6 +167,13 @@ func (x *Payload) GetData() []byte {
 	return nil
 }
 
+func (x *Payload) GetIdentity() *Identity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
 // Connect is the first message of a TCP connection carrying the Tai frame
 // protocol (ALPN "tai/2" or plaintext): Light over reversed HTTP/2, or Heavy.
 // Control and H3 Light carry the same fields in HTTP headers instead.
@@ -110,7 +188,7 @@ type Connect struct {
 
 func (x *Connect) Reset() {
 	*x = Connect{}
-	mi := &file_control_proto_msgTypes[1]
+	mi := &file_control_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -122,7 +200,7 @@ func (x *Connect) String() string {
 func (*Connect) ProtoMessage() {}
 
 func (x *Connect) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[1]
+	mi := &file_control_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -135,7 +213,7 @@ func (x *Connect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Connect.ProtoReflect.Descriptor instead.
 func (*Connect) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{1}
+	return file_control_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Connect) GetNodeId() string {
@@ -168,7 +246,7 @@ type ConnectAck struct {
 
 func (x *ConnectAck) Reset() {
 	*x = ConnectAck{}
-	mi := &file_control_proto_msgTypes[2]
+	mi := &file_control_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -180,7 +258,7 @@ func (x *ConnectAck) String() string {
 func (*ConnectAck) ProtoMessage() {}
 
 func (x *ConnectAck) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[2]
+	mi := &file_control_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -193,7 +271,7 @@ func (x *ConnectAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectAck.ProtoReflect.Descriptor instead.
 func (*ConnectAck) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{2}
+	return file_control_proto_rawDescGZIP(), []int{3}
 }
 
 // Register is sent by Tai immediately after the Control stream is established.
@@ -210,7 +288,7 @@ type Register struct {
 
 func (x *Register) Reset() {
 	*x = Register{}
-	mi := &file_control_proto_msgTypes[3]
+	mi := &file_control_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +300,7 @@ func (x *Register) String() string {
 func (*Register) ProtoMessage() {}
 
 func (x *Register) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[3]
+	mi := &file_control_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +313,7 @@ func (x *Register) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Register.ProtoReflect.Descriptor instead.
 func (*Register) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{3}
+	return file_control_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Register) GetNodeId() string {
@@ -285,7 +363,7 @@ type ContainerRuntime struct {
 
 func (x *ContainerRuntime) Reset() {
 	*x = ContainerRuntime{}
-	mi := &file_control_proto_msgTypes[4]
+	mi := &file_control_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +375,7 @@ func (x *ContainerRuntime) String() string {
 func (*ContainerRuntime) ProtoMessage() {}
 
 func (x *ContainerRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[4]
+	mi := &file_control_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +388,7 @@ func (x *ContainerRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerRuntime.ProtoReflect.Descriptor instead.
 func (*ContainerRuntime) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{4}
+	return file_control_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ContainerRuntime) GetName() string {
@@ -338,7 +416,7 @@ func (x *ContainerRuntime) GetSocket() string {
 type RegisterAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaiId         string                 `protobuf:"bytes,1,opt,name=tai_id,json=taiId,proto3" json:"tai_id,omitempty"`                // Server-assigned Tai identifier
-	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`    // OperationToken verification public key (PEM)
+	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`    // Legacy OperationToken verification key (v1; v2 does not verify user credentials)
 	KeyId         string                 `protobuf:"bytes,3,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`                // Public key identifier for rotation
 	PoolConfig    *PoolConfig            `protobuf:"bytes,4,opt,name=pool_config,json=poolConfig,proto3" json:"pool_config,omitempty"` // Initial pool parameters
 	unknownFields protoimpl.UnknownFields
@@ -347,7 +425,7 @@ type RegisterAck struct {
 
 func (x *RegisterAck) Reset() {
 	*x = RegisterAck{}
-	mi := &file_control_proto_msgTypes[5]
+	mi := &file_control_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +437,7 @@ func (x *RegisterAck) String() string {
 func (*RegisterAck) ProtoMessage() {}
 
 func (x *RegisterAck) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[5]
+	mi := &file_control_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +450,7 @@ func (x *RegisterAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterAck.ProtoReflect.Descriptor instead.
 func (*RegisterAck) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{5}
+	return file_control_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RegisterAck) GetTaiId() string {
@@ -415,7 +493,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_control_proto_msgTypes[6]
+	mi := &file_control_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +505,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[6]
+	mi := &file_control_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +518,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{6}
+	return file_control_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Ping) GetTimestamp() int64 {
@@ -475,7 +553,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_control_proto_msgTypes[7]
+	mi := &file_control_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +565,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[7]
+	mi := &file_control_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +578,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{7}
+	return file_control_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Pong) GetTimestamp() int64 {
@@ -528,7 +606,7 @@ type GoAway struct {
 
 func (x *GoAway) Reset() {
 	*x = GoAway{}
-	mi := &file_control_proto_msgTypes[8]
+	mi := &file_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -540,7 +618,7 @@ func (x *GoAway) String() string {
 func (*GoAway) ProtoMessage() {}
 
 func (x *GoAway) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[8]
+	mi := &file_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -553,7 +631,7 @@ func (x *GoAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GoAway.ProtoReflect.Descriptor instead.
 func (*GoAway) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{8}
+	return file_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GoAway) GetReason() string {
@@ -581,7 +659,7 @@ type PoolAdjust struct {
 
 func (x *PoolAdjust) Reset() {
 	*x = PoolAdjust{}
-	mi := &file_control_proto_msgTypes[9]
+	mi := &file_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +671,7 @@ func (x *PoolAdjust) String() string {
 func (*PoolAdjust) ProtoMessage() {}
 
 func (x *PoolAdjust) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[9]
+	mi := &file_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +684,7 @@ func (x *PoolAdjust) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PoolAdjust.ProtoReflect.Descriptor instead.
 func (*PoolAdjust) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{9}
+	return file_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PoolAdjust) GetPool() string {
@@ -637,7 +715,7 @@ type ToolFilePush struct {
 
 func (x *ToolFilePush) Reset() {
 	*x = ToolFilePush{}
-	mi := &file_control_proto_msgTypes[10]
+	mi := &file_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -649,7 +727,7 @@ func (x *ToolFilePush) String() string {
 func (*ToolFilePush) ProtoMessage() {}
 
 func (x *ToolFilePush) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[10]
+	mi := &file_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -662,7 +740,7 @@ func (x *ToolFilePush) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolFilePush.ProtoReflect.Descriptor instead.
 func (*ToolFilePush) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{10}
+	return file_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ToolFilePush) GetToolCallId() string {
@@ -710,7 +788,7 @@ type BlobPull struct {
 
 func (x *BlobPull) Reset() {
 	*x = BlobPull{}
-	mi := &file_control_proto_msgTypes[11]
+	mi := &file_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -722,7 +800,7 @@ func (x *BlobPull) String() string {
 func (*BlobPull) ProtoMessage() {}
 
 func (x *BlobPull) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[11]
+	mi := &file_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -735,7 +813,7 @@ func (x *BlobPull) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobPull.ProtoReflect.Descriptor instead.
 func (*BlobPull) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{11}
+	return file_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *BlobPull) GetBlobHash() string {
@@ -758,7 +836,7 @@ type TransferRejected struct {
 
 func (x *TransferRejected) Reset() {
 	*x = TransferRejected{}
-	mi := &file_control_proto_msgTypes[12]
+	mi := &file_control_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +848,7 @@ func (x *TransferRejected) String() string {
 func (*TransferRejected) ProtoMessage() {}
 
 func (x *TransferRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[12]
+	mi := &file_control_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +861,7 @@ func (x *TransferRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferRejected.ProtoReflect.Descriptor instead.
 func (*TransferRejected) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{12}
+	return file_control_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TransferRejected) GetKind() string {
@@ -826,7 +904,7 @@ type ToolFilePull struct {
 
 func (x *ToolFilePull) Reset() {
 	*x = ToolFilePull{}
-	mi := &file_control_proto_msgTypes[13]
+	mi := &file_control_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +916,7 @@ func (x *ToolFilePull) String() string {
 func (*ToolFilePull) ProtoMessage() {}
 
 func (x *ToolFilePull) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[13]
+	mi := &file_control_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +929,7 @@ func (x *ToolFilePull) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolFilePull.ProtoReflect.Descriptor instead.
 func (*ToolFilePull) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{13}
+	return file_control_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ToolFilePull) GetToolCallId() string {
@@ -879,7 +957,7 @@ type BlobPush struct {
 
 func (x *BlobPush) Reset() {
 	*x = BlobPush{}
-	mi := &file_control_proto_msgTypes[14]
+	mi := &file_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +969,7 @@ func (x *BlobPush) String() string {
 func (*BlobPush) ProtoMessage() {}
 
 func (x *BlobPush) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[14]
+	mi := &file_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +982,7 @@ func (x *BlobPush) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobPush.ProtoReflect.Descriptor instead.
 func (*BlobPush) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{14}
+	return file_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *BlobPush) GetBlobHash() string {
@@ -928,7 +1006,7 @@ type Hardware struct {
 
 func (x *Hardware) Reset() {
 	*x = Hardware{}
-	mi := &file_control_proto_msgTypes[15]
+	mi := &file_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -940,7 +1018,7 @@ func (x *Hardware) String() string {
 func (*Hardware) ProtoMessage() {}
 
 func (x *Hardware) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[15]
+	mi := &file_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -953,7 +1031,7 @@ func (x *Hardware) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hardware.ProtoReflect.Descriptor instead.
 func (*Hardware) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{15}
+	return file_control_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Hardware) GetOs() string {
@@ -1009,7 +1087,7 @@ type GPU struct {
 
 func (x *GPU) Reset() {
 	*x = GPU{}
-	mi := &file_control_proto_msgTypes[16]
+	mi := &file_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1099,7 @@ func (x *GPU) String() string {
 func (*GPU) ProtoMessage() {}
 
 func (x *GPU) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[16]
+	mi := &file_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1112,7 @@ func (x *GPU) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GPU.ProtoReflect.Descriptor instead.
 func (*GPU) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{16}
+	return file_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GPU) GetName() string {
@@ -1077,7 +1155,7 @@ type PoolConfig struct {
 
 func (x *PoolConfig) Reset() {
 	*x = PoolConfig{}
-	mi := &file_control_proto_msgTypes[17]
+	mi := &file_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1089,7 +1167,7 @@ func (x *PoolConfig) String() string {
 func (*PoolConfig) ProtoMessage() {}
 
 func (x *PoolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[17]
+	mi := &file_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1102,7 +1180,7 @@ func (x *PoolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PoolConfig.ProtoReflect.Descriptor instead.
 func (*PoolConfig) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{17}
+	return file_control_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PoolConfig) GetLightMinConns() uint32 {
@@ -1179,7 +1257,7 @@ type ServerToolSync struct {
 
 func (x *ServerToolSync) Reset() {
 	*x = ServerToolSync{}
-	mi := &file_control_proto_msgTypes[18]
+	mi := &file_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1191,7 +1269,7 @@ func (x *ServerToolSync) String() string {
 func (*ServerToolSync) ProtoMessage() {}
 
 func (x *ServerToolSync) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[18]
+	mi := &file_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1204,7 +1282,7 @@ func (x *ServerToolSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerToolSync.ProtoReflect.Descriptor instead.
 func (*ServerToolSync) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{18}
+	return file_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ServerToolSync) GetTools() []*ServerTool {
@@ -1226,7 +1304,7 @@ type ServerTool struct {
 
 func (x *ServerTool) Reset() {
 	*x = ServerTool{}
-	mi := &file_control_proto_msgTypes[19]
+	mi := &file_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1316,7 @@ func (x *ServerTool) String() string {
 func (*ServerTool) ProtoMessage() {}
 
 func (x *ServerTool) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[19]
+	mi := &file_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1329,7 @@ func (x *ServerTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerTool.ProtoReflect.Descriptor instead.
 func (*ServerTool) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{19}
+	return file_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ServerTool) GetName() string {
@@ -1286,7 +1364,7 @@ type ACLSync struct {
 
 func (x *ACLSync) Reset() {
 	*x = ACLSync{}
-	mi := &file_control_proto_msgTypes[20]
+	mi := &file_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1298,7 +1376,7 @@ func (x *ACLSync) String() string {
 func (*ACLSync) ProtoMessage() {}
 
 func (x *ACLSync) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[20]
+	mi := &file_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1311,7 +1389,7 @@ func (x *ACLSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ACLSync.ProtoReflect.Descriptor instead.
 func (*ACLSync) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{20}
+	return file_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ACLSync) GetComputerUsers() []string {
@@ -1339,7 +1417,7 @@ type KeyRotation struct {
 
 func (x *KeyRotation) Reset() {
 	*x = KeyRotation{}
-	mi := &file_control_proto_msgTypes[21]
+	mi := &file_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1429,7 @@ func (x *KeyRotation) String() string {
 func (*KeyRotation) ProtoMessage() {}
 
 func (x *KeyRotation) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[21]
+	mi := &file_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1442,7 @@ func (x *KeyRotation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyRotation.ProtoReflect.Descriptor instead.
 func (*KeyRotation) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{21}
+	return file_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *KeyRotation) GetKid() string {
@@ -1391,7 +1469,7 @@ type CertRotation struct {
 
 func (x *CertRotation) Reset() {
 	*x = CertRotation{}
-	mi := &file_control_proto_msgTypes[22]
+	mi := &file_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1403,7 +1481,7 @@ func (x *CertRotation) String() string {
 func (*CertRotation) ProtoMessage() {}
 
 func (x *CertRotation) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[22]
+	mi := &file_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1416,7 +1494,7 @@ func (x *CertRotation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertRotation.ProtoReflect.Descriptor instead.
 func (*CertRotation) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{22}
+	return file_control_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CertRotation) GetCaCertificate() []byte {
@@ -1426,18 +1504,19 @@ func (x *CertRotation) GetCaCertificate() []byte {
 	return nil
 }
 
-// TokenRefresh pushes a refreshed OperationToken for a long-running session.
+// TokenRefresh pushes a refreshed user credential for a long-running session.
 type TokenRefresh struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"` // New OperationToken (JWT)
+	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`                           // New user credential (opaque to Tai)
+	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // Unix seconds; local GC hint only, never trusted
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TokenRefresh) Reset() {
 	*x = TokenRefresh{}
-	mi := &file_control_proto_msgTypes[23]
+	mi := &file_control_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1449,7 +1528,7 @@ func (x *TokenRefresh) String() string {
 func (*TokenRefresh) ProtoMessage() {}
 
 func (x *TokenRefresh) ProtoReflect() protoreflect.Message {
-	mi := &file_control_proto_msgTypes[23]
+	mi := &file_control_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1541,7 @@ func (x *TokenRefresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRefresh.ProtoReflect.Descriptor instead.
 func (*TokenRefresh) Descriptor() ([]byte, []int) {
-	return file_control_proto_rawDescGZIP(), []int{23}
+	return file_control_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TokenRefresh) GetSessionId() string {
@@ -1479,15 +1558,30 @@ func (x *TokenRefresh) GetToken() string {
 	return ""
 }
 
+func (x *TokenRefresh) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
 var File_control_proto protoreflect.FileDescriptor
 
 const file_control_proto_rawDesc = "" +
 	"\n" +
-	"\rcontrol.proto\x12\x03tai\"O\n" +
+	"\rcontrol.proto\x12\x03tai\"z\n" +
+	"\bIdentity\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x1d\n" +
+	"\n" +
+	"user_token\x18\x03 \x01(\tR\tuserToken\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\x03R\texpiresAt\"z\n" +
 	"\aPayload\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data\"d\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\x12)\n" +
+	"\bidentity\x18\x04 \x01(\v2\r.tai.IdentityR\bidentity\"d\n" +
 	"\aConnect\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -1591,11 +1685,13 @@ const file_control_proto_rawDesc = "" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\"5\n" +
 	"\fCertRotation\x12%\n" +
-	"\x0eca_certificate\x18\x01 \x01(\fR\rcaCertificate\"C\n" +
+	"\x0eca_certificate\x18\x01 \x01(\fR\rcaCertificate\"b\n" +
 	"\fTokenRefresh\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05tokenB!Z\x1fgithub.com/yaoapp/tai-golang/pbb\x06proto3"
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x03R\texpiresAtB!Z\x1fgithub.com/yaoapp/tai-golang/pbb\x06proto3"
 
 var (
 	file_control_proto_rawDescOnce sync.Once
@@ -1609,45 +1705,47 @@ func file_control_proto_rawDescGZIP() []byte {
 	return file_control_proto_rawDescData
 }
 
-var file_control_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_control_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_control_proto_goTypes = []any{
-	(*Payload)(nil),          // 0: tai.Payload
-	(*Connect)(nil),          // 1: tai.Connect
-	(*ConnectAck)(nil),       // 2: tai.ConnectAck
-	(*Register)(nil),         // 3: tai.Register
-	(*ContainerRuntime)(nil), // 4: tai.ContainerRuntime
-	(*RegisterAck)(nil),      // 5: tai.RegisterAck
-	(*Ping)(nil),             // 6: tai.Ping
-	(*Pong)(nil),             // 7: tai.Pong
-	(*GoAway)(nil),           // 8: tai.GoAway
-	(*PoolAdjust)(nil),       // 9: tai.PoolAdjust
-	(*ToolFilePush)(nil),     // 10: tai.ToolFilePush
-	(*BlobPull)(nil),         // 11: tai.BlobPull
-	(*TransferRejected)(nil), // 12: tai.TransferRejected
-	(*ToolFilePull)(nil),     // 13: tai.ToolFilePull
-	(*BlobPush)(nil),         // 14: tai.BlobPush
-	(*Hardware)(nil),         // 15: tai.Hardware
-	(*GPU)(nil),              // 16: tai.GPU
-	(*PoolConfig)(nil),       // 17: tai.PoolConfig
-	(*ServerToolSync)(nil),   // 18: tai.ServerToolSync
-	(*ServerTool)(nil),       // 19: tai.ServerTool
-	(*ACLSync)(nil),          // 20: tai.ACLSync
-	(*KeyRotation)(nil),      // 21: tai.KeyRotation
-	(*CertRotation)(nil),     // 22: tai.CertRotation
-	(*TokenRefresh)(nil),     // 23: tai.TokenRefresh
+	(*Identity)(nil),         // 0: tai.Identity
+	(*Payload)(nil),          // 1: tai.Payload
+	(*Connect)(nil),          // 2: tai.Connect
+	(*ConnectAck)(nil),       // 3: tai.ConnectAck
+	(*Register)(nil),         // 4: tai.Register
+	(*ContainerRuntime)(nil), // 5: tai.ContainerRuntime
+	(*RegisterAck)(nil),      // 6: tai.RegisterAck
+	(*Ping)(nil),             // 7: tai.Ping
+	(*Pong)(nil),             // 8: tai.Pong
+	(*GoAway)(nil),           // 9: tai.GoAway
+	(*PoolAdjust)(nil),       // 10: tai.PoolAdjust
+	(*ToolFilePush)(nil),     // 11: tai.ToolFilePush
+	(*BlobPull)(nil),         // 12: tai.BlobPull
+	(*TransferRejected)(nil), // 13: tai.TransferRejected
+	(*ToolFilePull)(nil),     // 14: tai.ToolFilePull
+	(*BlobPush)(nil),         // 15: tai.BlobPush
+	(*Hardware)(nil),         // 16: tai.Hardware
+	(*GPU)(nil),              // 17: tai.GPU
+	(*PoolConfig)(nil),       // 18: tai.PoolConfig
+	(*ServerToolSync)(nil),   // 19: tai.ServerToolSync
+	(*ServerTool)(nil),       // 20: tai.ServerTool
+	(*ACLSync)(nil),          // 21: tai.ACLSync
+	(*KeyRotation)(nil),      // 22: tai.KeyRotation
+	(*CertRotation)(nil),     // 23: tai.CertRotation
+	(*TokenRefresh)(nil),     // 24: tai.TokenRefresh
 }
 var file_control_proto_depIdxs = []int32{
-	15, // 0: tai.Register.hardware:type_name -> tai.Hardware
-	4,  // 1: tai.Register.container_runtimes:type_name -> tai.ContainerRuntime
-	17, // 2: tai.RegisterAck.pool_config:type_name -> tai.PoolConfig
-	17, // 3: tai.Pong.pool_config:type_name -> tai.PoolConfig
-	16, // 4: tai.Hardware.gpus:type_name -> tai.GPU
-	19, // 5: tai.ServerToolSync.tools:type_name -> tai.ServerTool
-	6,  // [6:6] is the sub-list for method output_type
-	6,  // [6:6] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	0,  // 0: tai.Payload.identity:type_name -> tai.Identity
+	16, // 1: tai.Register.hardware:type_name -> tai.Hardware
+	5,  // 2: tai.Register.container_runtimes:type_name -> tai.ContainerRuntime
+	18, // 3: tai.RegisterAck.pool_config:type_name -> tai.PoolConfig
+	18, // 4: tai.Pong.pool_config:type_name -> tai.PoolConfig
+	17, // 5: tai.Hardware.gpus:type_name -> tai.GPU
+	20, // 6: tai.ServerToolSync.tools:type_name -> tai.ServerTool
+	7,  // [7:7] is the sub-list for method output_type
+	7,  // [7:7] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_control_proto_init() }
@@ -1661,7 +1759,7 @@ func file_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_control_proto_rawDesc), len(file_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

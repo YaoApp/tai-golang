@@ -17,7 +17,9 @@ func TestTokenRefresher_TickerSendsRefresh(t *testing.T) {
 	var captured *types.ControlMsg
 
 	tr := newTokenRefresher("sess-tr-1",
-		func() (string, error) { return "fresh-token", nil },
+		func() (string, time.Time, error) {
+			return "fresh-token", time.Unix(1762400000, 0), nil
+		},
 		func(msg *types.ControlMsg) error {
 			mu.Lock()
 			captured = msg
@@ -49,6 +51,9 @@ func TestTokenRefresher_TickerSendsRefresh(t *testing.T) {
 	if parsed.Token != "fresh-token" {
 		t.Errorf("token = %q, want fresh-token", parsed.Token)
 	}
+	if parsed.ExpiresAt != 1762400000 {
+		t.Errorf("expires_at = %d, want 1762400000", parsed.ExpiresAt)
+	}
 }
 
 func TestTokenRefresher_IssueTokenError(t *testing.T) {
@@ -56,9 +61,9 @@ func TestTokenRefresher_IssueTokenError(t *testing.T) {
 	callCount := atomic.Int32{}
 
 	tr := newTokenRefresher("sess-tr-err",
-		func() (string, error) {
+		func() (string, time.Time, error) {
 			callCount.Add(1)
-			return "", fmt.Errorf("key unavailable")
+			return "", time.Time{}, fmt.Errorf("key unavailable")
 		},
 		func(msg *types.ControlMsg) error {
 			sent.Add(1)
@@ -81,7 +86,7 @@ func TestTokenRefresher_IssueTokenError(t *testing.T) {
 func TestTokenRefresher_StopBeforeTick(t *testing.T) {
 	var sent atomic.Int32
 	tr := newTokenRefresher("sess-tr-2",
-		func() (string, error) { return "tok", nil },
+		func() (string, time.Time, error) { return "tok", time.Time{}, nil },
 		func(msg *types.ControlMsg) error {
 			sent.Add(1)
 			return nil
@@ -98,7 +103,7 @@ func TestTokenRefresher_StopBeforeTick(t *testing.T) {
 
 func TestTokenRefresher_StopIdempotent(t *testing.T) {
 	tr := NewTokenRefresher("sess-tr-3",
-		func() (string, error) { return "t", nil },
+		func() (string, time.Time, error) { return "t", time.Time{}, nil },
 		func(msg *types.ControlMsg) error { return nil },
 	)
 	tr.Stop()

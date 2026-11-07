@@ -60,35 +60,36 @@ type EnvVariable struct {
 }
 
 // OpenSessionRequest is the transport-level wrapper for opening a session.
-// NodeID selects the target node, Token carries the OperationToken,
-// Request holds the session parameters.
+// NodeID selects the target node, Request holds the session parameters,
+// Scopes declares the actions the session needs (default: session:access).
 type OpenSessionRequest struct {
 	NodeID    string
 	SessionID string
-	Token     string // OperationToken JWT
 	Request   *SessionRequest
+	Scopes    Scope
 }
 
 // SessionOpenRequest is the node-level wrapper for opening a session.
 // Unlike OpenSessionRequest, it does not carry NodeID (the RemoteNode
 // already knows its own node ID).
 type SessionOpenRequest struct {
-	SessionID  string
-	Token      string
-	Request    *SessionRequest
-	OnEvent    OnSessionEventFunc     // lifecycle event callback (disconnect/resume/gap)
-	IssueToken func() (string, error) // issues a new OperationToken for refresh; nil disables auto-refresh
+	SessionID string
+	Request   *SessionRequest
+	Scopes    Scope // actions required by the session; empty defaults to {session:access}
+	Anonymous bool  // open without a user identity (system/unattended sessions)
+	OnEvent   OnSessionEventFunc
 }
 
 // ResumeSessionRequest carries the parameters for resuming a session
 // after a Light connection drops. The ctrl/data streams are reopened
-// from last_seq+1.
+// from last_seq+1; a fresh user credential is issued by the transport.
 type ResumeSessionRequest struct {
 	SessionID   string
-	Token       string
 	LastCtrlSeq uint64
 	LastDataSeq uint64
-	OnEvent     OnSessionEventFunc // lifecycle event callback (disconnect/resume/gap)
+	Scopes      Scope // re-declared at resume time; empty defaults to {session:access}
+	Anonymous   bool  // resume without re-issuing a user identity
+	OnEvent     OnSessionEventFunc
 }
 
 // Session represents an active agent session on a Tai node.
