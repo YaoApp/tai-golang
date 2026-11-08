@@ -52,6 +52,7 @@ type WellKnownResponse struct {
 	Protocols     []string `json:"protocols"`
 	TLS           *TLSInfo `json:"tls,omitempty"`
 	TaoServer     string   `json:"tao_server,omitempty"`
+	ToolEndpoint  string   `json:"tool_endpoint,omitempty"`
 	Version       string   `json:"version"`
 }
 

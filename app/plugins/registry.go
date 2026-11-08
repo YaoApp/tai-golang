@@ -32,7 +32,7 @@ func Register(reg Registrar, wasmDir string) error {
 	if wasmDir == "" {
 		return nil
 	}
-	for _, name := range []string{"normalize", "tag"} {
+	for _, name := range []string{"normalize", "tag", "bad_fetch"} {
 		dir := filepath.Join("demo", name)
 		metaData, err := metaFS.ReadFile(filepath.Join(dir, "plugin.json"))
 		if err != nil {

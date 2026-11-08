@@ -441,11 +441,12 @@ func (s *Session) StopRealtime() error {
 
 	// audioOut/motionOut/renderOut are closed by their I/O goroutines on exit
 	// (via defer), not here, to avoid a send-on-closed-channel panic.
+	// Close asynchronously: H2 LightStream.Close can wait for RST_STREAM.
 	if motionStream != nil {
-		motionStream.Close()
+		go motionStream.Close()
 	}
 	if audioStream != nil {
-		audioStream.Close()
+		go audioStream.Close()
 	}
 
 	return err

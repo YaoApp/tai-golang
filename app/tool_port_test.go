@@ -30,7 +30,7 @@ func freePort(t *testing.T) int {
 
 func TestDemoPluginArtifactOnTransportPort(t *testing.T) {
 	dir := t.TempDir()
-	for _, n := range []string{"normalize", "tag"} {
+	for _, n := range []string{"normalize", "tag", "bad_fetch"} {
 		if err := os.WriteFile(filepath.Join(dir, n+".wasm"), []byte("wasm-"+n), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestDemoPluginArtifactOnTransportPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := srv.PluginRegistry().Metadata()
-	if len(meta) != 2 {
+	if len(meta) != 3 {
 		t.Fatalf("metadata=%d", len(meta))
 	}
 	token, err := a.IssueNodeToken("n1")

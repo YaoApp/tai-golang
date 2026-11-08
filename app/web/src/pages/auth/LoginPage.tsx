@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../api';
 import type { DemoUser } from '../../api';
 import Button from '../../components/ui/Button';
@@ -28,6 +28,39 @@ export default function LoginPage({ onLogin }: Props) {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [keyState, setKeyState] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.auth
+      .info()
+      .then((info) => {
+        if (active) setKeyState(info.llmKeys ?? {});
+      })
+      .catch(() => {
+        if (active) setKeyState({});
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const keyRows = [
+    { label: 'DeepSeek', env: 'DEEPSEEK_API_KEY' },
+    { label: 'OpenAI', env: 'OPENAI_API_KEY' },
+  ];
+
+  const keyBadge = (env: string) => {
+    const value = keyState?.[env];
+    if (value === undefined) {
+      return <span className="login__key login__key--checking">checking</span>;
+    }
+    return (
+      <span className={`login__key login__key--${value === 'set' ? 'set' : 'unset'}`}>
+        {value}
+      </span>
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +82,16 @@ export default function LoginPage({ onLogin }: Props) {
   return (
     <div className="login">
       <div className="login__card">
+        <div className="login__keys" aria-label="LLM API key status">
+          <span className="login__keys-label">LLM keys</span>
+          {keyRows.map((row) => (
+            <span className="login__key-item" key={row.env}>
+              <span>{row.label}</span>
+              {keyBadge(row.env)}
+            </span>
+          ))}
+        </div>
+
         <div className="login__brand">
           <span className="sidebar__mark" />
           <div>
@@ -142,6 +185,10 @@ export default function LoginPage({ onLogin }: Props) {
           <div>
             Email + password only — accounts live in demo memory. The email becomes
             the <code>user_id</code> in the session's user credential.
+          </div>
+          <div className="login__keys-footer">
+            LLM keys are read from the server process environment and are never
+            sent to the browser as values.
           </div>
         </div>
       </div>

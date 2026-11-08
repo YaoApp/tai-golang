@@ -24,6 +24,8 @@ export interface AuthInfo {
   transportPort: number;
   protocols: string[];
   version: string;
+  /** Presence only (set/unset); values are never sent to the browser. */
+  llmKeys?: Record<string, string>;
 }
 
 export interface NodeInfo {

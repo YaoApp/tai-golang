@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,9 +111,16 @@ func TestHandleHeartbeat_Unauthorized(t *testing.T) {
 // handleWellKnown
 // ---------------------------------------------------------------------------
 
+type wellKnownAuth struct{ testAuth }
+
+func (a *wellKnownAuth) WellKnownInfo() *types.WellKnownResponse {
+	return &types.WellKnownResponse{TransportPort: 6099}
+}
+
 func TestHandleWellKnown(t *testing.T) {
-	s := NewHTTPServer(&testAuth{})
+	s := NewHTTPServer(&wellKnownAuth{})
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/yao-transport", nil)
+	req.Host = "example.com:5099"
 	w := httptest.NewRecorder()
 
 	s.mux.ServeHTTP(w, req)
@@ -123,6 +131,13 @@ func TestHandleWellKnown(t *testing.T) {
 	ct := w.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var info types.WellKnownResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ToolEndpoint != "http://example.com:6099/v1/tai/tool" {
+		t.Fatalf("tool_endpoint=%q", info.ToolEndpoint)
 	}
 }
 

@@ -100,6 +100,17 @@ func (s *HTTPServer) Close(ctx context.Context) error {
 
 func (s *HTTPServer) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	info := s.auth.WellKnownInfo()
+	if info != nil && info.ToolEndpoint == "" && info.TransportPort > 0 {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		info.ToolEndpoint = fmt.Sprintf("%s://%s:%d/v1/tai/tool", scheme, host, info.TransportPort)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }

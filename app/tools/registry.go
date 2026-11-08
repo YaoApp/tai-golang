@@ -52,10 +52,14 @@ func Register(reg Registrar) error {
 		if !ok {
 			return fmt.Errorf("tools: no handler for %s", s.Name)
 		}
-		tools = append(tools, &remotetool.Tool{Entry: &pb.RemoteToolEntry{
+		tool := &remotetool.Tool{Entry: &pb.RemoteToolEntry{
 			Name: s.Name, Group: s.Group, Description: s.Description,
 			InputSchema: s.InputSchema, Pipeline: s.Pipeline,
-		}, Handler: h})
+		}, Handler: h}
+		if s.Name == "demo.echo" {
+			tool.ProgressHandler = demo.ProgressEcho()
+		}
+		tools = append(tools, tool)
 	}
 	return reg.SetRemoteTools(tools)
 }

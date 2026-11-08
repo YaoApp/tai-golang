@@ -23,6 +23,10 @@ func (h *AuthHandler) Info(w http.ResponseWriter, r *http.Request) {
 		"transportPort": wk.TransportPort,
 		"protocols":     wk.Protocols,
 		"version":       wk.Version,
+		"llmKeys": map[string]string{
+			"DEEPSEEK_API_KEY": keyState("DEEPSEEK_API_KEY"),
+			"OPENAI_API_KEY":   keyState("OPENAI_API_KEY"),
+		},
 	})
 }
 

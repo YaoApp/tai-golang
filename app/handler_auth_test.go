@@ -402,3 +402,21 @@ func TestUserTokenRouteWired(t *testing.T) {
 		t.Errorf("node-token response = %q, want JSON token", rec.Body.String())
 	}
 }
+
+func TestAuthInfoReportsKeyPresence(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "configured")
+	t.Setenv("OPENAI_API_KEY", "")
+	h := &AuthHandler{auth: newFakeAuth()}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/info", nil)
+	rec := httptest.NewRecorder()
+	h.Info(rec, req)
+	var out struct {
+		LLMKeys map[string]string `json:"llmKeys"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.LLMKeys["DEEPSEEK_API_KEY"] != "set" || out.LLMKeys["OPENAI_API_KEY"] != "unset" {
+		t.Fatalf("llmKeys=%v", out.LLMKeys)
+	}
+}

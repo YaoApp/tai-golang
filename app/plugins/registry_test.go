@@ -21,7 +21,7 @@ func TestRegisterArtifacts(t *testing.T) {
 	if err := Register(fake, dir); err == nil {
 		t.Fatal("expected missing artifact error")
 	}
-	for _, n := range []string{"normalize", "tag"} {
+	for _, n := range []string{"normalize", "tag", "bad_fetch"} {
 		if err := os.WriteFile(filepath.Join(dir, n+".wasm"), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -29,7 +29,7 @@ func TestRegisterArtifacts(t *testing.T) {
 	if err := Register(fake, dir); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.entries) != 2 || fake.entries[0].Name != "demo.normalize" || len(fake.entries[0].Artifact) == 0 {
+	if len(fake.entries) != 3 || fake.entries[0].Name != "demo.normalize" || len(fake.entries[0].Artifact) == 0 {
 		t.Fatalf("entries=%+v", fake.entries)
 	}
 }

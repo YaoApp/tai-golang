@@ -174,7 +174,7 @@ export default function SessionDetailPage() {
         <div style={{ minWidth: 0 }}>
           <div className="session-head__title">
             <span className="truncate">{sessionTitle || `Session: ${id}`}</span>
-            {session && <StatusDot status={session.status} />}
+            {session && <StatusDot status={session.status} label={session.status === 'running' ? 'connected' : undefined} />}
           </div>
           <div className="session-head__meta">
             {wsLabel && (

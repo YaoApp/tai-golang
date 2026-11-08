@@ -1,0 +1,1 @@
+{"name":"demo.bad_fetch","group":"demo","description":"E2E negative: plugin imports forbidden tai_fetch.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}},"pipeline":[{"use":"plugin:demo.bad_fetch@1.0.0"},{"use":"$request"}]}

@@ -100,6 +100,58 @@ session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
 See [LLM Providers](llm-providers.md) for every endpoint field and how to switch
 models at runtime.
 
+## Remote Tools
+
+The SDK can expose tools that Tai nodes call over Tool H2. A tool may run local
+pipeline steps and then invoke your handler with the `$request` step.
+
+```go
+import (
+    "context"
+    "encoding/json"
+
+    "github.com/yaoapp/tai-golang/pb"
+    "github.com/yaoapp/tai-golang/remotetool"
+)
+
+err := server.SetRemoteTools([]*remotetool.Tool{
+    {
+        Entry: &pb.RemoteToolEntry{
+            Name:        "ping",
+            Group:       "dev",
+            Description: "Return a message and the caller identity.",
+            InputSchema: []byte(`{"type":"object","properties":{"message":{"type":"string"}}}`),
+        },
+        Handler: func(ctx context.Context, input []byte) ([]byte, error) {
+            var req struct{ Message string `json:"message"` }
+            _ = json.Unmarshal(input, &req)
+            user := remotetool.User(ctx)
+            return json.Marshal(map[string]any{
+                "message": req.Message,
+                "user_id": user.UserID,
+                "team_id": user.TeamID,
+            })
+        },
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+From the node:
+
+```bash
+tai run --list
+tai run ping --describe
+tai run ping --input '{"message":"hello"}'
+```
+
+Tool definitions, groups, schemas, pipelines, and Plugin metadata are synced
+over Control. Calls use the SDK `transport_port`; there is no separate Tool
+port. See [Remote Tools](remote-tools.md) for progress events, Plugins,
+pipelines, and the endpoint/error reference.
+
 ## Realtime (Voice)
 
 Realtime needs a provider key. The demo reads it from the environment by

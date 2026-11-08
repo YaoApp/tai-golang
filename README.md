@@ -10,7 +10,7 @@ Tai is a computer agent installed on every machine. This SDK handles the transpo
 
 **Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods + Realtime audio, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
 
-Not yet implemented: Server Tools, Tunnel, Realtime Video, ONNX model integration for balanced render preset.
+Not yet implemented: Tunnel, Realtime Video, ONNX model integration for balanced render preset, container remote management.
 
 ## Install
 
@@ -128,6 +128,62 @@ for {
 
 See [LLM Providers](docs/llm-providers.md) for the full endpoint fields and how
 to switch models at runtime.
+
+## Remote Tools
+
+The SDK can expose tools that Tai nodes call over Tool H2. Tools can run a
+local pipeline and then invoke your handler through the `$request` step.
+
+```go
+import (
+    "context"
+    "encoding/json"
+
+    "github.com/yaoapp/tai-golang/pb"
+    "github.com/yaoapp/tai-golang/remotetool"
+)
+
+err := server.SetRemoteTools([]*remotetool.Tool{
+    {
+        Entry: &pb.RemoteToolEntry{
+            Name:        "ping",
+            Group:       "dev",
+            Description: "Return a message and the verified caller identity.",
+            InputSchema: []byte(`{"type":"object","properties":{"message":{"type":"string"}}}`),
+        },
+        Handler: func(ctx context.Context, input []byte) ([]byte, error) {
+            var req struct{ Message string `json:"message"` }
+            _ = json.Unmarshal(input, &req)
+            user := remotetool.User(ctx)
+            return json.Marshal(map[string]any{
+                "message": req.Message,
+                "user_id": user.UserID,
+                "team_id": user.TeamID,
+            })
+        },
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+On the Tai node:
+
+```bash
+tai run --list
+tai run ping --describe
+tai run ping --input '{"message":"hello"}'
+```
+
+Tool metadata and Plugin metadata are synced over Control. Tool calls and
+Plugin artifacts use the SDK `transport_port` (`/v1/tai/tool/*`); there is no
+separate Tool port. Handlers can stream progress with
+`remotetool.ProgressHandler` and read the verified identity with
+`remotetool.User(ctx)`.
+
+See [docs/remote-tools.md](docs/remote-tools.md) for the full API, pipelines,
+Plugins, CLI, and error reference.
 
 ## Realtime (Voice)
 
@@ -316,18 +372,19 @@ set only the providers you intend to use. See [Demo App Guide](docs/demo-guide.m
 - **Realtime Audio**: QUIC datagram (H3) + bidi stream fallback (H2), EncodeAudioFrame/DecodeAudioFrame, DatagramConn interface, H2 stale frame detection
 - **Render (Avatar Motion)**: MotionFrame 87-byte wire format (Pack/Unpack), motion datagram encode/decode (95 bytes), RecvMotion (QUIC datagram), RecvRender (render stream), RenderEvent type, MotionConfig (provider/profile/fps)
 - **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal
+- **Remote Tools**: `SetRemoteTools` / `RegisterRemoteTool` / `UnregisterRemoteTool`; Tool H2 on `transport_port`; Control sync/changed/list; Agent bridge; container broker; streaming progress; `-race`/E2E tested
+- **Plugins (Wasm)**: `RegisterPlugin` / `SetRemotePlugins`, artifact H2 distribution, 16 MiB limit
 - **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions + Exists/WriteArchive/ReadManifest), commit/rollback, history query, GC, watch — 36 transport command kinds
 - **Context API**: Four-level scope model (bot → home → board → session), SeedContext, ReadContext, MergeContext
 - **Skills API**: SkillPack, SkillHash, SyncSkills with manifest-based incremental sync
 - **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken (issue/sign/validate)
 - **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
-- **Proto**: 4 `.proto` files with generated Go (control, session, computer, servertool)
+- **Proto**: 6 `.proto` files with generated Go (control, session, computer, servertool, plugin, remotetool)
 - **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
 - **Test Infrastructure**: MockNode, MockLLM, MockSession (+ Realtime auto-reply), MockLightConn/Stream, 400+ test functions
 
 ## Not Yet Implemented
 
-- Server Tools (RegisterTool / tai call)
 - Tunnel
 - Realtime Video (Plan 7b)
 - ONNX model integration for balanced render preset
