@@ -14,10 +14,13 @@ import (
 	"github.com/yaoapp/tai-golang/pb"
 )
 
+// MaxPluginArtifact is the per-plugin artifact limit (design §4).
+const MaxPluginArtifact = 16 << 20
+
 var (
 	ErrInvalidPlugin = errors.New("plugin_invalid")
 	ErrNotFound      = errors.New("plugin_not_found")
-	nameRE           = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+	nameRE           = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
 	versionRE        = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 )
 
@@ -50,17 +53,21 @@ func (r *Registry) RegisterPlugin(entry *pb.PluginEntry) error {
 	if len(entry.Artifact) == 0 {
 		return fmt.Errorf("%w: artifact is required", ErrInvalidPlugin)
 	}
+	if len(entry.Artifact) > MaxPluginArtifact {
+		return fmt.Errorf("%w: artifact exceeds %d bytes", ErrInvalidPlugin, MaxPluginArtifact)
+	}
 	sum := sha256.Sum256(entry.Artifact)
 	entry.Digest = "sha256:" + hex.EncodeToString(sum[:])
 	entry.Size = uint64(len(entry.Artifact))
 	key := entry.Name + "@" + entry.Version
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if _, ok := r.plugins[key]; ok {
+		r.mu.Unlock()
 		return fmt.Errorf("%w: duplicate %s", ErrInvalidPlugin, key)
 	}
 	meta := cloneMeta(entry)
 	r.plugins[key] = &stored{meta: meta, data: append([]byte(nil), entry.Artifact...)}
+	r.mu.Unlock()
 	r.notify()
 	return nil
 }
@@ -68,12 +75,13 @@ func (r *Registry) RegisterPlugin(entry *pb.PluginEntry) error {
 // UnregisterPlugin removes a Plugin.
 func (r *Registry) UnregisterPlugin(name, version string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	key := name + "@" + version
 	if _, ok := r.plugins[key]; !ok {
+		r.mu.Unlock()
 		return ErrNotFound
 	}
 	delete(r.plugins, key)
+	r.mu.Unlock()
 	r.notify()
 	return nil
 }
@@ -82,7 +90,7 @@ func (r *Registry) UnregisterPlugin(name, version string) error {
 func (r *Registry) SetRemotePlugins(entries []*pb.PluginEntry) error {
 	next := make(map[string]*stored, len(entries))
 	for _, e := range entries {
-		if e == nil || !nameRE.MatchString(e.Name) || !versionRE.MatchString(e.Version) || e.Runtime != "wasm" || len(e.Artifact) == 0 {
+		if e == nil || !nameRE.MatchString(e.Name) || !versionRE.MatchString(e.Version) || e.Runtime != "wasm" || len(e.Artifact) == 0 || len(e.Artifact) > MaxPluginArtifact {
 			return fmt.Errorf("%w: invalid entry", ErrInvalidPlugin)
 		}
 		sum := sha256.Sum256(e.Artifact)
@@ -120,6 +128,9 @@ func (r *Registry) Metadata() []*pb.PluginEntry {
 
 // Artifact returns the bytes for a digest.
 func (r *Registry) Artifact(digest string) ([]byte, error) {
+	if digest != "" && !strings.HasPrefix(digest, "sha256:") {
+		digest = "sha256:" + digest
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, s := range r.plugins {

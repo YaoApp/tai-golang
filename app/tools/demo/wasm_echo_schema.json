@@ -1,0 +1,1 @@
+{"name":"demo.wasm_echo","group":"demo","description":"Demo Wasm pipeline echo.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]},"pipeline":[{"use":"plugin:demo.normalize@1.0.0"},{"use":"$request"},{"use":"plugin:demo.tag@1.0.0"}]}

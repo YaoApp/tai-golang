@@ -14,6 +14,7 @@ import (
 
 	"github.com/yaoapp/tai-golang/auth"
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/remotetool"
 	"github.com/yaoapp/tai-golang/transport"
 	"github.com/yaoapp/tai-golang/types"
 	"github.com/yaoapp/tai-golang/workspace"
@@ -845,5 +846,50 @@ func TestRemoteNodeOpenSessionDataStreamError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected data stream error")
+	}
+}
+
+func TestRegistryAutoRemoteToolSync(t *testing.T) {
+	a := testAuth(t)
+	reg := testRegistry()
+	reg.SetRemoteToolRegistry(remotetool.New(nil))
+	reg.Register("node-rt", &pb.Register{Hardware: &pb.Hardware{}}, a)
+	mw := &mockWriter{}
+	reg.BindStream("node-rt", mw)
+	if len(mw.msgs) != 0 {
+		t.Fatalf("bind must not race register_ack: %+v", mw.msgs)
+	}
+	reg.BroadcastRemoteToolSync()
+	reg.BroadcastRemoteToolSync()
+	if len(mw.msgs) < 1 || mw.msgs[0].Kind != "remote_tool.sync" {
+		t.Fatalf("broadcast msgs=%+v", mw.msgs)
+	}
+}
+
+func TestSendRemoteToolSyncAndDefault(t *testing.T) {
+	reg := testRegistry()
+	reg.Register("node-sync", &pb.Register{Hardware: &pb.Hardware{}}, testAuth(t))
+	mw := &mockWriter{}
+	reg.BindStream("node-sync", mw)
+	if err := reg.SendRemoteToolSync("node-sync", &pb.Payload{Kind: "remote_tool.sync"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(mw.msgs) == 0 {
+		t.Fatal("no sync")
+	}
+	if Default() == nil {
+		t.Fatal("default nil")
+	}
+}
+
+func TestBroadcastRemoteToolChanged(t *testing.T) {
+	reg := testRegistry()
+	reg.SetRemoteToolRegistry(remotetool.New(nil))
+	reg.Register("node-changed", &pb.Register{Hardware: &pb.Hardware{}}, testAuth(t))
+	mw := &mockWriter{}
+	reg.BindStream("node-changed", mw)
+	reg.BroadcastRemoteToolChanged()
+	if len(mw.msgs) != 1 || mw.msgs[0].Kind != "remote_tool.changed" {
+		t.Fatalf("msgs=%+v", mw.msgs)
 	}
 }

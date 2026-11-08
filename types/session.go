@@ -115,6 +115,7 @@ type Session interface {
 	RecvAction() (*SessionMsg, error)
 
 	StartRealtime(req *RealtimeRequest) error
+	WaitRealtime(ctx context.Context) error
 	UpdateRealtime(opts *RealtimeUpdateOptions) error
 	StopRealtime() error
 

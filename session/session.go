@@ -68,6 +68,7 @@ type Session struct {
 	renderOut       chan *types.RenderEvent // downstream render stream events (transcript + emotion)
 	renderStream    io.ReadWriteCloser      // dedicated render uni stream; nil before StartRealtime
 	renderCancel    context.CancelFunc
+	realtimeReady   chan struct{} // closed once StartRealtime completed
 
 	// identity is the caller identity carried by the first frame of the
 	// session streams. It is optional: nil means the session has no user
@@ -92,14 +93,15 @@ type Options struct {
 // Starts the background ctrl read loop.
 func New(id, nodeID string, ctrl, data io.ReadWriteCloser, codec *transport.FrameCodec, opts ...Options) *Session {
 	s := &Session{
-		id:      id,
-		nodeID:  nodeID,
-		ctrl:    ctrl,
-		data:    data,
-		codec:   codec,
-		actions: make(chan *types.SessionMsg, 16),
-		done:    make(chan struct{}),
-		buffer:  newRecvBuffer(defaultRecvBufferCapacity),
+		id:            id,
+		nodeID:        nodeID,
+		ctrl:          ctrl,
+		data:          data,
+		codec:         codec,
+		actions:       make(chan *types.SessionMsg, 16),
+		done:          make(chan struct{}),
+		buffer:        newRecvBuffer(defaultRecvBufferCapacity),
+		realtimeReady: make(chan struct{}),
 	}
 	if len(opts) > 0 {
 		s.resumeFn = opts[0].ResumeFn
@@ -346,7 +348,32 @@ func (s *Session) StartRealtime(req *types.RealtimeRequest) error {
 		return fmt.Errorf("open render stream: %w", err)
 	}
 
+	s.mu.Lock()
+	if s.realtimeReady != nil {
+		close(s.realtimeReady)
+		s.realtimeReady = nil
+	}
+	s.mu.Unlock()
 	return nil
+}
+
+// WaitRealtime blocks until Realtime is active or ctx is done.
+func (s *Session) WaitRealtime(ctx context.Context) error {
+	s.mu.Lock()
+	ready := s.realtimeReady
+	active := s.audioChannelID != 0
+	s.mu.Unlock()
+	if active || ready == nil {
+		return nil
+	}
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return fmt.Errorf("session closed")
+	}
 }
 
 // UpdateRealtime applies runtime configuration changes to the active Realtime session.

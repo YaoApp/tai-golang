@@ -814,16 +814,14 @@ func (h *SessionHandler) WSAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := sess.WaitRealtime(r.Context()); err != nil {
+		log.Printf("audio ws: realtime not active: %v", err)
+		return
+	}
 	audioCh := sess.RecvAudio()
 	if audioCh == nil {
-		// Brief grace period in case the audio WS upgrade races with
-		// StartRealtime setting up channels.
-		time.Sleep(500 * time.Millisecond)
-		audioCh = sess.RecvAudio()
-		if audioCh == nil {
-			log.Printf("audio ws: RecvAudio returned nil (realtime not active)")
-			return
-		}
+		log.Printf("audio ws: RecvAudio returned nil (realtime not active)")
+		return
 	}
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -904,15 +902,16 @@ func (h *SessionHandler) WSRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := sess.WaitRealtime(r.Context()); err != nil {
+		log.Printf("render ws: realtime not active: %v", err)
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
+	}
 	ch := sess.RecvRender()
 	if ch == nil {
-		time.Sleep(500 * time.Millisecond)
-		ch = sess.RecvRender()
-		if ch == nil {
-			log.Printf("render ws: RecvRender returned nil (realtime not active)")
-			conn.WriteJSON(map[string]string{"type": "_closed"})
-			return
-		}
+		log.Printf("render ws: RecvRender returned nil (realtime not active)")
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
 	}
 
 	// Drain WebSocket reads so close frames are detected.
@@ -969,14 +968,15 @@ func (h *SessionHandler) WSMotion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := sess.WaitRealtime(r.Context()); err != nil {
+		log.Printf("motion ws: realtime not active: %v", err)
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
+	}
 	ch := sess.RecvMotion()
 	if ch == nil {
-		time.Sleep(500 * time.Millisecond)
-		ch = sess.RecvMotion()
-		if ch == nil {
-			conn.WriteJSON(map[string]string{"type": "_closed"})
-			return
-		}
+		conn.WriteJSON(map[string]string{"type": "_closed"})
+		return
 	}
 
 	closeCh := make(chan struct{})

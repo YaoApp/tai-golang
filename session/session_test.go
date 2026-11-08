@@ -749,3 +749,17 @@ func TestSessionPromptAfterClose(t *testing.T) {
 		t.Errorf("Prompt after Close = %v, want ErrSessionClosed", err)
 	}
 }
+
+func TestWaitRealtime(t *testing.T) {
+	s := &Session{realtimeReady: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() { time.Sleep(10 * time.Millisecond); close(s.realtimeReady) }()
+	if err := s.WaitRealtime(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.realtimeReady = nil
+	if err := s.WaitRealtime(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

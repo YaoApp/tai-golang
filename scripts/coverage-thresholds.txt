@@ -9,3 +9,5 @@ session 90
 mock 90
 workspace 73
 plugin 90
+remotetool 90
+toolserver 90

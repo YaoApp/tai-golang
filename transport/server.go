@@ -33,8 +33,9 @@ type Server struct {
 	unauthTimeout time.Duration
 
 	// TCP
-	tcp        *tcpMux
-	taiHandler atomic.Pointer[taiConnHandler]
+	tcp         *tcpMux
+	taiHandler  atomic.Pointer[taiConnHandler]
+	toolHandler atomic.Value // http.Handler
 
 	// Light pool
 	light *lightPool
@@ -66,6 +67,13 @@ func NewServer(auth types.AuthProvider, reg types.NodeRegistry, codec *FrameCode
 	t.mux.HandleFunc("POST /v1/tai/connect", t.handleConnect)
 	t.mux.HandleFunc("/v1/tai/light", t.handleLight)
 	t.mux.Handle("POST /v1/tai/control", t.requireAuthorized(ConnTypeControl, http.HandlerFunc(t.handleControl)))
+	t.mux.Handle("/v1/tai/tool/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h, ok := t.toolHandler.Load().(http.Handler); ok && h != nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}))
 
 	t.handler = t.mux
 	return t
@@ -82,6 +90,13 @@ func (t *Server) Registry() types.NodeRegistry { return t.reg }
 
 // Codec returns the frame codec.
 func (t *Server) Codec() *FrameCodec { return t.codec }
+
+// SetToolHandler mounts the Remote Tool H2 endpoints on the transport port.
+func (t *Server) SetToolHandler(h http.Handler) {
+	if h != nil {
+		t.toolHandler.Store(h)
+	}
+}
 
 // Handler returns the HTTP handler for testing.
 func (t *Server) Handler() http.Handler { return t.handler }

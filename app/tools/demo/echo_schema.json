@@ -1,0 +1,1 @@
+{"name":"demo.echo","group":"demo","description":"Echo input with verified identity.","inputSchema":{"type":"object"},"pipeline":[{"use":"$request"}]}

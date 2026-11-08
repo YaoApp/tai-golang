@@ -664,3 +664,22 @@ func (m *tcpMux) connCount() int {
 	defer m.mu.Unlock()
 	return len(m.conns)
 }
+
+func TestToolHandlerMount(t *testing.T) {
+	tr := NewServer(newTestAuth(t), testRegistry(), DefaultCodec())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tai/tool/health", nil)
+	tr.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unmounted status=%d", rec.Code)
+	}
+	tr.SetToolHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rec = httptest.NewRecorder()
+	tr.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("mounted status=%d", rec.Code)
+	}
+	tr.SetToolHandler(nil)
+}

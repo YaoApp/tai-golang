@@ -151,3 +151,23 @@ func TestRemoteToolCall_RequiresScope(t *testing.T) {
 		t.Errorf("message = %q, want scope hint", resp.Error.Message)
 	}
 }
+
+type listRegistry struct{ testNodeRegistry }
+
+func (r *listRegistry) RemoteToolPayload() *pb.Payload {
+	return &pb.Payload{Namespace: types.NamespaceControl, Kind: "remote_tool.sync", Data: []byte("sync")}
+}
+
+func TestRemoteToolList(t *testing.T) {
+	var buf bytes.Buffer
+	reg := &listRegistry{testNodeRegistry: testNodeRegistry{pool: &pb.PoolConfig{}}}
+	cs := newControlStream("n1", strings.NewReader(""), &noopResponseWriter{&buf}, reg, &testAuth{}, DefaultCodec())
+	cs.dispatch(&pb.Payload{Namespace: types.NamespaceControl, Kind: "remote_tool.list"})
+	frame, err := cs.codec.ReadFrame(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Kind != "remote_tool.sync" || string(frame.Data) != "sync" {
+		t.Fatalf("frame=%+v", frame)
+	}
+}

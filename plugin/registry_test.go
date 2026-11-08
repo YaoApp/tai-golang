@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/yaoapp/tai-golang/pb"
@@ -83,5 +84,25 @@ func TestSetRemotePluginsAtomic(t *testing.T) {
 	}
 	if got := r.Metadata(); len(got) != 1 || got[0].Name != "echo" {
 		t.Fatalf("registry not preserved: %+v", got)
+	}
+}
+
+func TestArtifactHexDigest(t *testing.T) {
+	r := New(nil)
+	e := &pb.PluginEntry{Name: "p", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("x")}
+	if err := r.RegisterPlugin(e); err != nil {
+		t.Fatal(err)
+	}
+	hex := strings.TrimPrefix(e.Digest, "sha256:")
+	if data, err := r.Artifact(hex); err != nil || string(data) != "x" {
+		t.Fatalf("artifact %q %v", data, err)
+	}
+}
+
+func TestPluginArtifactLimit(t *testing.T) {
+	r := New(nil)
+	entry := &pb.PluginEntry{Name: "big", Version: "1.0.0", Runtime: "wasm", Artifact: make([]byte, MaxPluginArtifact+1)}
+	if err := r.RegisterPlugin(entry); err == nil {
+		t.Fatal("expected limit error")
 	}
 }

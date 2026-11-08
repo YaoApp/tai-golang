@@ -90,6 +90,12 @@ func (cs *controlStream) dispatch(msg *pb.Payload) {
 		cs.handlePing(msg.Data)
 	case types.KindRemoteToolCall:
 		cs.handleRemoteToolCall(msg)
+	case "remote_tool.list":
+		if lister, ok := cs.reg.(interface{ RemoteToolPayload() *pb.Payload }); ok {
+			if p := lister.RemoteToolPayload(); p != nil {
+				_ = cs.WriteControl(p)
+			}
+		}
 	default:
 		log.Printf("tai-sdk: unknown control kind=%q node=%s", msg.Kind, cs.nodeID)
 	}
@@ -117,6 +123,11 @@ func (cs *controlStream) handleRegister(data []byte) {
 	}
 
 	cs.WriteControl(&pb.Payload{Namespace: types.NamespaceControl, Kind: "register_ack", Data: ackData})
+	if lister, ok := cs.reg.(interface{ RemoteToolPayload() *pb.Payload }); ok {
+		if p := lister.RemoteToolPayload(); p != nil {
+			_ = cs.WriteControl(p)
+		}
+	}
 	log.Printf("tai-sdk: node registered: id=%s tai_id=%s", cs.nodeID, ack.TaiId)
 }
 

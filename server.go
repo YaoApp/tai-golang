@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -32,6 +33,9 @@ import (
 
 	"github.com/yaoapp/tai-golang/node"
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/plugin"
+	"github.com/yaoapp/tai-golang/remotetool"
+	"github.com/yaoapp/tai-golang/toolserver"
 	"github.com/yaoapp/tai-golang/transport"
 	"github.com/yaoapp/tai-golang/types"
 	"github.com/yaoapp/tai-golang/workspace"
@@ -150,6 +154,17 @@ type Server interface {
 	RegisterTool(tool *ToolDefinition) error
 	UnregisterTool(name string) error
 	Close() error
+	WaitReady(ctx context.Context) error
+
+	// Remote Tool / Plugin registration (design §14 / wasm Part I §4).
+	SetRemoteTools(tools []*remotetool.Tool) error
+	RegisterRemoteTool(tool *remotetool.Tool) error
+	UnregisterRemoteTool(name string) error
+	RegisterPlugin(entry *pb.PluginEntry) error
+	UnregisterPlugin(name, version string) error
+	SetRemotePlugins(entries []*pb.PluginEntry) error
+	RemoteToolRegistry() *remotetool.Registry
+	PluginRegistry() *plugin.Registry
 }
 
 // ErrNotImplemented is returned by Server methods not yet available.
@@ -189,6 +204,10 @@ type server struct {
 	closeOnce sync.Once
 	closeErr  error
 	done      chan struct{}
+	ready     chan struct{}
+
+	remoteTools *remotetool.Registry
+	plugins     *plugin.Registry
 }
 
 // NewServer creates a transport server from cfg.
@@ -227,16 +246,42 @@ func newServer(cfg *ServerConfig) (*server, error) {
 	tr := transport.NewServer(c.Auth, reg, codec)
 	transport.SetDefault(tr)
 
+	var remoteTools *remotetool.Registry
+	var pluginReg *plugin.Registry
+	pluginReg = plugin.New(func() {
+		if remoteTools != nil {
+			remoteTools.SetPlugins(pluginReg.Metadata())
+			reg.BroadcastRemoteToolSync()
+		}
+	})
+	remoteTools = remotetool.New(func() { reg.BroadcastRemoteToolChanged() })
+	reg.SetRemoteToolRegistry(remoteTools)
+
 	s := &server{
-		cfg:  c,
-		auth: c.Auth,
-		reg:  reg,
-		http: transport.NewHTTPServer(c.Auth),
-		tr:   tr,
-		done: make(chan struct{}),
+		cfg:         c,
+		auth:        c.Auth,
+		reg:         reg,
+		http:        transport.NewHTTPServer(c.Auth),
+		tr:          tr,
+		done:        make(chan struct{}),
+		ready:       make(chan struct{}),
+		remoteTools: remoteTools,
+		plugins:     pluginReg,
 	}
 	s.tr.SetUnauthTimeout(c.UnauthTimeout)
 	s.tr.SetQUICConfig(c.QUIC)
+	s.tr.SetToolHandler((&toolserver.Server{
+		Registry: remoteTools,
+		NodeAuth: func(r *http.Request) bool {
+			info, err := c.Auth.ValidateNodeToken(transport.ExtractBearer(r))
+			if err != nil {
+				return false
+			}
+			return r.Header.Get("X-Tai-Node-Id") == info.NodeID
+		},
+		UserAuth:  c.Auth.ValidateUserToken,
+		Artifacts: pluginReg.Artifact,
+	}).Handler())
 	return s, nil
 }
 
@@ -296,6 +341,7 @@ func (s *server) bind() error {
 		return err
 	}
 	s.bound = true
+	close(s.ready)
 	return nil
 }
 
@@ -338,6 +384,18 @@ func (s *server) Start(ctx context.Context) error {
 	return s.Close()
 }
 
+// WaitReady blocks until listeners are bound or ctx is done.
+func (s *server) WaitReady(ctx context.Context) error {
+	select {
+	case <-s.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return errors.New("tai: server closed before ready")
+	}
+}
+
 func (s *server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -347,6 +405,34 @@ func (s *server) Addr() string {
 func (s *server) RegisterTool(tool *ToolDefinition) error { return ErrNotImplemented }
 
 func (s *server) UnregisterTool(name string) error { return ErrNotImplemented }
+
+// SetRemoteTools replaces the Remote Tool set atomically.
+func (s *server) SetRemoteTools(tools []*remotetool.Tool) error { return s.remoteTools.Set(tools) }
+
+// RegisterRemoteTool adds one Remote Tool.
+func (s *server) RegisterRemoteTool(tool *remotetool.Tool) error { return s.remoteTools.Register(tool) }
+
+// UnregisterRemoteTool removes a Remote Tool.
+func (s *server) UnregisterRemoteTool(name string) error { return s.remoteTools.Unregister(name) }
+
+// RegisterPlugin validates and stores a Plugin artifact.
+func (s *server) RegisterPlugin(entry *pb.PluginEntry) error { return s.plugins.RegisterPlugin(entry) }
+
+// UnregisterPlugin removes a Plugin.
+func (s *server) UnregisterPlugin(name, version string) error {
+	return s.plugins.UnregisterPlugin(name, version)
+}
+
+// SetRemotePlugins replaces the Plugin set atomically.
+func (s *server) SetRemotePlugins(entries []*pb.PluginEntry) error {
+	return s.plugins.SetRemotePlugins(entries)
+}
+
+// RemoteToolRegistry exposes the registry for the Tool H2 server.
+func (s *server) RemoteToolRegistry() *remotetool.Registry { return s.remoteTools }
+
+// PluginRegistry exposes the artifact registry for the Tool H2 server.
+func (s *server) PluginRegistry() *plugin.Registry { return s.plugins }
 
 func (s *server) Close() error {
 	s.closeOnce.Do(func() {

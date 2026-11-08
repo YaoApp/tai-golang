@@ -23,6 +23,7 @@ import (
 	"github.com/yaoapp/tai-golang/auth"
 	"github.com/yaoapp/tai-golang/mock"
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/remotetool"
 	"github.com/yaoapp/tai-golang/transport"
 	"github.com/yaoapp/tai-golang/types"
 )
@@ -302,3 +303,80 @@ func TestServerPassesQUICConfig(t *testing.T) {
 // Suppress unused import warnings.
 var _ = auth.DefaultAuth
 var _ = mock.NewTestServer
+
+func TestServerWaitReady(t *testing.T) {
+	s, err := NewServer(&ServerConfig{Auth: testAuth(t), TransportPort: freePort(t), HTTPPort: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Start(ctx) }()
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer readyCancel()
+	if err := s.WaitReady(readyCtx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestServerWaitReadyErrors(t *testing.T) {
+	s, err := NewServer(&ServerConfig{Auth: testAuth(t), TransportPort: freePort(t), HTTPPort: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := s.WaitReady(ctx); err == nil {
+		t.Fatal("expected timeout")
+	}
+	s2, err := NewServer(&ServerConfig{Auth: testAuth(t), TransportPort: freePort(t), HTTPPort: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(s2.(*server).done)
+	if err := s2.WaitReady(context.Background()); err == nil {
+		t.Fatal("expected closed")
+	}
+}
+
+func TestServerRemoteToolAndPluginAPIs(t *testing.T) {
+	s, err := NewServer(&ServerConfig{Auth: testAuth(t), TransportPort: freePort(t), HTTPPort: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &pb.PluginEntry{Name: "demo.normalize", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("wasm")}
+	if err := s.RegisterPlugin(entry); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.PluginRegistry().Metadata()) != 1 {
+		t.Fatal("plugin not registered")
+	}
+	if err := s.UnregisterPlugin("demo.normalize", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRemotePlugins([]*pb.PluginEntry{{Name: "demo.tag", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("x")}}); err != nil {
+		t.Fatal(err)
+	}
+	tool := &remotetool.Tool{Entry: &pb.RemoteToolEntry{Name: "demo.echo", Group: "demo"}, Handler: func(context.Context, []byte) ([]byte, error) { return nil, nil }}
+	if err := s.RegisterRemoteTool(tool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RemoteToolRegistry().Find("demo.echo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UnregisterRemoteTool("demo.echo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRemoteTools([]*remotetool.Tool{tool}); err != nil {
+		t.Fatal(err)
+	}
+}

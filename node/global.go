@@ -26,3 +26,6 @@ func OnRegister(fn func(types.RemoteNode) error) {
 func OnDisconnect(fn func(nodeID string)) {
 	defaultRegistry.SetOnDisconnect(fn)
 }
+
+// Default returns the process-wide node registry.
+func Default() *Registry { return defaultRegistry }

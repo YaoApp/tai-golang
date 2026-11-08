@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/yaoapp/tai-golang/pb"
+	"github.com/yaoapp/tai-golang/remotetool"
 	"github.com/yaoapp/tai-golang/types"
 	"github.com/yaoapp/tai-golang/workspace"
 )
@@ -25,6 +26,7 @@ type Registry struct {
 	auth         types.AuthProvider
 	onRegister   func(types.RemoteNode) error
 	onDisconnect func(nodeID string)
+	remoteTools  *remotetool.Registry
 }
 
 // SetAuth installs the auth provider used to issue user credentials when the
@@ -117,9 +119,58 @@ func (r *Registry) Register(nodeID string, reg *pb.Register, auth types.AuthProv
 // BindStream associates a ControlWriter with an already-registered node.
 func (r *Registry) BindStream(nodeID string, ctrl types.ControlWriter) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if mn, ok := r.nodes[nodeID]; ok {
 		mn.stream = ctrl
+	}
+	r.mu.Unlock()
+}
+
+// SetRemoteToolRegistry installs the registry pushed on node bind.
+func (r *Registry) SetRemoteToolRegistry(reg *remotetool.Registry) {
+	r.mu.Lock()
+	r.remoteTools = reg
+	r.mu.Unlock()
+}
+
+// RemoteToolPayload returns the current sync frame for remote_tool.list.
+func (r *Registry) RemoteToolPayload() *pb.Payload {
+	r.mu.RLock()
+	reg := r.remoteTools
+	r.mu.RUnlock()
+	if reg == nil {
+		return nil
+	}
+	return reg.Payload()
+}
+
+// BroadcastRemoteToolChanged notifies nodes to re-pull remote_tool.list.
+func (r *Registry) BroadcastRemoteToolChanged() {
+	r.mu.RLock()
+	ids := make([]string, 0, len(r.nodes))
+	for id := range r.nodes {
+		ids = append(ids, id)
+	}
+	r.mu.RUnlock()
+	for _, id := range ids {
+		_ = r.SendControl(id, &pb.Payload{Namespace: types.NamespaceControl, Kind: "remote_tool.changed"})
+	}
+}
+
+// BroadcastRemoteToolSync pushes the current tool registry to all nodes.
+func (r *Registry) BroadcastRemoteToolSync() {
+	r.mu.RLock()
+	ids := make([]string, 0, len(r.nodes))
+	for id := range r.nodes {
+		ids = append(ids, id)
+	}
+	reg := r.remoteTools
+	r.mu.RUnlock()
+	if reg == nil {
+		return
+	}
+	payload := reg.Payload()
+	for _, id := range ids {
+		_ = r.SendControl(id, payload)
 	}
 }
 
@@ -287,4 +338,9 @@ func generateTaiID() string {
 
 func marshalAny(m proto.Message) ([]byte, error) {
 	return proto.Marshal(m)
+}
+
+// SendRemoteToolSync sends one remote_tool.sync frame to a node.
+func (r *Registry) SendRemoteToolSync(nodeID string, payload *pb.Payload) error {
+	return r.SendControl(nodeID, payload)
 }

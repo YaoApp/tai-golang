@@ -17,6 +17,8 @@ import (
 	"time"
 
 	tai "github.com/yaoapp/tai-golang"
+	"github.com/yaoapp/tai-golang/app/plugins"
+	"github.com/yaoapp/tai-golang/app/tools"
 	"github.com/yaoapp/tai-golang/auth"
 	"github.com/yaoapp/tai-golang/node"
 	"github.com/yaoapp/tai-golang/types"
@@ -90,6 +92,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("create sdk server: %v", err)
 	}
+	if err := plugins.Register(sdkServer, os.Getenv("TAI_DEMO_WASM_DIR")); err != nil {
+		log.Fatalf("register demo plugins: %v", err)
+	}
+	if err := tools.Register(sdkServer); err != nil {
+		log.Fatalf("register demo tools: %v", err)
+	}
+	log.Printf("demo remote tool endpoint: transport_port=%d tools=%d plugins=%d", transportPort, len(sdkServer.RemoteToolRegistry().Sync().Tools), len(sdkServer.PluginRegistry().Metadata()))
 
 	// In-memory store for nodes/sessions.
 	store := NewStore()
@@ -115,8 +124,12 @@ func main() {
 		}
 	}()
 
-	// Wait for SDK server to be ready.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for SDK listeners to be bound rather than guessing a delay.
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer readyCancel()
+	if err := sdkServer.WaitReady(readyCtx); err != nil {
+		log.Fatalf("wait sdk ready: %v", err)
+	}
 
 	// Build API router.
 	mux := NewAPI(authProvider, store, users)
