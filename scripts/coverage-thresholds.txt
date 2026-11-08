@@ -8,3 +8,4 @@ transport 90
 session 90
 mock 90
 workspace 73
+plugin 90

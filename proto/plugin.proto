@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package tai;
+
+option go_package = "github.com/yaoapp/tai-golang/pb";
+
+// PluginEntry is a custom pipeline step registered by the SDK.
+message PluginEntry {
+  string name        = 1;
+  string version     = 2;
+  string runtime     = 3;
+  string digest      = 4;
+  uint64 size        = 5;
+  string description = 6;
+  bytes  artifact    = 7; // empty in sync metadata; fetched via Tool H2
+  Capabilities capabilities = 8;
+}
+
+message Capabilities {
+  repeated string args   = 1;
+  repeated string env    = 2;
+  repeated FSGrant fs    = 3;
+  FetchCapability fetch  = 4;
+}
+
+message FSGrant {
+  string mount = 1;
+  string mode  = 2;
+}
+
+message FetchCapability {
+  repeated string allow            = 1;
+  repeated string methods          = 2;
+  bool            follow_redirects = 3;
+  int64           max_body_bytes   = 4;
+  int32           timeout_ms       = 5;
+  int32           max_calls        = 6;
+}
