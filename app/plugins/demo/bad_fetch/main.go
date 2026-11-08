@@ -1,4 +1,5 @@
 //go:build wasip1
+
 package main
 
 //go:wasmimport tai_fetch fetch
