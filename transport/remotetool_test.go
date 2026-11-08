@@ -117,3 +117,37 @@ func TestRemoteToolCall_BadFrameIgnored(t *testing.T) {
 		t.Errorf("malformed request must not produce a response frame")
 	}
 }
+
+// noScopeAuth returns an identity without the remote_tool:call scope.
+type noScopeAuth struct{ *testAuth }
+
+func (a noScopeAuth) ValidateUserToken(string) (*types.UserIdentity, error) {
+	return &types.UserIdentity{UserID: "u1", TeamID: "t1"}, nil
+}
+
+func TestRemoteToolCall_RequiresScope(t *testing.T) {
+	var buf bytes.Buffer
+	reg := &trackingRegistry{testNodeRegistry: testNodeRegistry{pool: &pb.PoolConfig{}}}
+	cs := newControlStream("n1", strings.NewReader(""), &noopResponseWriter{&buf}, reg, noScopeAuth{&testAuth{}}, DefaultCodec())
+
+	reqData, _ := proto.Marshal(&pb.ServerToolRequest{Tool: "t", RequestId: "r-scope"})
+	cs.dispatch(&pb.Payload{
+		Namespace: types.NamespaceControl,
+		Kind:      types.KindRemoteToolCall,
+		Data:      reqData,
+		Identity:  &pb.Identity{UserToken: "tok"},
+	})
+
+	frame, err := cs.codec.ReadFrame(&buf)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	resp := &pb.ServerToolResponse{}
+	_ = proto.Unmarshal(frame.Data, resp)
+	if resp.Error == nil || resp.Error.Code != "unauthorized" {
+		t.Fatalf("error = %+v, want unauthorized", resp.Error)
+	}
+	if !strings.Contains(resp.Error.Message, "remote_tool:call") {
+		t.Errorf("message = %q, want scope hint", resp.Error.Message)
+	}
+}

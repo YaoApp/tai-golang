@@ -160,6 +160,8 @@ func (cs *controlStream) handleRemoteToolCall(msg *pb.Payload) {
 		resp.Error = &pb.ToolError{Code: "unauthorized", Message: "missing user credential"}
 	} else if identity, err := cs.auth.ValidateUserToken(token); err != nil {
 		resp.Error = &pb.ToolError{Code: "unauthorized", Message: "invalid user credential"}
+	} else if !identity.Scope.Has(types.RemoteToolCall) {
+		resp.Error = &pb.ToolError{Code: "unauthorized", Message: "credential lacks remote_tool:call scope"}
 	} else {
 		var input any
 		if len(req.Input) > 0 {

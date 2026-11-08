@@ -56,7 +56,7 @@ func (a *testAuth) IssueUserToken(nodeID string, scopes types.Scope) (string, *t
 }
 func (a *testAuth) RefreshUserToken(oldToken string) (string, error) { return "user-tok-2", nil }
 func (a *testAuth) ValidateUserToken(token string) (*types.UserIdentity, error) {
-	return &types.UserIdentity{UserID: "u1", TeamID: "t1"}, nil
+	return &types.UserIdentity{UserID: "u1", TeamID: "t1", Scope: types.Scope{types.RemoteToolCall}}, nil
 }
 
 func writeCtrlFrame(t *testing.T, w io.Writer, codec *FrameCodec, ns, kind string, data []byte) {
