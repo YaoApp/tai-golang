@@ -2,15 +2,38 @@
 
 ![Tai Console](./docs/images/console.png)
 
-Go SDK for the Tai Transport Protocol v2. This package implements the **server side** of the protocol, enabling any Go application to accept connections from Tai nodes, manage workspaces, run sessions, and execute agent workloads.
+Go SDK for building the **server side** of a Tai deployment.
 
-Tai is a computer agent installed on every machine. This SDK handles the transport layer so your application doesn't need to implement the protocol details.
+Tai is a computer agent installed on user machines. `tai-golang` lets a Go
+application accept Tai node connections and manage nodes, agent sessions,
+workspaces, realtime voice, Remote Tools, and Wasm plugins.
+
+The SDK is a library embedded in your application. It does not run an agent
+itself; it owns the server-side transport, identity, session orchestration, and
+business tool handlers.
 
 ## Status
 
-**Phase 2 in progress** — Transport (L0–L2), Light/Heavy pool, Workspace (4 interfaces, 36 commands, Context API, Skills API), Session (17 methods + Realtime audio, Daemon mode, OperationToken validation, Recovery Buffer + resume), and the Demo App with React frontend are all working.
+Active development. The public API follows the current v2 design and may change
+without backward-compatibility guarantees while the project is in development.
 
-Not yet implemented: Tunnel, Realtime Video, ONNX model integration for balanced render preset, container remote management.
+Working today:
+
+- Transport server with HTTP discovery, HTTP/2 + HTTP/3 support, and connection pools
+- Node registry, node lifecycle callbacks, remote node operations
+- Sessions: prompt, follow-up, steer, cancel, permissions, queue, runtime updates
+- Session recovery and resume
+- Workspaces: files, branches, commits, history, merge, watch, context, skills
+- Realtime: PCM audio, transcripts, emotion, avatar motion frames
+- Remote Tools with Tool H2, progress events, and Agent integration
+- Wasm plugins distributed by digest and streamed to nodes on demand
+- Auth: node tokens and scoped user tokens
+- Demo App with React frontend and docs browser
+
+Not yet implemented:
+
+- Realtime video
+- ONNX integration for the balanced render preset
 
 ## Install
 
@@ -22,7 +45,7 @@ Requires Go 1.26+.
 
 ## Download Tai
 
-The SDK requires a Tai node to connect. Download the nightly build (v2.x):
+The SDK needs Tai nodes to connect. Download the nightly build:
 
 ```bash
 # macOS (Apple Silicon)
@@ -42,7 +65,8 @@ $url = (Invoke-RestMethod https://get.yaoapps.com/tai/nightly/latest.json).asset
 Invoke-WebRequest $url -OutFile tai.exe
 ```
 
-All platforms: query [latest.json](https://get.yaoapps.com/tai/nightly/latest.json) for version info and download URLs. SHA256 checksums available at `<binary-url>.sha256`.
+See [latest.json](https://get.yaoapps.com/tai/nightly/latest.json) for versions,
+download URLs, and SHA256 checksums.
 
 ## Quick Start
 
@@ -58,10 +82,14 @@ import (
     tai "github.com/yaoapp/tai-golang"
     "github.com/yaoapp/tai-golang/auth"
     "github.com/yaoapp/tai-golang/node"
+    "github.com/yaoapp/tai-golang/types"
 )
 
 func main() {
-    _, privateKey, _ := ed25519.GenerateKey(rand.Reader)
+    _, privateKey, err := ed25519.GenerateKey(rand.Reader)
+    if err != nil {
+        log.Fatal(err)
+    }
 
     server, err := tai.NewServer(&tai.ServerConfig{
         TransportPort: 6099,
@@ -72,67 +100,146 @@ func main() {
         log.Fatal(err)
     }
 
-    node.OnRegister(func(n tai.RemoteNode) error {
-        log.Printf("node registered: %s", n.Info().ID)
+    node.OnRegister(func(rn types.RemoteNode) error {
+        log.Printf("node registered: %s", rn.Info().ID)
         return nil
     })
 
     go func() {
         if err := server.Start(context.Background()); err != nil {
-            log.Fatal(err)
+            log.Print(err)
         }
     }()
 
-    // Block until interrupt
+    if err := server.WaitReady(context.Background()); err != nil {
+        log.Fatal(err)
+    }
     select {}
 }
 ```
 
-## Opening a Session
+`auth.DefaultAuth` is a demo implementation for the complete local flow. Use a
+custom `AuthProvider` in production. See [Auth](docs/auth.md).
+
+A node then connects to the SDK:
+
+```bash
+tai start --node-id node-1 \
+  --server http://localhost:5099 \
+  --node-token <token> \
+  --data ./tai-volumes
+```
+
+Generate the node token with `IssueNodeToken` or through your own provisioning
+flow.
+
+## Core Concepts
+
+| Concept | Description |
+| --- | --- |
+| `Server` | Embedded transport, node registry, tool/plugin registries |
+| `RemoteNode` | A connected node with workspace/session operations |
+| `Session` | One agent conversation, commands, events, optional realtime |
+| `Workspace` | Remote filesystem, branches, history, watchers |
+| `AuthProvider` | Node credential and scoped user credential verification |
+| `RemoteTool` | Server-side tool exposed to node Agents |
+| `PluginEntry` | Wasm step for a Remote Tool pipeline |
+
+Read [Architecture](docs/architecture.md) for the deployment model and
+[API Reference](docs/api-reference.md) for a quick method lookup.
+
+## Sessions
 
 ```go
-// Issue an operation token for the session
-opToken, _ := authProvider.IssueOperationToken("node-1", "sess-001", []string{"session"}, nil)
+import (
+    "encoding/json"
 
-// Describe the models the session may use. Only "model" is required; the
-// provider is inferred from base_url when provider_id is empty.
-llm := json.RawMessage(`{
-  "primary": {"provider_id": "deepseek", "model": "deepseek-chat"},
-  "roles":   {"light": {"provider_id": "deepseek", "model": "deepseek-chat"}}
-}`)
+    "github.com/yaoapp/tai-golang/node"
+    "github.com/yaoapp/tai-golang/types"
+)
 
-// Get a registered node and open a session
-n := node.Get("node-1")
-session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
-    SessionID: "sess-001",
-    Token:     opToken,
-    Request: &tai.SessionRequest{
-        Runtime: "tai",
-        LLM:     llm,
-        Env:     map[string]string{"DEEPSEEK_API_KEY": "sk-..."},
+llm, _ := json.Marshal(map[string]any{
+    "primary": map[string]any{
+        "provider_id": "deepseek",
+        "model":       "deepseek-chat",
     },
 })
 
-// Send a prompt
-session.Prompt(&tai.UserMessage{Message: "Hello"})
+rn := node.Get("node-1")
+sess, err := rn.OpenSession(ctx, &types.SessionOpenRequest{
+    SessionID: "sess-001",
+    Scopes:    types.Scope{types.SessionAccess, types.WorkspaceRead},
+    Request: &types.SessionRequest{
+        Runtime: "tai",
+        Cwd:     "/workspace/project",
+        LLM:     llm,
+        Env:     map[string]string{"DEEPSEEK_API_KEY": apiKey},
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer sess.Close(context.Background())
 
-// Receive events
+if err := sess.Prompt(&types.UserMessage{Message: "Hello"}); err != nil {
+    log.Fatal(err)
+}
+
 for {
-    msg, err := session.RecvEvent()
+    msg, err := sess.RecvEvent()
     if err != nil {
         break
     }
-    fmt.Printf("[%s] %s\n", msg.Kind, string(msg.Data))
+    log.Printf("[%s] %s", msg.Kind, msg.Data)
 }
 ```
 
-See [LLM Providers](docs/llm-providers.md) for the full endpoint fields and how
-to switch models at runtime.
+`OpenSession` issues the user credential from the declared scopes; there is no
+operation token to pass. Use `ResumeSession` after a transport interruption.
+
+See [Session](docs/session.md) for steering, queue management, permissions,
+updates, and event handling. See [LLM Providers](docs/llm-providers.md) for model
+and endpoint configuration.
+
+## Workspaces
+
+```go
+rn := node.Get("node-1")
+
+ws, err := rn.OpenWorkspace(ctx, "workspace-id")
+if err != nil {
+    log.Fatal(err)
+}
+
+branch, err := ws.GetBranch(ctx, "main")
+if err != nil {
+    log.Fatal(err)
+}
+
+data, err := fs.ReadFile(branch.FS(), "README.md")
+if err != nil {
+    log.Fatal(err)
+}
+
+w, err := branch.FS().Create("hello.txt")
+if err != nil {
+    log.Fatal(err)
+}
+_, _ = w.Write([]byte("Hello, World!"))
+_ = w.Close()
+
+if err := branch.Commit(ctx, "add hello.txt"); err != nil {
+    log.Fatal(err)
+}
+```
+
+Use `Rename`, `Remove`, `MkdirAll`, `WriteArchive`, `ReadManifest`, `Exists`,
+history queries, merges, and watchers as needed. See
+[Workspace API](docs/workspace.md).
 
 ## Remote Tools
 
-The SDK can expose tools that Tai nodes call over Tool H2. Tools can run a
-local pipeline and then invoke your handler through the `$request` step.
+Remote Tools expose application capabilities to node Agents:
 
 ```go
 import (
@@ -143,24 +250,22 @@ import (
     "github.com/yaoapp/tai-golang/remotetool"
 )
 
-err := server.SetRemoteTools([]*remotetool.Tool{
-    {
-        Entry: &pb.RemoteToolEntry{
-            Name:        "ping",
-            Group:       "dev",
-            Description: "Return a message and the verified caller identity.",
-            InputSchema: []byte(`{"type":"object","properties":{"message":{"type":"string"}}}`),
-        },
-        Handler: func(ctx context.Context, input []byte) ([]byte, error) {
-            var req struct{ Message string `json:"message"` }
-            _ = json.Unmarshal(input, &req)
-            user := remotetool.User(ctx)
-            return json.Marshal(map[string]any{
-                "message": req.Message,
-                "user_id": user.UserID,
-                "team_id": user.TeamID,
-            })
-        },
+err := server.RegisterRemoteTool(&remotetool.Tool{
+    Entry: &pb.RemoteToolEntry{
+        Name:        "ping",
+        Group:       "dev",
+        Description: "Return a message and the caller identity.",
+        InputSchema: []byte(`{"type":"object","properties":{"message":{"type":"string"}}}`),
+    },
+    Handler: func(ctx context.Context, input []byte) ([]byte, error) {
+        var req struct{ Message string `json:"message"` }
+        _ = json.Unmarshal(input, &req)
+        user := remotetool.User(ctx)
+        return json.Marshal(map[string]any{
+            "message": req.Message,
+            "user_id": user.UserID,
+            "team_id": user.TeamID,
+        })
     },
 })
 if err != nil {
@@ -168,227 +273,191 @@ if err != nil {
 }
 ```
 
-On the Tai node:
+The node exposes the tool to the Agent. Calls return to the SDK handler with a
+verified user identity. Tool metadata and plugin metadata are synced to the node;
+tool calls and plugin artifacts use the SDK transport port.
 
-```bash
-tai run --list
-tai run ping --describe
-tai run ping --input '{"message":"hello"}'
-```
+See [Remote Tools](docs/remote-tools.md) for pipelines, progress handlers, CLI,
+and error codes.
 
-Tool metadata and Plugin metadata are synced over Control. Tool calls and
-Plugin artifacts use the SDK `transport_port` (`/v1/tai/tool/*`); there is no
-separate Tool port. Handlers can stream progress with
-`remotetool.ProgressHandler` and read the verified identity with
-`remotetool.User(ctx)`.
+## Plugins
 
-See [docs/remote-tools.md](docs/remote-tools.md) for the full API, pipelines,
-Plugins, CLI, and error reference.
-
-## Realtime (Voice)
+A Remote Tool pipeline can include Wasm plugin steps:
 
 ```go
-// Start realtime mode
-session.StartRealtime(&tai.RealtimeRequest{
-    Providers: tai.Providers{
-        Primary: tai.Provider{
-            ProviderID: "openai", Model: "gpt-realtime-mini",
-            BaseURL: "wss://api.openai.com/v1/realtime", APIKey: "sk-...",
+err := server.RegisterPlugin(&pb.PluginEntry{
+    Name:         "demo.normalize",
+    Version:      "1.0.0",
+    Runtime:      "wasm",
+    ArtifactPath: "dist/wasm/normalize.wasm",
+})
+```
+
+`RegisterPlugin` reads the file once to compute `digest` and `size`, then stores
+the path. The node downloads the artifact on demand; the SDK opens and streams
+it from disk at that point.
+
+See [Remote Tool Plugins](docs/remote-tool-plugins.md) for the plugin ABI,
+capabilities, build commands, and pipeline examples.
+
+## Realtime
+
+Realtime upgrades an open session into a voice conversation:
+
+```go
+err := sess.StartRealtime(&types.RealtimeRequest{
+    Providers: types.Providers{
+        Primary: types.Provider{
+            ProviderID: "openai",
+            Model:      "gpt-realtime-mini",
+            BaseURL:    "wss://api.openai.com/v1/realtime",
+            APIKey:     os.Getenv("OPENAI_API_KEY"),
         },
     },
-    Audio: &tai.AudioConfig{OutputFormat: "pcm16", SampleRate: 24000},
+    Audio: &types.AudioConfig{
+        InputFormat:  "pcm16",
+        OutputFormat: "pcm16",
+        SampleRate:   24000,
+        Channels:     1,
+        Voice:        "alloy",
+    },
 })
+if err != nil {
+    log.Fatal(err)
+}
 
-// Send audio + receive speech
-session.AudioAppend(pcmData)
-
+// Microphone → node.
 go func() {
-    for frame := range session.RecvAudio() {
+    for buf := range micFrames {
+        if err := sess.AudioAppend(buf); err != nil {
+            return
+        }
+    }
+}()
+
+// Node → speakers.
+go func() {
+    for frame := range sess.RecvAudio() {
         speaker.Play(frame.Data)
     }
 }()
 
-// Receive render stream (transcript, emotion)
+// Transcript and emotion.
 go func() {
-    for evt := range session.RecvRender() {
-        switch evt.Type {
+    for ev := range sess.RecvRender() {
+        switch ev.Type {
         case "transcript.delta":
-            subtitle.Append(evt.Content)
+            subtitle.Append(ev.Content)
+        case "transcript.done":
+            subtitle.Set(ev.Transcript)
         case "emotion":
-            mood.Set(evt.Emotion, evt.Intensity)
+            mood.Set(ev.State, ev.Emotion, ev.Intensity)
         }
     }
 }()
 
-session.StopRealtime()
+_ = sess.StopRealtime()
 ```
 
-## Render (Avatar Motion)
+Do not read `RecvAction` concurrently with `StartRealtime`; start one control
+relay after it returns. See [Session Realtime](docs/session-realtime.md) and
+[Render Protocol](docs/render.md).
+
+## Avatar Motion
+
+Enable motion on the realtime request:
 
 ```go
-// Start with motion enabled
-session.StartRealtime(&tai.RealtimeRequest{
+err := sess.StartRealtime(&types.RealtimeRequest{
     Providers: providers,
-    Audio:  &tai.AudioConfig{OutputFormat: "pcm16", SampleRate: 24000},
-    Motion: &tai.MotionConfig{Enabled: true, Provider: "fast", Profile: "arkit_52", FPS: 30},
+    Audio:     &types.AudioConfig{OutputFormat: "pcm16", SampleRate: 24000},
+    Motion: &types.MotionConfig{
+        Enabled: true,
+        Profile: "arkit_52",
+        FPS:     30,
+    },
 })
 
-// Receive motion frames (30fps, 87 bytes each)
 go func() {
-    for frame := range session.RecvMotion() {
+    for frame := range sess.RecvMotion() {
         avatar.ApplyBlendshapes(frame.Face, frame.Head, frame.Gaze)
     }
 }()
-
-// Receive render stream events (transcript, audio lifecycle, emotion)
-go func() {
-    for evt := range session.RecvRender() {
-        switch evt.Type {
-        case "transcript.delta", "transcript.done":
-            subtitle.Update(evt.Type, evt.Content, evt.Transcript)
-        case "emotion":
-            mood.Set(evt.State, evt.Emotion, evt.Intensity)
-        }
-    }
-}()
 ```
 
-See [docs/render.md](docs/render.md) for the complete render protocol.
-
-## Working with Workspaces
-
-```go
-// List workspaces on a node
-entries, _ := node.ListWorkspaces(ctx, types.ListOptions{})
-
-// Create a new workspace (path auto-generated on the Tai node)
-ws, _ := node.CreateWorkspace(ctx, types.Meta{Name: "my-project", Owner: "user-1"})
-
-// Open an existing workspace
-ws, _ := node.OpenWorkspace(ctx, "workspace-id")
-
-// Branch operations
-branches, _ := ws.ListBranches(ctx)
-branch, _ := ws.CreateBranch(ctx, "feature-1", "main", nil)
-ws.Merge(ctx, "feature-1", "main", types.MergeOptions{})
-
-// File operations via fs.FS interface
-bfs := branch.FS()
-data, _ := fs.ReadFile(bfs, "README.md")
-entries, _ := fs.ReadDir(bfs, ".")
-
-// Write files
-w, _ := bfs.Create("hello.txt")
-w.Write([]byte("Hello, World!"))
-w.Close()
-
-// Check existence
-exists, _ := bfs.Exists("hello.txt")
-
-// Archive extraction (auto-detects gzip/zip)
-bfs.WriteArchive(".skills/my-skill", archiveReader)
-
-// Read manifest
-manifest, _ := bfs.ReadManifest(".skills/my-skill")
-
-// Commit changes
-branch.Commit(ctx, "initial commit")
-```
-
-## Architecture
-
-```text
-Your Application                    Tai Node
-┌─────────────────────┐            ┌──────────┐
-│  import tai-golang  │            │ tai start │
-│                     │            │           │
-│  SDK Server         │  ←─────── │  connects │
-│    :5099  HTTP      │  outbound │  to SDK   │
-│    :6099  Transport │            │           │
-└─────────────────────┘            └──────────┘
-```
-
-The SDK embeds into your application as a library — no separate process. Tai nodes connect outbound to the SDK's two ports.
-
-## Project Layout
-
-```
-server.go             Server + Session interfaces, NewServer, OpenSession
-session/              Session implementation (17 methods, dual-stream, recovery buffer)
-workspace/            Remote workspace API (fs.FS + write, branch, history, watch, context, skills)
-node/                 Node registry and RemoteNode implementation
-types/                Shared types (Session, Workspace, Event, Permission, etc.)
-auth/                 AuthProvider interface + DefaultAuth (Ed25519 JWT)
-transport/            Transport server (H2/H3, Light pool, Heavy pool, frame codec)
-mock/                 Test doubles (MockNode, MockLLM, MockSession, MockLightConn)
-proto/                Protobuf source files (control, session, computer, servertool)
-pb/                   Generated Go code from protobuf
-app/                  Demo application (Go API server + React frontend)
-docs/                 SDK documentation (rendered in demo app)
-```
+Motion is optional and non-fatal; realtime continues if the motion channel is
+unavailable.
 
 ## Documentation
-
-Full SDK documentation is available in the [`docs/`](docs/) directory:
 
 - [Quick Start](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [API Reference](docs/api-reference.md)
+- [Auth](docs/auth.md)
+- [Node API](docs/nodes.md)
 - [Workspace API](docs/workspace.md)
-- [Session Protocol](docs/session-protocol.md)
 - [Session](docs/session.md)
-- [LLM Providers](docs/llm-providers.md)
 - [Session File Inputs](docs/session-inputs.md)
 - [Session Context](docs/session-context.md)
 - [Session Skills](docs/session-skills.md)
 - [Session Attachments](docs/session-attachments.md)
 - [Session Realtime](docs/session-realtime.md)
+- [Session Protocol](docs/session-protocol.md)
+- [LLM Providers](docs/llm-providers.md)
 - [ACP Events Reference](docs/events.md)
 - [Realtime Protocol](docs/realtime.md)
 - [Render Protocol](docs/render.md)
 - [Resource URI Convention](docs/uri.md)
+- [Remote Tools](docs/remote-tools.md)
+- [Remote Tool Plugins](docs/remote-tool-plugins.md)
 - [Demo App Guide](docs/demo-guide.md)
 
-Run the demo app to browse documentation with syntax highlighting:
+## Demo App
+
+The repository includes a demo application that embeds the SDK and serves a
+React UI plus a documentation browser.
 
 ```bash
-cd app && make build
+cd app
+make build
 
-# Text agent sessions and the docs browser
+# Text sessions and docs browser
 DEEPSEEK_API_KEY=<key> ./tai-demo --port 3000
 
-# Add a provider key for Realtime voice; the built-in preset uses OpenAI
+# Enable realtime voice too
 DEEPSEEK_API_KEY=<key> OPENAI_API_KEY=<key> ./tai-demo --port 3000
 ```
 
-The demo injects whichever keys are present into each session's environment, so
-set only the providers you intend to use. See [Demo App Guide](docs/demo-guide.md).
+Open <http://localhost:3000>. See [Demo App Guide](docs/demo-guide.md).
 
-## Implemented
+## Project Layout
 
-- **Transport (L0–L2)**: HTTP API (:5099), TCP/UDP transport (:6099), H3 (QUIC) + H2 fallback, Light/Heavy connection pool
-- **Node**: Registry, RemoteNode interface, online/offline lifecycle, GoAway
-- **Session (29 methods)**: Prompt, Followup, Cancel, Steer, UpdateQueue, ResolvePermission, ResolveElicitation, SetConfigOption, UpdateSession, RecvEvent, RecvAction, StartRealtime, UpdateRealtime, StopRealtime, AudioAppend, AudioCommit, AudioClear, AudioInterrupt, ResponseCreate, RecvAudio, RecvMotion, RecvRender, SendVideoFrame (stub), RecvVideoFrame (stub), Close, ID, NodeID, Status, Done
-- **Realtime Audio**: QUIC datagram (H3) + bidi stream fallback (H2), EncodeAudioFrame/DecodeAudioFrame, DatagramConn interface, H2 stale frame detection
-- **Render (Avatar Motion)**: MotionFrame 87-byte wire format (Pack/Unpack), motion datagram encode/decode (95 bytes), RecvMotion (QUIC datagram), RecvRender (render stream), RenderEvent type, MotionConfig (provider/profile/fps)
-- **Session Recovery**: Recovery Buffer (per-session 1000-message ring buffer), session.resume with seq replay, token.refresh periodic renewal
-- **Remote Tools**: `SetRemoteTools` / `RegisterRemoteTool` / `UnregisterRemoteTool`; Tool H2 on `transport_port`; Control sync/changed/list; Agent bridge; container broker; streaming progress; `-race`/E2E tested
-- **Plugins (Wasm)**: `RegisterPlugin` / `SetRemotePlugins`, artifact H2 distribution, 16 MiB limit
-- **Workspace**: CRUD, branch management (create/delete/merge), file operations (fs.FS + write extensions + Exists/WriteArchive/ReadManifest), commit/rollback, history query, GC, watch — 36 transport command kinds
-- **Context API**: Four-level scope model (bot → home → board → session), SeedContext, ReadContext, MergeContext
-- **Skills API**: SkillPack, SkillHash, SyncSkills with manifest-based incremental sync
-- **Auth**: Ed25519 JWT node_token (issue/validate/refresh), OperationToken (issue/sign/validate)
-- **Types**: Full ACP v2 type coverage (Event, ContentBlock, Permission, Elicitation, Queue, Disposition, Config)
-- **Proto**: 6 `.proto` files with generated Go (control, session, computer, servertool, plugin, remotetool)
-- **Demo App**: React frontend (nodes, sessions, workspaces, file manager, docs browser) + Go API server
-- **Test Infrastructure**: MockNode, MockLLM, MockSession (+ Realtime auto-reply), MockLightConn/Stream, 400+ test functions
+```text
+server.go       Server interface, NewServer, ServerConfig
+node/           Node registry, RemoteNode operations
+session/        Session implementation
+workspace/      Remote workspace, branches, history, watchers
+remotetool/     Remote Tool registry and handlers
+plugin/         Wasm plugin registry and artifact paths
+auth/           AuthProvider interface + demo DefaultAuth
+transport/      HTTP discovery, HTTP/2/HTTP/3 transport, frame codec
+types/          Public SDK types
+mock/           Test doubles
+proto/          Protobuf source
+pb/             Generated Go code
+app/            Demo application
+docs/           SDK documentation
+```
 
-## Not Yet Implemented
+## Development
 
-- Tunnel
-- Realtime Video (Plan 7b)
-- ONNX model integration for balanced render preset
-- Container remote management
+```bash
+go test ./...
+go vet ./...
+./scripts/coverage-gate.sh coverage.out
+```
+
+The demo app requires Node.js 22+ for the frontend build.
 
 ## License
 

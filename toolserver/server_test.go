@@ -35,11 +35,11 @@ func testServer(t *testing.T, allow bool) (*Server, *httptest.Server) {
 			}
 			return &types.UserIdentity{Scope: types.Scope{types.RemoteToolCall}}, nil
 		},
-		Artifacts: func(digest string) ([]byte, error) {
+		Artifacts: func(digest string) (io.ReadCloser, uint64, error) {
 			if digest != strings.Repeat("a", 64) {
-				return nil, io.ErrUnexpectedEOF
+				return nil, 0, io.ErrUnexpectedEOF
 			}
-			return []byte("wasm"), nil
+			return io.NopCloser(strings.NewReader("wasm")), 4, nil
 		},
 	}
 	ts := httptest.NewUnstartedServer(s.Handler())
@@ -339,7 +339,7 @@ func TestProgressStream(t *testing.T) {
 func TestArtifactInvalidDigestAndRequestID(t *testing.T) {
 	reg := remotetool.New(nil)
 	_ = reg.Set([]*remotetool.Tool{{Entry: &pb.RemoteToolEntry{Name: "x"}, Handler: func(context.Context, []byte) ([]byte, error) { return nil, nil }}})
-	s := &Server{Registry: reg, NodeAuth: func(*http.Request) bool { return true }, Artifacts: func(string) ([]byte, error) { return nil, errors.New("missing") }, UserAuth: func(string) (*types.UserIdentity, error) {
+	s := &Server{Registry: reg, NodeAuth: func(*http.Request) bool { return true }, Artifacts: func(string) (io.ReadCloser, uint64, error) { return nil, 0, errors.New("missing") }, UserAuth: func(string) (*types.UserIdentity, error) {
 		return &types.UserIdentity{Scope: types.Scope{types.RemoteToolCall}}, nil
 	}}
 	ts := httptest.NewUnstartedServer(s.Handler())

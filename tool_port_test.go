@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,7 +22,11 @@ func TestToolEndpointOnTransportPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &pb.PluginEntry{Name: "demo.normalize", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("wasm")}
+	wasmPath := filepath.Join(t.TempDir(), "normalize.wasm")
+	if err := os.WriteFile(wasmPath, []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &pb.PluginEntry{Name: "demo.normalize", Version: "1.0.0", Runtime: "wasm", ArtifactPath: wasmPath}
 	if err := s.RegisterPlugin(e); err != nil {
 		t.Fatal(err)
 	}

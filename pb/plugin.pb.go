@@ -30,7 +30,7 @@ type PluginEntry struct {
 	Digest        string                 `protobuf:"bytes,4,opt,name=digest,proto3" json:"digest,omitempty"`
 	Size          uint64                 `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
 	Description   string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
-	Artifact      []byte                 `protobuf:"bytes,7,opt,name=artifact,proto3" json:"artifact,omitempty"` // empty in sync metadata; fetched via Tool H2
+	ArtifactPath  string                 `protobuf:"bytes,7,opt,name=artifact_path,json=artifactPath,proto3" json:"artifact_path,omitempty"` // SDK-local source path; never synced
 	Capabilities  *Capabilities          `protobuf:"bytes,8,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -108,11 +108,11 @@ func (x *PluginEntry) GetDescription() string {
 	return ""
 }
 
-func (x *PluginEntry) GetArtifact() []byte {
+func (x *PluginEntry) GetArtifactPath() string {
 	if x != nil {
-		return x.Artifact
+		return x.ArtifactPath
 	}
-	return nil
+	return ""
 }
 
 func (x *PluginEntry) GetCapabilities() *Capabilities {
@@ -330,15 +330,15 @@ var File_plugin_proto protoreflect.FileDescriptor
 
 const file_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\fplugin.proto\x12\x03tai\"\xf6\x01\n" +
+	"\fplugin.proto\x12\x03tai\"\xff\x01\n" +
 	"\vPluginEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x18\n" +
 	"\aruntime\x18\x03 \x01(\tR\aruntime\x12\x16\n" +
 	"\x06digest\x18\x04 \x01(\tR\x06digest\x12\x12\n" +
 	"\x04size\x18\x05 \x01(\x04R\x04size\x12 \n" +
-	"\vdescription\x18\x06 \x01(\tR\vdescription\x12\x1a\n" +
-	"\bartifact\x18\a \x01(\fR\bartifact\x125\n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\x12#\n" +
+	"\rartifact_path\x18\a \x01(\tR\fartifactPath\x125\n" +
 	"\fcapabilities\x18\b \x01(\v2\x11.tai.CapabilitiesR\fcapabilities\"~\n" +
 	"\fCapabilities\x12\x12\n" +
 	"\x04args\x18\x01 \x03(\tR\x04args\x12\x10\n" +

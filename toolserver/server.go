@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -31,8 +32,8 @@ type Server struct {
 	NodeAuth func(*http.Request) bool
 	// UserAuth validates the per-call user token.
 	UserAuth func(token string) (*types.UserIdentity, error)
-	// Artifacts returns a plugin artifact by digest.
-	Artifacts func(digest string) ([]byte, error)
+	// Artifacts opens a plugin artifact for streaming by digest.
+	Artifacts func(digest string) (io.ReadCloser, uint64, error)
 	codec     *transport.FrameCodec
 	codecOnce sync.Once
 }
@@ -179,16 +180,19 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	data, err := s.Artifacts(hex)
+	rc, size, err := s.Artifacts(hex)
 	if err != nil {
 		log.Printf("tool artifact miss: digest=%s err=%v", hex, err)
 		http.NotFound(w, r)
 		return
 	}
-	log.Printf("tool artifact served: digest=%s size=%d", hex, len(data))
+	defer rc.Close()
+	log.Printf("tool artifact served: digest=%s size=%d", hex, size)
 	w.Header().Set("Content-Type", "application/wasm")
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	_, _ = w.Write(data)
+	w.Header().Set("Content-Length", strconv.FormatUint(size, 10))
+	if _, err := io.Copy(w, rc); err != nil {
+		log.Printf("tool artifact stream error: digest=%s err=%v", hex, err)
+	}
 }
 
 // ServeTLS runs the Tool H2 endpoint with ALPN h2 until ctx is done.

@@ -108,10 +108,10 @@ A tool can run local Wasm Plugin steps before and after `$request`:
 
 ```go
 err := server.RegisterPlugin(&pb.PluginEntry{
-    Name:    "demo.normalize",
-    Version: "1.0.0",
-    Runtime: "wasm",
-    Artifact: normalizeWasm, // []byte
+    Name:         "demo.normalize",
+    Version:      "1.0.0",
+    Runtime:      "wasm",
+    ArtifactPath: "dist/wasm/normalize.wasm",
 })
 if err != nil {
     log.Fatal(err)
@@ -134,9 +134,9 @@ err = server.SetRemoteTools([]*remotetool.Tool{
 })
 ```
 
-Plugins are registered with their Wasm artifact. The SDK computes and publishes
-the digest and size; the node downloads the bytes from the Tool H2 artifact
-endpoint. `SetRemotePlugins` replaces the full set; `UnregisterPlugin` removes
+Plugins are registered with a local Wasm artifact path. The SDK computes and
+publishes the digest and size; the node downloads the bytes from the Tool H2
+artifact endpoint, opened and streamed on demand. `SetRemotePlugins` replaces the full set; `UnregisterPlugin` removes
 one. A Plugin artifact is limited to 16 MiB.
 
 Pipeline steps run in the node:
@@ -235,3 +235,12 @@ mode each node provides.
 `-f`, `--session-id`, `--sandbox-id`, `--socat-addr`, `--timeout-ms` and `-v`.
 Progress frames are streamed from Tool H2 through the host bridge/broker and
 printed live by `-v`.
+
+See [Remote Tool Plugins](remote-tool-plugins.md) for the plugin source
+layout, stdin/stdout ABI, capabilities, build commands, and pipeline examples.
+
+## Tunnel-like capabilities
+
+The SDK does not expose a Tunnel API. Applications that need tunnel-style
+exposure should implement it as a Remote Tool on the application side; the SDK
+only provides tool registration, caller identity, and transport.

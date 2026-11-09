@@ -55,7 +55,7 @@ message Register {
   string   node_id      = 1; // Unique node identifier
   string   version      = 2; // Tai binary version
   Hardware hardware     = 3; // Hardware information
-  repeated string capabilities = 4; // e.g. ["session","tunnel","realtime","container"]
+  repeated string capabilities = 4; // e.g. ["session","sandbox:native","realtime"]
   repeated ContainerRuntime container_runtimes = 5; // Available container runtimes
 }
 

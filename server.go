@@ -58,8 +58,6 @@ type (
 	UserMessage           = types.UserMessage
 	ToolDefinition        = types.ToolDefinition
 	ToolHandler           = types.ToolHandler
-	TunnelProvider        = types.TunnelProvider
-	TunnelBindRequest     = types.TunnelBindRequest
 	RealtimeRequest       = types.RealtimeRequest
 	RealtimeUpdateOptions = types.RealtimeUpdateOptions
 	Providers             = types.Providers
@@ -280,7 +278,7 @@ func newServer(cfg *ServerConfig) (*server, error) {
 			return r.Header.Get("X-Tai-Node-Id") == info.NodeID
 		},
 		UserAuth:  c.Auth.ValidateUserToken,
-		Artifacts: pluginReg.Artifact,
+		Artifacts: pluginReg.OpenArtifact,
 	}).Handler())
 	return s, nil
 }

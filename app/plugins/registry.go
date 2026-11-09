@@ -42,11 +42,11 @@ func Register(reg Registrar, wasmDir string) error {
 		if err := json.Unmarshal(metaData, &m); err != nil {
 			return fmt.Errorf("plugins: decode %s: %w", name, err)
 		}
-		data, err := os.ReadFile(filepath.Join(wasmDir, name+".wasm"))
-		if err != nil {
-			return fmt.Errorf("plugins: read artifact %s: %w", name, err)
+		artifactPath := filepath.Join(wasmDir, name+".wasm")
+		if _, err := os.Stat(artifactPath); err != nil {
+			return fmt.Errorf("plugins: artifact %s: %w", artifactPath, err)
 		}
-		entry := &pb.PluginEntry{Name: m.Name, Version: m.Version, Runtime: m.Runtime, Artifact: data}
+		entry := &pb.PluginEntry{Name: m.Name, Version: m.Version, Runtime: m.Runtime, ArtifactPath: artifactPath}
 		if err := reg.RegisterPlugin(entry); err != nil {
 			return err
 		}

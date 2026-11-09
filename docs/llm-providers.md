@@ -60,7 +60,7 @@ llmJSON := json.RawMessage(`{
 
 sess, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-001",
-    Token:     token,
+    Scopes:    types.Scope{types.SessionAccess},
     Request: &types.SessionRequest{
         WorkspaceID: "ws-001",
         Runtime:     "tai",

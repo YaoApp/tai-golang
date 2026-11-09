@@ -280,7 +280,7 @@ type Register struct {
 	NodeId            string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                  // Unique node identifier
 	Version           string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`                                              // Tai binary version
 	Hardware          *Hardware              `protobuf:"bytes,3,opt,name=hardware,proto3" json:"hardware,omitempty"`                                            // Hardware information
-	Capabilities      []string               `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`                                    // e.g. ["session","tunnel","realtime","container"]
+	Capabilities      []string               `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`                                    // e.g. ["session","sandbox:native","realtime"]
 	ContainerRuntimes []*ContainerRuntime    `protobuf:"bytes,5,rep,name=container_runtimes,json=containerRuntimes,proto3" json:"container_runtimes,omitempty"` // Available container runtimes
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache

@@ -149,8 +149,9 @@ tai run ping --input '{"message":"hello"}'
 
 Tool definitions, groups, schemas, pipelines, and Plugin metadata are synced
 over Control. Calls use the SDK `transport_port`; there is no separate Tool
-port. See [Remote Tools](remote-tools.md) for progress events, Plugins,
-pipelines, and the endpoint/error reference.
+port. See [Remote Tools](remote-tools.md) for progress events, pipelines, and the
+endpoint/error reference. See [Remote Tool Plugins](remote-tool-plugins.md) for
+writing Wasm plugins.
 
 ## Realtime (Voice)
 

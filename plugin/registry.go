@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,7 +35,7 @@ type Registry struct {
 
 type stored struct {
 	meta *pb.PluginEntry
-	data []byte
+	path string
 }
 
 // New creates a registry. changed is called when the set changes.
@@ -41,8 +43,9 @@ func New(changed func()) *Registry {
 	return &Registry{plugins: map[string]*stored{}, changed: changed}
 }
 
-// RegisterPlugin validates, hashes and stores a Plugin. Digest/Size are
-// computed by the SDK when empty.
+// RegisterPlugin validates a Plugin and computes digest/size from its source
+// artifact_path. The file is opened here only to hash it; bytes are not kept in
+// memory. The file is opened again when the artifact is transferred.
 func (r *Registry) RegisterPlugin(entry *pb.PluginEntry) error {
 	if entry == nil || !nameRE.MatchString(entry.Name) || !versionRE.MatchString(entry.Version) {
 		return fmt.Errorf("%w: invalid name/version", ErrInvalidPlugin)
@@ -50,15 +53,14 @@ func (r *Registry) RegisterPlugin(entry *pb.PluginEntry) error {
 	if entry.Runtime != "wasm" {
 		return fmt.Errorf("%w: runtime %q", ErrInvalidPlugin, entry.Runtime)
 	}
-	if len(entry.Artifact) == 0 {
-		return fmt.Errorf("%w: artifact is required", ErrInvalidPlugin)
+	if entry.ArtifactPath == "" {
+		return fmt.Errorf("%w: artifact_path is required", ErrInvalidPlugin)
 	}
-	if len(entry.Artifact) > MaxPluginArtifact {
-		return fmt.Errorf("%w: artifact exceeds %d bytes", ErrInvalidPlugin, MaxPluginArtifact)
+	digest, size, err := hashArtifactFile(entry.ArtifactPath)
+	if err != nil {
+		return err
 	}
-	sum := sha256.Sum256(entry.Artifact)
-	entry.Digest = "sha256:" + hex.EncodeToString(sum[:])
-	entry.Size = uint64(len(entry.Artifact))
+	entry.Digest, entry.Size = digest, size
 	key := entry.Name + "@" + entry.Version
 	r.mu.Lock()
 	if _, ok := r.plugins[key]; ok {
@@ -66,10 +68,30 @@ func (r *Registry) RegisterPlugin(entry *pb.PluginEntry) error {
 		return fmt.Errorf("%w: duplicate %s", ErrInvalidPlugin, key)
 	}
 	meta := cloneMeta(entry)
-	r.plugins[key] = &stored{meta: meta, data: append([]byte(nil), entry.Artifact...)}
+	r.plugins[key] = &stored{meta: meta, path: entry.ArtifactPath}
 	r.mu.Unlock()
 	r.notify()
 	return nil
+}
+
+func hashArtifactFile(path string) (string, uint64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: open artifact: %v", ErrInvalidPlugin, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(f, MaxPluginArtifact+1))
+	if err != nil {
+		return "", 0, fmt.Errorf("%w: read artifact: %v", ErrInvalidPlugin, err)
+	}
+	if n == 0 {
+		return "", 0, fmt.Errorf("%w: artifact is empty", ErrInvalidPlugin)
+	}
+	if n > MaxPluginArtifact {
+		return "", 0, fmt.Errorf("%w: artifact exceeds %d bytes", ErrInvalidPlugin, MaxPluginArtifact)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), uint64(n), nil
 }
 
 // UnregisterPlugin removes a Plugin.
@@ -90,17 +112,19 @@ func (r *Registry) UnregisterPlugin(name, version string) error {
 func (r *Registry) SetRemotePlugins(entries []*pb.PluginEntry) error {
 	next := make(map[string]*stored, len(entries))
 	for _, e := range entries {
-		if e == nil || !nameRE.MatchString(e.Name) || !versionRE.MatchString(e.Version) || e.Runtime != "wasm" || len(e.Artifact) == 0 || len(e.Artifact) > MaxPluginArtifact {
+		if e == nil || !nameRE.MatchString(e.Name) || !versionRE.MatchString(e.Version) || e.Runtime != "wasm" || e.ArtifactPath == "" {
 			return fmt.Errorf("%w: invalid entry", ErrInvalidPlugin)
 		}
-		sum := sha256.Sum256(e.Artifact)
-		e.Digest = "sha256:" + hex.EncodeToString(sum[:])
-		e.Size = uint64(len(e.Artifact))
+		digest, size, err := hashArtifactFile(e.ArtifactPath)
+		if err != nil {
+			return err
+		}
+		e.Digest, e.Size = digest, size
 		key := e.Name + "@" + e.Version
 		if _, ok := next[key]; ok {
 			return fmt.Errorf("%w: duplicate %s", ErrInvalidPlugin, key)
 		}
-		next[key] = &stored{meta: cloneMeta(e), data: append([]byte(nil), e.Artifact...)}
+		next[key] = &stored{meta: cloneMeta(e), path: e.ArtifactPath}
 	}
 	r.mu.Lock()
 	r.plugins = next
@@ -126,21 +150,35 @@ func (r *Registry) Metadata() []*pb.PluginEntry {
 	return out
 }
 
-// Artifact returns the bytes for a digest.
-func (r *Registry) Artifact(digest string) ([]byte, error) {
+// OpenArtifact opens the plugin artifact for streaming. Digest is accepted
+// with or without the sha256: prefix.
+func (r *Registry) OpenArtifact(digest string) (io.ReadCloser, uint64, error) {
 	if digest != "" && !strings.HasPrefix(digest, "sha256:") {
 		digest = "sha256:" + digest
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	var path string
+	var size uint64
 	for _, s := range r.plugins {
 		if s.meta.Digest == digest {
-			return append([]byte(nil), s.data...), nil
+			path, size = s.path, s.meta.Size
+			break
 		}
 	}
-	return nil, ErrNotFound
+	r.mu.RUnlock()
+	if path == "" {
+		return nil, 0, ErrNotFound
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	if info, err := f.Stat(); err != nil || uint64(info.Size()) != size {
+		f.Close()
+		return nil, 0, fmt.Errorf("%w: artifact changed", ErrInvalidPlugin)
+	}
+	return f, size, nil
 }
-
 func (r *Registry) notify() {
 	if r.changed != nil {
 		r.changed()
@@ -152,6 +190,7 @@ func cloneMeta(e *pb.PluginEntry) *pb.PluginEntry {
 		Name: e.Name, Version: e.Version, Runtime: e.Runtime,
 		Digest: e.Digest, Size: e.Size, Description: e.Description,
 	}
+	cp.ArtifactPath = ""
 	if e.Capabilities != nil {
 		cp.Capabilities = &pb.Capabilities{
 			Args: append([]string(nil), e.Capabilities.Args...),

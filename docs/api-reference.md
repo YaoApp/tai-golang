@@ -1,248 +1,297 @@
 # API Reference
 
+Quick lookup for the public SDK surface. Each section links to the detailed
+guide for types, examples, and edge cases.
+
 ## Server
 
 ```go
-func NewServer(cfg *ServerConfig) (Server, error)
+srv, err := tai.NewServer(&tai.ServerConfig{
+    HTTPPort:      5099,
+    TransportPort: 6099,
+    Auth:          authProvider,
+})
 ```
 
 ### ServerConfig
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `TransportPort` | `int` | `6099` | Transport (H3/H2) listen port |
-| `HTTPPort` | `int` | `5099` | HTTP API listen port |
-| `Auth` | `AuthProvider` | required | Authentication provider |
-| `TLS` | `*TLSConfig` | `nil` | TLS cert/key (`nil` = plaintext) |
-| `MaxFrameSize` | `int` | `16 MiB` | Maximum frame payload size (range: 64 KiB – 64 MiB) |
-| `UnauthTimeout` | `Duration` | `5s` | Unauthenticated connection timeout |
-| `QUIC` | `*quic.Config` | `nil` | Custom QUIC transport settings (H3 only) |
-| `ShutdownTimeout` | `Duration` | `5s` | Graceful shutdown timeout |
-| `Pool` | `*PoolSettings` | defaults | Light/Heavy pool configuration |
+| --- | --- | --- | --- |
+| `TransportPort` | `int` | `6099` | HTTP/2 or HTTP/3 transport port |
+| `HTTPPort` | `int` | `5099` | Discovery and token-refresh HTTP port |
+| `Auth` | `AuthProvider` | required | Node/user credential provider |
+| `TLS` | `*TLSConfig` | `nil` | `CertFile` + `KeyFile`; nil = plaintext |
+| `MaxFrameSize` | `int` | `16 MiB` | Max transport frame payload, 64 KiB–64 MiB |
+| `UnauthTimeout` | `time.Duration` | `5s` | Time allowed before authentication |
+| `QUIC` | `*quic.Config` | `nil` | HTTP/3 transport settings |
+| `ShutdownTimeout` | `time.Duration` | `5s` | Graceful shutdown budget |
+| `Pool` | `*PoolSettings` | defaults | Light/Heavy pool sizes and idle timeouts |
 
-### Server Interface
+### Server methods
 
 | Method | Description |
-|--------|-------------|
-| `Start(ctx)` | Start and block until shutdown |
-| `Addr()` | TCP listen address |
-| `RegisterTool(tool)` | Register a server-side tool (not implemented) |
-| `UnregisterTool(name)` | Unregister a server-side tool (not implemented) |
-| `Close()` | Shutdown (idempotent) |
+| --- | --- |
+| `Start(ctx)` | Start serving and block until shutdown |
+| `WaitReady(ctx)` | Wait until listeners are ready |
+| `Addr()` | Transport listen address |
+| `Close()` | Graceful, idempotent shutdown |
+| `RegisterTool(tool)` | Reserved; currently returns `ErrNotImplemented` |
+| `UnregisterTool(name)` | Reserved; currently returns `ErrNotImplemented` |
 
-## RemoteNode
+### Remote Tool registration
 
-Node management uses the `node` package-level functions. After a Tai node connects and registers, it becomes a `RemoteNode` with workspace, session, and control operations.
+| Method | Description |
+| --- | --- |
+| `RegisterRemoteTool(tool)` | Add one Remote Tool |
+| `UnregisterRemoteTool(name)` | Remove one |
+| `SetRemoteTools(tools)` | Replace the full set atomically |
+| `RemoteToolRegistry()` | Access the underlying registry |
+
+See [Remote Tools](remote-tools.md).
+
+### Plugin registration
+
+| Method | Description |
+| --- | --- |
+| `RegisterPlugin(entry)` | Register a Wasm plugin from `ArtifactPath`; computes digest/size |
+| `UnregisterPlugin(name, version)` | Remove one |
+| `SetRemotePlugins(entries)` | Replace the full set atomically |
+| `PluginRegistry()` | Access the underlying registry |
+
+See [Remote Tool Plugins](remote-tool-plugins.md).
+
+## Node
 
 ```go
 import "github.com/yaoapp/tai-golang/node"
 
-// Callbacks
-node.OnRegister(func(n types.RemoteNode) error { ... })
-node.OnDisconnect(func(nodeID string) { ... })
+node.OnRegister(func(rn types.RemoteNode) error { return nil })
+node.OnDisconnect(func(id string) { ... })
 
-// Lookup
-n := node.Get("node-1")   // returns types.RemoteNode or nil
-all := node.List()         // returns []types.RemoteNode
+rn := node.Get("node-1")
+all := node.List()
 ```
 
-### RemoteNode Interface
+| API | Description |
+| --- | --- |
+| `node.Get(id)` | `types.RemoteNode` or nil |
+| `node.List()` | All connected nodes |
+| `node.Default()` | Process-wide registry |
+| `node.OnRegister(fn)` | Registration callback; return error to reject |
+| `node.OnDisconnect(fn)` | Disconnect callback |
+
+### RemoteNode
 
 | Method | Description |
-|--------|-------------|
-| `Info()` | Returns the `*Node` data struct |
-| `Online()` | Whether the node is connected |
-| `OpenWorkspace(ctx, wsID, branch...)` | Open an existing workspace |
-| `CreateWorkspace(ctx, meta)` | Create a new workspace |
+| --- | --- |
+| `Info()` | Current `*types.Node` snapshot |
+| `Online()` | Connected state |
+| `OpenWorkspace(ctx, id, branch...)` | Open existing workspace |
+| `CreateWorkspace(ctx, meta)` | Create workspace |
 | `ListWorkspaces(ctx, opts)` | List workspaces |
-| `DeleteWorkspace(ctx, wsID)` | Delete a workspace |
+| `DeleteWorkspace(ctx, id)` | Delete workspace |
 | `OpenSession(ctx, req)` | Open a session |
-| `ResumeSession(ctx, req)` | Resume a session (not implemented) |
+| `ResumeSession(ctx, req)` | Resume after transport loss |
 | `SendControl(msg)` | Send a control message |
-| `GoAway(reason, reconnectAfter)` | Ask the node to disconnect and reconnect |
+| `GoAway(reason, reconnectAfter)` | Ask node to reconnect |
 
-## Session (29 methods)
+See [Node API](nodes.md).
+
+## Session
 
 ```go
-n := node.Get("node-1")
-session, err := n.OpenSession(ctx, &types.SessionOpenRequest{
-    SessionID: "sess-001",
-    Token:     operationToken,
-    Request:   &types.SessionRequest{Runtime: "tai"},
+sess, err := rn.OpenSession(ctx, &types.SessionOpenRequest{
+    SessionID: "sess-1",
+    Scopes:    types.Scope{types.SessionAccess},
+    Request:   &types.SessionRequest{Cwd: "/workspace"},
 })
 ```
 
 ### Lifecycle
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `ID()` | Session identifier |
-| `NodeID()` | Node running this session |
-| `Status()` | `opening` / `running` / `closing` / `closed` |
-| `Done()` | Channel that closes when the session is fully torn down |
+| `NodeID()` | Owning node |
+| `Status()` | `opening` / `running` / `disconnected` / `closing` / `closed` |
+| `Done()` | Closed when the session terminates |
 | `Close(ctx)` | Close the session |
 
 ### Commands
 
 | Method | Description |
-|--------|-------------|
-| `Prompt(msg)` | Send user input, start a turn |
-| `Followup(msg)` | Append input (returns `Disposition`) |
-| `Cancel()` | Cancel current turn |
-| `Steer(msg)` | Guide direction (returns `Disposition`) |
-| `UpdateQueue(action)` | Queue management (`remove` / `edit` / `clear` / `promote`) |
+| --- | --- |
+| `Prompt(msg)` | Start a turn with user input |
+| `Followup(msg)` | Append input; returns `queued` or `handled` |
+| `Steer(msg)` | Guide the current turn; returns `queued` or `handled` |
+| `Cancel()` | Cancel the current turn |
+| `UpdateQueue(action)` | `remove` / `edit` / `clear` / `promote` |
 
 ### Resolve
 
 | Method | Description |
-|--------|-------------|
-| `ResolvePermission(requestID, resp)` | Reply to permission request |
-| `ResolveElicitation(id, resp)` | Reply to elicitation request |
-| `SetConfigOption(configID, val)` | Switch a session option chosen from the agent's published list. `model` is the only option today; the value must be a model ID the matrix offers. |
+| --- | --- |
+| `ResolvePermission(requestID, resp)` | Approve/cancel a permission request |
+| `ResolveElicitation(id, resp)` | Accept/decline/cancel form input |
+| `SetConfigOption(id, value)` | Change a published session option (e.g. model) |
 
-### Runtime
+### Runtime update
 
 | Method | Description |
-|--------|-------------|
-| `UpdateSession(ctx, opts)` | Change workspace, access policy, mounts, LLM matrix, environment, or resources |
+| --- | --- |
+| `UpdateSession(ctx, opts)` | Workspace, access policy, mounts, LLM matrix, env, resources |
 
-See [LLM Providers](llm-providers.md#changing-models-at-runtime) for how
-`UpdateSession` and `SetConfigOption` divide the work.
+See [LLM Providers](llm-providers.md#changing-models-at-runtime).
 
 ### Realtime
 
 | Method | Description |
-|--------|-------------|
-| `StartRealtime(req)` | Start realtime mode (voice interaction) |
-| `UpdateRealtime(opts)` | Update realtime config (voice, modality) |
-| `StopRealtime()` | Stop realtime mode |
-| `AudioAppend(data)` | Send PCM audio frames |
-| `AudioCommit()` | Commit audio buffer (manual VAD) |
-| `AudioClear()` | Clear audio buffer |
-| `AudioInterrupt()` | Interrupt model speech output |
-| `ResponseCreate()` | Trigger model response (manual VAD) |
-| `RecvAudio()` | Receive model speech audio frames (`<-chan *AudioFrame`) |
-| `RecvRender()` | Receive transcript/emotion events (`<-chan *RenderEvent`) |
-| `RecvMotion()` | Receive avatar motion frames (`<-chan *MotionFrame`) |
+| --- | --- |
+| `StartRealtime(req)` | Enter voice/realtime mode |
+| `WaitRealtime(ctx)` | Wait for realtime setup |
+| `UpdateRealtime(opts)` | Change voice/modality |
+| `StopRealtime()` | Leave realtime mode |
+| `AudioAppend(data)` | Append PCM audio |
+| `AudioCommit()` | Commit buffered audio (manual VAD) |
+| `AudioClear()` | Clear buffered audio |
+| `AudioInterrupt()` | Interrupt playback |
+| `ResponseCreate()` | Trigger a response (manual VAD) |
+| `RecvAudio()` | `<-chan *AudioFrame` |
+| `RecvRender()` | `<-chan *RenderEvent` |
+| `RecvMotion()` | `<-chan *MotionFrame` |
+| `SendVideoFrame(frame)` | Reserved; not implemented |
+| `RecvVideoFrame()` | Reserved; not implemented |
 
-`SendVideoFrame` and `RecvVideoFrame` are declared but not implemented: the first
-returns an error, the second a nil channel.
-
-See [Session Realtime](session-realtime.md) for the integration guide and
-[Realtime Protocol](realtime.md) for wire-level event details.
+See [Session Realtime](session-realtime.md) and [Realtime Protocol](realtime.md).
 
 ### Receive
 
 | Method | Description |
-|--------|-------------|
-| `RecvEvent()` | Read next ACP event from data stream (blocks; returns `io.EOF` on end) |
-| `RecvAction()` | Read next action from ctrl stream (permissions, disposition, realtime control events) |
+| --- | --- |
+| `RecvEvent()` | Next ACP event from the data stream; `io.EOF` on end |
+| `RecvAction()` | Next control-side action |
 
-See [Session](session.md) for how these fit together, including the
-single-reader constraint.
+Single reader per channel. See [Session](session.md#receiving-events-concurrently).
+
+## Workspace
+
+Workspaces are opened through `RemoteNode`:
+
+```go
+ws, err := rn.OpenWorkspace(ctx, "ws-1")
+branch, err := ws.GetBranch(ctx, "main")
+f, err := branch.FS().Open("README.md")
+```
+
+| Interface | Description |
+| --- | --- |
+| `Workspace` | Root filesystem, branches, history, GC |
+| `Branch` | Branch-scoped `FS()`, `Commit`, `Diff`, `Rollback` |
+| `History` | Commit/file queries and branch log |
+| `Watcher` | `Events()` channel |
+
+See [Workspace API](workspace.md) for methods, archive helpers, context, and
+skills APIs.
+
+## Remote Tools
+
+```go
+srv.RegisterRemoteTool(&remotetool.Tool{
+    Entry: &pb.RemoteToolEntry{
+        Name:  "demo.echo",
+        Group: "demo",
+        InputSchema: []byte(`{"type":"object"}`),
+    },
+    Handler: func(ctx context.Context, in []byte) ([]byte, error) {
+        return in, nil
+    },
+})
+```
+
+| Type | Description |
+| --- | --- |
+| `remotetool.Tool` | `Entry`, `Handler`, optional `ProgressHandler` |
+| `remotetool.User(ctx)` | Verified caller identity inside a Handler |
+| `remotetool.ToolCallID(ctx)` | Request correlation ID |
+| `remotetool.Emitter` | Progress event emitter for streamed progress |
+
+See [Remote Tools](remote-tools.md).
+
+## Plugins
+
+```go
+srv.RegisterPlugin(&pb.PluginEntry{
+    Name:         "demo.normalize",
+    Version:      "1.0.0",
+    Runtime:      "wasm",
+    ArtifactPath: "dist/wasm/normalize.wasm",
+})
+```
+
+| API | Description |
+| --- | --- |
+| `RegisterPlugin(entry)` | Validate path, hash file, store path |
+| `UnregisterPlugin(name, version)` | Remove |
+| `SetRemotePlugins(entries)` | Atomic replacement |
+
+See [Remote Tool Plugins](remote-tool-plugins.md).
 
 ## Auth
 
 ```go
-provider := auth.DefaultAuth(ed25519PrivateKey)
+provider := auth.DefaultAuth(privateKey)
 
-// Node credential (connection identity).
 nodeToken, _ := provider.IssueNodeToken("node-1")
-info, _ := provider.ValidateNodeToken(nodeToken)
-
-// User credential (business-operation identity). The transport calls these
-// automatically when a session is opened/resumed; consumers only supply the
-// target node and the scopes they need.
-token, identity, _ := provider.IssueUserToken("node-1", types.Scope{types.SessionAccess})
-fresh, _ := provider.RefreshUserToken(token)
-who, _ := provider.ValidateUserToken(fresh)
+userToken, identity, _ := provider.IssueUserToken("node-1",
+    types.Scope{types.SessionAccess})
 ```
-
-| Method | Description |
-|--------|-------------|
-| `IssueNodeToken(nodeID)` | Create a node token (7-day expiry) |
-| `ValidateNodeToken(token)` | Verify and decode a node token |
-| `RefreshNodeToken(oldToken)` | Validate old token and issue a new one |
-| `IssueUserToken(nodeID, scopes)` | Issue a user credential; returns token + identity |
-| `RefreshUserToken(oldToken)` | Re-sign the old credential (inherits identity/scopes) |
-| `ValidateUserToken(token)` | Verify a user credential and return its identity |
-| `WellKnownInfo()` | Return transport discovery metadata |
-
-A user credential is carried in the first-frame `Payload.identity` and is
-opaque to the Tai node: it only stores and forwards the string. See
-`tai/docs/v2/runtime/identity.md` for the wire contract.
-
-## Key Types
-
-- `SessionOpenRequest` — `SessionID`, `Scopes`, `Anonymous`, `Request`, `OnEvent`
-- `SessionRequest` — Runtime, isolation, LLM config, MCP servers, environment
-- `UserMessage` — Content blocks, message text, attachments
-- `Event` — ACP update (`Type` + `Data` as raw JSON)
-- `SessionMsg` — Wire message (`Seq`, `Kind`, `Data` bytes)
-- `Disposition` — `"queued"` | `"handled"` (returned by `Followup` / `Steer`)
-- `QueueAction` — Queue operation (`"remove"` / `"edit"` / `"clear"` / `"promote"`)
-- `PermissionResponse` — Permission reply (`"selected"` / `"cancelled"`)
-- `ElicitationResponse` — Elicitation reply (`"accept"` / `"decline"` / `"cancel"`)
-- `ConfigOptionValue` — Config value (`"id"` / `"boolean"`)
-- `SessionUpdateOptions` — Runtime updates (workspace, access policy, mounts, LLM, env, resources)
-
-## Workspace
-
-See [Workspace API](workspace.md) for full documentation. Workspace operations are accessed through `RemoteNode` methods:
-
-```go
-import "github.com/yaoapp/tai-golang/node"
-
-n := node.Get("node-1")
-ws, err := n.OpenWorkspace(ctx, "workspace-id")
-ws, err := n.CreateWorkspace(ctx, types.Meta{Name: "proj"})
-entries, err := n.ListWorkspaces(ctx, types.ListOptions{})
-err := n.DeleteWorkspace(ctx, "workspace-id")
-```
-
-### Key Interfaces
 
 | Interface | Description |
-|-----------|-------------|
-| `Workspace` | Top-level object: `WorkspaceFS` + branch management + history + GC |
-| `WorkspaceFS` | `fs.FS` + `Create` / `Remove` / `RemoveAll` / `Rename` / `MkdirAll` / `Symlink` / `Watch` / `Exists` / `WriteArchive` / `ReadManifest` |
-| `Branch` | Branch-scoped file operations (`FS()`) + version control (`Commit` / `Diff` / `Rollback`) |
-| `History` | Commit queries: `Query` / `FileHistory` / `BranchLog` |
-| `Watcher` | Real-time file change events via `Events()` channel |
+| --- | --- |
+| `AuthProvider` | Node/user token issue, refresh, validate |
+| `UserTokenContextProvider` | Optional request-context resolver |
+| `UserTokenExpiry` | Optional expiry hint for local GC |
 
-### WorkspaceFS Utility Methods
+`auth.DefaultAuth` is for the demo flow only; production uses a custom
+`AuthProvider`. See [Auth](auth.md).
 
-These methods are part of the `WorkspaceFS` interface, available on any `Workspace` or `branch.FS()`:
+## Scopes
 
-| Method | Description |
-|--------|-------------|
-| `ws.Exists(name)` | Check file/directory existence |
-| `ws.WriteArchive(dir, r)` | Write tar.gz/zip archive to directory (SDK auto-detects format) |
-| `ws.ReadManifest(dir)` | Read manifest.json hash map |
+| Constant | Value |
+| --- | --- |
+| `types.SessionAccess` | `session:access` |
+| `types.WorkspaceRead` | `workspace:read` |
+| `types.WorkspaceWrite` | `workspace:write` |
+| `types.WorkspaceDelete` | `workspace:delete` |
+| `types.WorkspaceAll` | `workspace:*` |
+| `types.RemoteToolCall` | `remote_tool:call` |
 
-### Context & Skills APIs (package-level)
+## Common types
 
-| Function | Description |
-|----------|-------------|
-| `ContextDir(scope, id)` | Get context directory path (`.context/{scope}/{id}`) |
-| `SeedContext(fsys, scope, id, files)` | Initialize context files (skip existing) |
-| `ReadContext(fsys, scope, id)` | Read standard context files (`*ContextFiles`) |
-| `MergeContext(fsys, entries)` | Concatenate multi-scope context as Markdown |
-| `SkillHash(r)` | Compute SHA-256 hash (`"sha256:<hex>"`) |
-| `SyncSkills(wsFS, packs)` | Incremental skill sync, returns `(pushed, error)` |
+| Type | Documentation |
+| --- | --- |
+| `ServerConfig`, `Server` | This page |
+| `Node`, `NodeRuntime`, `RemoteNode` | [Node API](nodes.md) |
+| `SessionRequest`, `SessionOpenRequest`, `ResumeSessionRequest` | [Session](session.md) |
+| `UserMessage`, `QueueAction`, `PermissionResponse`, `ElicitationResponse` | [Session](session.md) |
+| `Event`, `SessionMsg` | [ACP Events](events.md) |
+| `RealtimeRequest`, `RealtimeUpdateOptions`, `AudioConfig`, `VADConfig` | [Session Realtime](session-realtime.md) |
+| `Workspace`, `Branch`, `History`, `Watcher`, `Meta` | [Workspace API](workspace.md) |
+| `AuthProvider`, `UserIdentity`, `Scope` | [Auth](auth.md) |
+| `remotetool.Tool`, `RemoteToolEntry` | [Remote Tools](remote-tools.md) |
+| `PluginEntry`, `Capabilities` | [Remote Tool Plugins](remote-tool-plugins.md) |
+| `ControlMsg`, `ToolDefinition` | [Node API](nodes.md) / [Remote Tools](remote-tools.md) |
 
-See [Workspace API — Exists / WriteArchive / ReadManifest](workspace.md#exists--writearchive--readmanifest), [Context API](workspace.md#context-api), and [Skills API](workspace.md#skills-api) for details.
+## Errors
 
-`Open()` returns a file implementing `fs.File` + `io.ReadSeeker`. Consumer code is identical to a local `*os.File` — `Seek` records the offset without network calls; `Read` reopens the stream at the new offset only when needed. This enables `http.ServeContent` for Range requests out of the box. See [Workspace API — Open](workspace.md#open) for details.
+| Error | Meaning |
+| --- | --- |
+| `types.ErrNodeNotFound` | Node is not connected to this SDK instance |
+| `tai.ErrNotImplemented` | Reserved API called before implementation |
+| `remotetool` errors | Invalid tool definition / duplicate name |
+| `plugin.ErrInvalidPlugin` | Invalid name, version, runtime, or artifact path |
+| `plugin.ErrNotFound` | Plugin digest not registered |
+| `workspace.ErrorResponse` | Structured remote workspace failure |
 
-### Key Types (in `types/`)
-
-- `Meta` — Workspace metadata (`Name`, `Owner`)
-- `BranchInfo` — Branch summary (`Name`, `Head`, `Meta`)
-- `CommitInfo` — Commit details (`ID`, `Parent`, `Message`, `Time`)
-- `FileDiff` — File change between commits (`Path`, `Type`, `OldPath`)
-- `MergeOptions` / `MergeResult` — Merge configuration and outcome
-- `GCOptions` / `GCResult` — Garbage collection configuration and outcome
-- `WatchEvent` — File change notification (`Type`, `Path`)
-- `ChannelPolicy` — Transport channel selection (in `workspace/`)
-- `ErrorResponse` — Structured remote error (in `workspace/`)
+Transport errors are returned by the operation that triggered them; inspect
+`errors.Is`/`errors.As` before logging. Never log tokens or raw tool input.

@@ -11,7 +11,7 @@ type Node struct {
 	ID                string        // Unique node identifier
 	TaiID             string        // Server-assigned identifier
 	Version           string        // Tai binary version
-	Capabilities      []string      // e.g. ["session","tunnel","realtime","container"]
+	Capabilities      []string      // e.g. ["session","sandbox:native","realtime"]
 	ContainerRuntimes []NodeRuntime // Available container runtimes
 	OS                string        // "darwin" | "linux" | "windows"
 	Arch              string        // "amd64" | "arm64"

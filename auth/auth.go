@@ -22,7 +22,10 @@ var (
 )
 
 // DefaultAuth creates an AuthProvider backed by Ed25519 JWT signing.
-// The private key signs node tokens and user credentials.
+// It is a demo implementation for the complete local flow (Demo App, local
+// nodes, examples), not a production user system. Production integrations
+// should implement types.AuthProvider with their own user database, login
+// context, token issuance, and key management.
 func DefaultAuth(privateKey ed25519.PrivateKey) types.AuthProvider {
 	return &defaultAuth{
 		privateKey:   privateKey,

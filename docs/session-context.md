@@ -105,9 +105,10 @@ Put the merged text in the session request metadata under `_agents_md` when
 opening the session:
 
 ```go
-sess, err := node.OpenSession(ctx, &types.SessionOpenRequest{
+n := node.Get("node-1")
+sess, err := n.OpenSession(ctx, &types.SessionOpenRequest{
     SessionID: "sess-xyz",
-    Token:     token,
+    Scopes:    types.Scope{types.SessionAccess},
     Request: &types.SessionRequest{
         Runtime: "tai",
         Metadata: map[string]string{

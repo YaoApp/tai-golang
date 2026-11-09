@@ -353,7 +353,11 @@ func TestServerRemoteToolAndPluginAPIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := &pb.PluginEntry{Name: "demo.normalize", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("wasm")}
+	wasmPath := filepath.Join(t.TempDir(), "normalize.wasm")
+	if err := os.WriteFile(wasmPath, []byte("wasm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := &pb.PluginEntry{Name: "demo.normalize", Version: "1.0.0", Runtime: "wasm", ArtifactPath: wasmPath}
 	if err := s.RegisterPlugin(entry); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +367,11 @@ func TestServerRemoteToolAndPluginAPIs(t *testing.T) {
 	if err := s.UnregisterPlugin("demo.normalize", "1.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRemotePlugins([]*pb.PluginEntry{{Name: "demo.tag", Version: "1.0.0", Runtime: "wasm", Artifact: []byte("x")}}); err != nil {
+	tagPath := filepath.Join(t.TempDir(), "tag.wasm")
+	if err := os.WriteFile(tagPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRemotePlugins([]*pb.PluginEntry{{Name: "demo.tag", Version: "1.0.0", Runtime: "wasm", ArtifactPath: tagPath}}); err != nil {
 		t.Fatal(err)
 	}
 	tool := &remotetool.Tool{Entry: &pb.RemoteToolEntry{Name: "demo.echo", Group: "demo"}, Handler: func(context.Context, []byte) ([]byte, error) { return nil, nil }}

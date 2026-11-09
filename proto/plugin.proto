@@ -12,7 +12,7 @@ message PluginEntry {
   string digest      = 4;
   uint64 size        = 5;
   string description = 6;
-  bytes  artifact    = 7; // empty in sync metadata; fetched via Tool H2
+  string artifact_path = 7; // SDK-local source path; never synced
   Capabilities capabilities = 8;
 }
 

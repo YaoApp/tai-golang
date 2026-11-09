@@ -8,10 +8,6 @@
     "title": "Quick Start"
   },
   {
-    "name": "remote-tools.md",
-    "title": "Remote Tools"
-  },
-  {
     "name": "architecture.md",
     "title": "Architecture"
   },
@@ -20,20 +16,20 @@
     "title": "API Reference"
   },
   {
+    "name": "auth.md",
+    "title": "Auth"
+  },
+  {
+    "name": "nodes.md",
+    "title": "Node API"
+  },
+  {
     "name": "workspace.md",
     "title": "Workspace API"
   },
   {
-    "name": "session-protocol.md",
-    "title": "Session Protocol"
-  },
-  {
     "name": "session.md",
     "title": "Session"
-  },
-  {
-    "name": "llm-providers.md",
-    "title": "LLM Providers"
   },
   {
     "name": "session-inputs.md",
@@ -56,6 +52,14 @@
     "title": "Session Realtime"
   },
   {
+    "name": "session-protocol.md",
+    "title": "Session Protocol"
+  },
+  {
+    "name": "llm-providers.md",
+    "title": "LLM Providers"
+  },
+  {
     "name": "events.md",
     "title": "ACP Events Reference"
   },
@@ -70,6 +74,14 @@
   {
     "name": "uri.md",
     "title": "Resource URI Convention"
+  },
+  {
+    "name": "remote-tools.md",
+    "title": "Remote Tools"
+  },
+  {
+    "name": "remote-tool-plugins.md",
+    "title": "Remote Tool Plugins"
   },
   {
     "name": "demo-guide.md",

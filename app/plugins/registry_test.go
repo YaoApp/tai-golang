@@ -29,7 +29,7 @@ func TestRegisterArtifacts(t *testing.T) {
 	if err := Register(fake, dir); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.entries) != 3 || fake.entries[0].Name != "demo.normalize" || len(fake.entries[0].Artifact) == 0 {
+	if len(fake.entries) != 3 || fake.entries[0].Name != "demo.normalize" || len(fake.entries[0].ArtifactPath) == 0 {
 		t.Fatalf("entries=%+v", fake.entries)
 	}
 }
