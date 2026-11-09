@@ -461,4 +461,4 @@ The demo app requires Node.js 22+ for the frontend build.
 
 ## License
 
-Apache-2.0
+MIT
